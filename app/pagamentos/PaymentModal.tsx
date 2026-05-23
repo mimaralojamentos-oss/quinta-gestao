@@ -12,11 +12,26 @@ interface Props {
   onSaved: () => void
 }
 
+const tipoConfig = {
+  renda:  { label: '🏠 Renda', color: 'bg-emerald-600 text-white border-emerald-600' },
+  caucao: { label: '🔒 Caução / Sinal', color: 'bg-blue-600 text-white border-blue-600' },
+  extra:  { label: '➕ Extra', color: 'bg-orange-500 text-white border-orange-500' },
+  luz:    { label: '⚡ Luz', color: 'bg-yellow-500 text-white border-yellow-500' },
+}
+
+const tipoLabels: Record<string, string> = {
+  renda: '🏠 Renda',
+  caucao: '🔒 Caução',
+  extra: '➕ Extra',
+  luz: '⚡ Luz',
+}
+
 export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: Props) {
   const [form, setForm] = useState({
     amount: String(lease.monthly_rent),
     payment_date: new Date().toISOString().slice(0, 10),
     payment_method: 'dinheiro',
+    tipo: 'renda',
     notes: '',
   })
   const [saving, setSaving] = useState(false)
@@ -32,6 +47,7 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
       payment_date: form.payment_date,
       amount: parseFloat(form.amount),
       payment_method: form.payment_method,
+      tipo: form.tipo,
       notes: form.notes || null,
     })
 
@@ -56,8 +72,13 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
           <div className="mb-4 p-3 bg-gray-50 rounded-lg">
             <p className="text-xs font-medium text-gray-500 mb-2">Pagamentos já registados este mês:</p>
             {lease.payments_this_month.map((p: any) => (
-              <div key={p.id} className="flex justify-between text-sm">
-                <span className="text-gray-700">{new Date(p.payment_date).toLocaleDateString('pt-PT')}</span>
+              <div key={p.id} className="flex justify-between items-center text-sm py-0.5">
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-700">{new Date(p.payment_date).toLocaleDateString('pt-PT')}</span>
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-gray-200 text-gray-600">
+                    {tipoLabels[p.tipo] ?? p.tipo}
+                  </span>
+                </div>
                 <span className="font-medium text-emerald-600">{formatCurrency(p.amount)}</span>
               </div>
             ))}
@@ -65,6 +86,22 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
         )}
 
         <div className="space-y-4">
+          {/* Tipo de pagamento */}
+          <div>
+            <label className="label">Tipo de Pagamento</label>
+            <div className="grid grid-cols-2 gap-2 mt-1">
+              {Object.entries(tipoConfig).map(([key, cfg]) => (
+                <button key={key}
+                  onClick={() => setForm(f => ({ ...f, tipo: key }))}
+                  className={`py-2 rounded-lg border text-sm font-medium transition-colors ${
+                    form.tipo === key ? cfg.color : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                  }`}>
+                  {cfg.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="label">Valor (€) *</label>
@@ -85,7 +122,11 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
               {['dinheiro', 'banco'].map(method => (
                 <button key={method}
                   onClick={() => setForm(f => ({ ...f, payment_method: method }))}
-                  className={`py-2.5 rounded-lg border text-sm font-medium transition-colors ${form.payment_method === method ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
+                  className={`py-2.5 rounded-lg border text-sm font-medium transition-colors ${
+                    form.payment_method === method
+                      ? 'bg-emerald-600 text-white border-emerald-600'
+                      : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                  }`}>
                   {method === 'dinheiro' ? '💵 Dinheiro' : '🏦 Banco/Transferência'}
                 </button>
               ))}
