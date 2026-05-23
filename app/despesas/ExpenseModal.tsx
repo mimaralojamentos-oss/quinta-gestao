@@ -1,0 +1,170 @@
+'use client'
+
+import { useState } from 'react'
+import { supabase } from '@/lib/supabase'
+import { Expense } from '@/lib/types'
+import { X, Upload, FileText } from 'lucide-react'
+
+interface Props {
+  expense: Expense | null
+  onClose: () => void
+  onSaved: () => void
+}
+
+export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
+  const [form, setForm] = useState({
+    expense_date: expense?.expense_date ?? new Date().toISOString().slice(0, 10),
+    category: expense?.category ?? 'outros',
+    type: expense?.type ?? 'pontual',
+    description: expense?.description ?? '',
+    amount: expense ? String(expense.amount) : '',
+    payment_method: expense?.payment_method ?? 'dinheiro',
+    supplier: expense?.supplier ?? '',
+    notes: expense?.notes ?? '',
+  })
+  const [invoiceFile, setInvoiceFile] = useState<File | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  async function handleSave() {
+    if (!form.description || !form.amount) { setError('Descrição e valor são obrigatórios'); return }
+    setSaving(true); setError('')
+
+    let invoicePath = expense?.invoice_file_path ?? null
+
+    if (invoiceFile) {
+      const filename = `invoices/${Date.now()}_${invoiceFile.name}`
+      const { error: uploadErr } = await supabase.storage.from('documents').upload(filename, invoiceFile)
+      if (uploadErr) { setError('Erro ao fazer upload: ' + uploadErr.message); setSaving(false); return }
+      invoicePath = filename
+    }
+
+    const payload = {
+      expense_date: form.expense_date,
+      category: form.category,
+      type: form.type,
+      description: form.description,
+      amount: parseFloat(form.amount),
+      payment_method: form.payment_method,
+      supplier: form.supplier || null,
+      invoice_file_path: invoicePath,
+      notes: form.notes || null,
+    }
+
+    let err
+    if (expense) {
+      ;({ error: err } = await supabase.from('expenses').update(payload).eq('id', expense.id))
+    } else {
+      ;({ error: err } = await supabase.from('expenses').insert(payload))
+    }
+
+    setSaving(false)
+    if (err) { setError(err.message); return }
+    onSaved()
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="font-semibold text-lg text-gray-900">{expense ? 'Editar Despesa' : 'Nova Despesa'}</h2>
+          <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="label">Descrição *</label>
+            <input className="input" placeholder="ex: Material de construção - Leroy Merlin" value={form.description}
+              onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="label">Data *</label>
+              <input className="input" type="date" value={form.expense_date}
+                onChange={e => setForm(f => ({ ...f, expense_date: e.target.value }))} />
+            </div>
+            <div>
+              <label className="label">Valor (€) *</label>
+              <input className="input" type="number" step="0.01" value={form.amount}
+                onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="label">Categoria</label>
+              <select className="input" value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value as any }))}>
+                <option value="obras">Obras</option>
+                <option value="edp">Eletricidade (EDP)</option>
+                <option value="pessoal">Pessoal</option>
+                <option value="contabilidade">Contabilidade</option>
+                <option value="manutencao">Manutenção</option>
+                <option value="outros">Outros</option>
+              </select>
+            </div>
+            <div>
+              <label className="label">Tipo</label>
+              <select className="input" value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value as any }))}>
+                <option value="pontual">Pontual</option>
+                <option value="recorrente">Recorrente</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="label">Método de Pagamento</label>
+            <div className="grid grid-cols-2 gap-3">
+              {['dinheiro', 'banco'].map(m => (
+                <button key={m} onClick={() => setForm(f => ({ ...f, payment_method: m as any }))}
+                  className={`py-2.5 rounded-lg border text-sm font-medium ${form.payment_method === m ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-600 border-gray-200'}`}>
+                  {m === 'dinheiro' ? '💵 Dinheiro' : '🏦 Banco/Transferência'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="label">Fornecedor</label>
+            <input className="input" placeholder="ex: Leroy Merlin, Alfamat..." value={form.supplier}
+              onChange={e => setForm(f => ({ ...f, supplier: e.target.value }))} />
+          </div>
+
+          <div>
+            <label className="label">Notas</label>
+            <textarea className="input" rows={2} value={form.notes}
+              onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
+          </div>
+
+          {/* Invoice upload */}
+          <div>
+            <label className="label">Fatura / Recibo (PDF ou imagem)</label>
+            {expense?.invoice_file_path && (
+              <p className="text-xs text-emerald-600 mb-2 flex items-center gap-1">
+                <FileText className="w-3 h-3" /> Fatura já carregada
+              </p>
+            )}
+            <label className="flex items-center gap-3 border-2 border-dashed border-gray-200 rounded-lg p-4 cursor-pointer hover:border-emerald-400 transition-colors">
+              <Upload className="w-5 h-5 text-gray-400" />
+              <div>
+                <p className="text-sm text-gray-600">{invoiceFile ? invoiceFile.name : 'Clique para fazer upload da fatura'}</p>
+                <p className="text-xs text-gray-400">PDF, JPG, PNG — máximo 10MB</p>
+              </div>
+              <input type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden"
+                onChange={e => setInvoiceFile(e.target.files?.[0] ?? null)} />
+            </label>
+          </div>
+
+          {error && <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg">{error}</p>}
+        </div>
+
+        <div className="flex justify-end gap-3 mt-6">
+          <button className="btn-secondary" onClick={onClose}>Cancelar</button>
+          <button className="btn-primary" onClick={handleSave} disabled={saving}>
+            {saving ? 'A guardar...' : 'Guardar'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
