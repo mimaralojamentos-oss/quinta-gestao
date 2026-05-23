@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic'
 
 import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
-import { supabase } from '@/lib/supabase'
+import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, getMonthLabel, getCurrentMonth } from '@/lib/utils'
 import {
   Building2, Users, TrendingUp, TrendingDown, AlertTriangle, CheckCircle, Clock, Wallet
@@ -43,6 +43,7 @@ export default function Dashboard() {
   })
   const [loading, setLoading] = useState(true)
   const currentMonth = getCurrentMonth()
+  const supabase = createClient()
 
   useEffect(() => {
     async function fetchStats() {
