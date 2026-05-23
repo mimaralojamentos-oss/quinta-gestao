@@ -19,9 +19,17 @@ interface LeaseWithDetails {
     amount: number
     payment_method: string
     payment_date: string
+    tipo: string
     notes: string
   }[]
   balance: number
+}
+
+const tipoLabels: Record<string, string> = {
+  renda: '🏠 Renda',
+  caucao: '🔒 Caução',
+  extra: '➕ Extra',
+  luz: '⚡ Luz',
 }
 
 export default function PagamentosPage() {
@@ -51,7 +59,8 @@ export default function PagamentosPage() {
 
     const mapped: LeaseWithDetails[] = (leasesData ?? []).map(l => {
       const payments = (paymentsData ?? []).filter(p => p.lease_id === l.id)
-      const totalPaid = payments.reduce((s, p) => s + p.amount, 0)
+      // Só contar rendas (não cauções, extras ou luz) no saldo
+      const totalPaid = payments.filter(p => p.tipo === 'renda' || !p.tipo).reduce((s, p) => s + p.amount, 0)
       return {
         id: l.id,
         monthly_rent: l.monthly_rent,
@@ -73,9 +82,10 @@ export default function PagamentosPage() {
     setLeases(mapped)
 
     const expected = mapped.reduce((s, l) => s + l.monthly_rent, 0)
-    const received = (paymentsData ?? []).reduce((s, p) => s + p.amount, 0)
-    const inCash = (paymentsData ?? []).filter(p => p.payment_method === 'dinheiro').reduce((s, p) => s + p.amount, 0)
-    const inBank = (paymentsData ?? []).filter(p => p.payment_method !== 'dinheiro').reduce((s, p) => s + p.amount, 0)
+    const rentaPayments = (paymentsData ?? []).filter(p => p.tipo === 'renda' || !p.tipo)
+    const received = rentaPayments.reduce((s, p) => s + p.amount, 0)
+    const inCash = rentaPayments.filter(p => p.payment_method === 'dinheiro').reduce((s, p) => s + p.amount, 0)
+    const inBank = rentaPayments.filter(p => p.payment_method !== 'dinheiro').reduce((s, p) => s + p.amount, 0)
     setSummary({ expected, received, pending: expected - received, inCash, inBank })
 
     setLoading(false)
@@ -192,9 +202,19 @@ export default function PagamentosPage() {
                         {lease.payments_this_month.length > 0 ? (
                           <div className="space-y-0.5">
                             {lease.payments_this_month.map(p => (
-                              <span key={p.id} className={`text-xs px-2 py-0.5 rounded-full block w-fit ${p.payment_method === 'dinheiro' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
-                                {p.payment_method === 'dinheiro' ? '💵 Dinheiro' : '🏦 Banco'}
-                              </span>
+                              <div key={p.id} className="flex items-center gap-1 flex-wrap">
+                                <span className={`text-xs px-2 py-0.5 rounded-full ${p.payment_method === 'dinheiro' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
+                                  {p.payment_method === 'dinheiro' ? '💵' : '🏦'}
+                                </span>
+                                <span className={`text-xs px-2 py-0.5 rounded-full ${
+                                  p.tipo === 'caucao' ? 'bg-blue-100 text-blue-700' :
+                                  p.tipo === 'extra' ? 'bg-orange-100 text-orange-700' :
+                                  p.tipo === 'luz' ? 'bg-yellow-100 text-yellow-700' :
+                                  'bg-gray-100 text-gray-600'
+                                }`}>
+                                  {tipoLabels[p.tipo] ?? '🏠 Renda'}
+                                </span>
+                              </div>
                             ))}
                           </div>
                         ) : '—'}
