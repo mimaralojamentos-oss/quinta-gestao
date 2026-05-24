@@ -1,7 +1,5 @@
 'use client'
 
-export const dynamic = 'force-dynamic'
-
 import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
@@ -79,7 +77,6 @@ export default function EletricidadePage() {
           </button>
         </div>
 
-        {/* Summary */}
         <div className="grid grid-cols-3 gap-4 mb-6">
           <div className="card">
             <p className="text-sm text-gray-500 mb-1">Por Receber</p>
@@ -95,7 +92,6 @@ export default function EletricidadePage() {
           </div>
         </div>
 
-        {/* Tabs */}
         <div className="flex gap-2 mb-4">
           <button
             onClick={() => setActiveTab('charges')}
