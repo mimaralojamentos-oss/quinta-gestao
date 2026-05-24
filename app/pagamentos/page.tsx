@@ -1,7 +1,5 @@
 'use client'
 
-export const dynamic = 'force-dynamic'
-
 import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
@@ -59,7 +57,6 @@ export default function PagamentosPage() {
 
     const mapped: LeaseWithDetails[] = (leasesData ?? []).map(l => {
       const payments = (paymentsData ?? []).filter(p => p.lease_id === l.id)
-      // Só contar rendas (não cauções, extras ou luz) no saldo
       const totalPaid = payments.filter(p => p.tipo === 'renda' || !p.tipo).reduce((s, p) => s + p.amount, 0)
       return {
         id: l.id,
@@ -71,7 +68,6 @@ export default function PagamentosPage() {
       }
     })
 
-    // Sort: unpaid first, then by space ref
     mapped.sort((a, b) => {
       const aPaid = a.payments_this_month.length > 0
       const bPaid = b.payments_this_month.length > 0
@@ -104,7 +100,6 @@ export default function PagamentosPage() {
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Rendas & Pagamentos</h1>
           </div>
-          {/* Month selector */}
           <div className="flex items-center gap-3 bg-white border border-gray-200 rounded-lg px-4 py-2">
             <button onClick={() => changeMonth(-1)} className="text-gray-500 hover:text-gray-700">
               <ChevronLeft className="w-4 h-4" />
@@ -116,7 +111,6 @@ export default function PagamentosPage() {
           </div>
         </div>
 
-        {/* Summary cards */}
         <div className="grid grid-cols-5 gap-4 mb-6">
           <div className="card text-center py-4">
             <p className="text-xs text-gray-500 mb-1">Esperado</p>
