@@ -8,7 +8,7 @@ import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import {
   Upload, CheckCircle, Clock, XCircle, ArrowUpRight,
-  ArrowDownRight, ChevronLeft, Loader2, Link2, X
+  ArrowDownRight, ChevronLeft, Loader2, X, ArrowRight
 } from 'lucide-react'
 import Link from 'next/link'
 import * as XLSX from 'xlsx'
@@ -20,18 +20,24 @@ interface Transaction {
   amount: number
   balance: number | null
   reference: string | null
-  import_code: string
   status: 'por_validar' | 'validado' | 'ignorado'
   suggested_type: string | null
-  suggested_lease_id: string | null
   notes: string | null
-  lease?: { space?: { ref: string }; tenant?: { name: string } }
 }
 
 interface Bank {
   id: string
   name: string
   iban: string | null
+  column_mapping?: any
+}
+
+interface ColumnMapping {
+  date: string
+  description: string
+  amount: string
+  balance: string
+  type: string
 }
 
 export default function BankDetailPage({ params }: { params: { id: string } }) {
@@ -41,69 +47,115 @@ export default function BankDetailPage({ params }: { params: { id: string } }) {
   const [importing, setImporting] = useState(false)
   const [showImport, setShowImport] = useState(false)
   const [filterStatus, setFilterStatus] = useState<'all' | 'por_validar' | 'validado' | 'ignorado'>('all')
+  const [importStep, setImportStep] = useState<'upload' | 'mapping' | 'preview'>('upload')
+  const [parsedHeaders, setParsedHeaders] = useState<string[]>([])
+  const [parsedRows, setParsedRows] = useState<any[][]>([])
+  const [headerRowIndex, setHeaderRowIndex] = useState(0)
+  const [mapping, setMapping] = useState<ColumnMapping>({ date: '', description: '', amount: '', balance: '', type: '' })
+  const [importFile, setImportFile] = useState<File | null>(null)
   const supabase = createClient()
 
   useEffect(() => { fetchData() }, [params.id])
 
   async function fetchData() {
     setLoading(true)
-    const { data: bankData } = await supabase.from('banks').select('*').eq('id', params.id).single()
-    setBank(bankData)
-    const { data: txData } = await supabase
-      .from('bank_transactions')
-      .select('*, lease:leases(space:spaces(ref), tenant:tenants(name))')
-      .eq('bank_id', params.id)
-      .order('transaction_date', { ascending: false })
-    setTransactions(txData ?? [])
-    setLoading(false)
+    try {
+      const { data: bankData } = await supabase.from('banks').select('*').eq('id', params.id).single()
+      setBank(bankData)
+      const { data: txData } = await supabase
+        .from('bank_transactions')
+        .select('*')
+        .eq('bank_id', params.id)
+        .order('transaction_date', { ascending: false })
+      setTransactions(txData ?? [])
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setLoading(false)
+    }
   }
 
-  async function handleFileImport(file: File) {
+  async function handleFileSelect(file: File) {
+    setImportFile(file)
     setImporting(true)
     try {
       const data = await file.arrayBuffer()
       const workbook = XLSX.read(data)
       const sheet = workbook.Sheets[workbook.SheetNames[0]]
-      const rows: any[] = XLSX.utils.sheet_to_json(sheet, { header: 1 })
+      const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 })
 
-      if (rows.length < 2) { alert('Ficheiro vazio ou sem dados'); setImporting(false); return }
+      let bestRow = 0
+      let bestCount = 0
+      rows.slice(0, 15).forEach((row, i) => {
+        const count = row.filter(c => c !== null && c !== undefined && String(c).trim() !== '').length
+        if (count > bestCount) { bestCount = count; bestRow = i }
+      })
 
-      const headers: string[] = rows[0].map((h: any) => String(h ?? '').toLowerCase())
-      const findCol = (keywords: string[]) => {
+      setParsedRows(rows)
+      setHeaderRowIndex(bestRow)
+      const headers = rows[bestRow].map((h: any) => String(h ?? '').trim()).filter(h => h !== '')
+      setParsedHeaders(headers)
+
+      const suggest = (keywords: string[]) => {
         for (const kw of keywords) {
-          const idx = headers.findIndex(h => h.includes(kw))
-          if (idx >= 0) return idx
+          const match = headers.find(h => h.toLowerCase().includes(kw.toLowerCase()))
+          if (match) return match
         }
-        return -1
+        return ''
       }
 
-      const dateCol = findCol(['data', 'date', 'dia'])
-      const descCol = findCol(['descri', 'movimento', 'detail'])
-      const amountCol = findCol(['valor', 'amount', 'montante', 'debito', 'crédito'])
-      const balanceCol = findCol(['saldo', 'balance'])
-      const refCol = findCol(['ref', 'referencia', 'referência', 'doc'])
+      const savedMapping = bank?.column_mapping
+      setMapping(savedMapping ?? {
+        date: suggest(['data mov', 'date', 'data']),
+        description: suggest(['descri', 'movimento', 'detalhe']),
+        amount: suggest(['valor', 'amount', 'montante']),
+        balance: suggest(['saldo', 'balance']),
+        type: suggest(['tipo', 'type', 'débito', 'credito']),
+      })
 
-      if (dateCol < 0 || descCol < 0 || amountCol < 0) {
-        alert(`Não foi possível detetar as colunas automaticamente.\n\nColunas encontradas:\n${rows[0].join(', ')}\n\nO ficheiro deve ter colunas de Data, Descrição e Valor.`)
-        setImporting(false)
-        return
-      }
+      setImportStep('mapping')
+    } catch (err) {
+      alert('Erro ao ler o ficheiro.')
+    }
+    setImporting(false)
+  }
+
+  function handleMappingConfirm() {
+    if (!mapping.date || !mapping.description || !mapping.amount) {
+      alert('Data, Descrição e Valor são obrigatórios')
+      return
+    }
+    setImportStep('preview')
+  }
+
+  async function handleImport() {
+    if (!importFile) return
+    setImporting(true)
+    try {
+      const headers = parsedRows[headerRowIndex].map((h: any) => String(h ?? '').trim())
+      const dataRows = parsedRows.slice(headerRowIndex + 1)
+
+      const getCol = (fieldName: string) => headers.indexOf(fieldName)
+      const dateCol = getCol(mapping.date)
+      const descCol = getCol(mapping.description)
+      const amountCol = getCol(mapping.amount)
+      const balanceCol = mapping.balance ? getCol(mapping.balance) : -1
+      const typeCol = mapping.type ? getCol(mapping.type) : -1
+
+      await supabase.from('banks').update({ column_mapping: mapping }).eq('id', params.id)
 
       const { data: leases } = await supabase
-        .from('leases')
-        .select('id, monthly_rent, space:spaces(ref), tenant:tenants(name)')
-        .eq('status', 'ativo')
+        .from('leases').select('id, monthly_rent').eq('status', 'ativo')
 
       let imported = 0
       let skipped = 0
 
-      for (let i = 1; i < rows.length; i++) {
-        const row = rows[i]
+      for (const row of dataRows) {
         if (!row || row.length === 0) continue
-
         const rawDate = row[dateCol]
         const rawAmount = row[amountCol]
         const rawDesc = String(row[descCol] ?? '').trim()
+        const rawType = typeCol >= 0 ? String(row[typeCol] ?? '').trim() : ''
         if (!rawDate || rawAmount === undefined || !rawDesc) continue
 
         let txDate: string
@@ -127,8 +179,15 @@ export default function BankDetailPage({ params }: { params: { id: string } }) {
         }
         if (isNaN(amount)) continue
 
-        const reference = refCol >= 0 ? String(row[refCol] ?? '').trim() : null
-        const balance = balanceCol >= 0 ? parseFloat(String(row[balanceCol] ?? '0').replace(',', '.')) : null
+        if (rawType.toLowerCase().includes('déb') || rawType.toLowerCase().includes('deb')) {
+          amount = -Math.abs(amount)
+        } else if (rawType.toLowerCase().includes('cré') || rawType.toLowerCase().includes('cre')) {
+          amount = Math.abs(amount)
+        }
+
+        const balance = balanceCol >= 0
+          ? parseFloat(String(row[balanceCol] ?? '').replace(/[^\d,.\-]/g, '').replace(',', '.'))
+          : null
 
         const codeStr = `${params.id}|${txDate}|${amount}|${rawDesc}`
         const importCode = await generateHash(codeStr)
@@ -145,8 +204,8 @@ export default function BankDetailPage({ params }: { params: { id: string } }) {
           transaction_date: txDate,
           description: rawDesc,
           amount,
-          balance,
-          reference: reference || null,
+          balance: isNaN(balance!) ? null : balance,
+          reference: null,
           import_code: importCode,
           status: 'por_validar',
           suggested_type: suggestedType,
@@ -158,10 +217,11 @@ export default function BankDetailPage({ params }: { params: { id: string } }) {
 
       alert(`✅ Importação concluída!\n\n${imported} linhas importadas\n${skipped} duplicados ignorados`)
       setShowImport(false)
+      setImportStep('upload')
       fetchData()
     } catch (err) {
       console.error(err)
-      alert('Erro ao processar o ficheiro. Verifica se é um ficheiro Excel ou CSV válido.')
+      alert('Erro durante a importação.')
     }
     setImporting(false)
   }
@@ -175,6 +235,8 @@ export default function BankDetailPage({ params }: { params: { id: string } }) {
   const totalIn = transactions.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0)
   const totalOut = transactions.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0)
   const pending = transactions.filter(t => t.status === 'por_validar').length
+  const headers = parsedRows[headerRowIndex]?.map((h: any) => String(h ?? '').trim()) ?? []
+  const previewRows = parsedRows.slice(headerRowIndex + 1).slice(0, 5).filter(r => r && r.length > 0)
 
   return (
     <AppLayout>
@@ -187,7 +249,7 @@ export default function BankDetailPage({ params }: { params: { id: string } }) {
             <h1 className="text-2xl font-bold text-gray-900">{bank?.name ?? 'Banco'}</h1>
             {bank?.iban && <p className="text-sm text-gray-500 font-mono mt-0.5">{bank.iban}</p>}
           </div>
-          <button className="btn-primary" onClick={() => setShowImport(true)}>
+          <button className="btn-primary" onClick={() => { setShowImport(true); setImportStep('upload') }}>
             <Upload className="w-4 h-4" /> Importar Extrato
           </button>
         </div>
@@ -248,7 +310,6 @@ export default function BankDetailPage({ params }: { params: { id: string } }) {
                 <tr>
                   <th className="table-header">Data</th>
                   <th className="table-header">Descrição</th>
-                  <th className="table-header">Referência</th>
                   <th className="table-header">Valor</th>
                   <th className="table-header">Saldo</th>
                   <th className="table-header">Sugestão</th>
@@ -263,7 +324,6 @@ export default function BankDetailPage({ params }: { params: { id: string } }) {
                     <td className="table-cell max-w-xs">
                       <p className="text-sm text-gray-800 truncate">{tx.description}</p>
                     </td>
-                    <td className="table-cell text-xs text-gray-500">{tx.reference ?? '—'}</td>
                     <td className="table-cell">
                       <span className={`font-semibold text-sm ${tx.amount >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                         {tx.amount >= 0 ? '+' : ''}{formatCurrency(tx.amount)}
@@ -273,14 +333,7 @@ export default function BankDetailPage({ params }: { params: { id: string } }) {
                       {tx.balance != null ? formatCurrency(tx.balance) : '—'}
                     </td>
                     <td className="table-cell">
-                      {tx.suggested_type && tx.lease ? (
-                        <div className="flex items-center gap-1.5">
-                          <Link2 className="w-3 h-3 text-blue-500" />
-                          <span className="text-xs text-blue-600">
-                            {tx.lease.space?.ref} · {tx.lease.tenant?.name}
-                          </span>
-                        </div>
-                      ) : tx.suggested_type ? (
+                      {tx.suggested_type ? (
                         <span className="text-xs text-blue-600">{tx.suggested_type}</span>
                       ) : (
                         <span className="text-xs text-gray-400">—</span>
@@ -321,7 +374,7 @@ export default function BankDetailPage({ params }: { params: { id: string } }) {
                 ))}
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="py-12 text-center text-gray-400 text-sm">
+                    <td colSpan={7} className="py-12 text-center text-gray-400 text-sm">
                       {transactions.length === 0
                         ? 'Ainda não há transações. Importa um extrato para começar.'
                         : 'Nenhuma transação com este filtro.'}
@@ -336,34 +389,129 @@ export default function BankDetailPage({ params }: { params: { id: string } }) {
 
       {showImport && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-5">
-              <h2 className="font-semibold text-lg text-gray-900">Importar Extrato</h2>
-              <button onClick={() => setShowImport(false)}><X className="w-5 h-5 text-gray-400" /></button>
-            </div>
-            <div className="bg-blue-50 border border-blue-100 rounded-lg p-4 mb-5 text-sm text-blue-700">
-              <p className="font-medium mb-1">Formatos suportados: Excel (.xlsx) e CSV (.csv)</p>
-              <p>O ficheiro deve ter colunas de <strong>Data</strong>, <strong>Descrição</strong> e <strong>Valor</strong>. Linhas já importadas são automaticamente ignoradas.</p>
-            </div>
-            {importing ? (
-              <div className="flex flex-col items-center py-8 gap-3">
-                <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
-                <p className="text-sm text-gray-600">A processar o ficheiro...</p>
-              </div>
-            ) : (
-              <label className="flex flex-col items-center gap-3 border-2 border-dashed border-gray-200 rounded-xl p-8 cursor-pointer hover:border-emerald-400 transition-colors">
-                <Upload className="w-10 h-10 text-gray-300" />
-                <div className="text-center">
-                  <p className="font-medium text-gray-700">Clica para selecionar o ficheiro</p>
-                  <p className="text-sm text-gray-400 mt-1">Excel (.xlsx) ou CSV (.csv)</p>
+              <div>
+                <h2 className="font-semibold text-lg text-gray-900">Importar Extrato</h2>
+                <div className="flex items-center gap-2 mt-1">
+                  {['upload', 'mapping', 'preview'].map((step, i) => (
+                    <div key={step} className="flex items-center gap-1">
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${importStep === step ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-gray-500'}`}>
+                        {i + 1}. {step === 'upload' ? 'Ficheiro' : step === 'mapping' ? 'Colunas' : 'Confirmar'}
+                      </span>
+                      {i < 2 && <ArrowRight className="w-3 h-3 text-gray-400" />}
+                    </div>
+                  ))}
                 </div>
-                <input type="file" accept=".xlsx,.xls,.csv" className="hidden"
-                  onChange={e => { const f = e.target.files?.[0]; if (f) handleFileImport(f) }} />
-              </label>
-            )}
-            <div className="flex justify-end mt-5">
-              <button className="btn-secondary" onClick={() => setShowImport(false)}>Cancelar</button>
+              </div>
+              <button onClick={() => { setShowImport(false); setImportStep('upload') }}>
+                <X className="w-5 h-5 text-gray-400" />
+              </button>
             </div>
+
+            {importStep === 'upload' && (
+              <div>
+                <p className="text-sm text-gray-500 mb-4">Seleciona o ficheiro Excel ou CSV exportado do teu banco.</p>
+                {importing ? (
+                  <div className="flex flex-col items-center py-8 gap-3">
+                    <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
+                    <p className="text-sm text-gray-600">A analisar o ficheiro...</p>
+                  </div>
+                ) : (
+                  <label className="flex flex-col items-center gap-3 border-2 border-dashed border-gray-200 rounded-xl p-8 cursor-pointer hover:border-emerald-400 transition-colors">
+                    <Upload className="w-10 h-10 text-gray-300" />
+                    <div className="text-center">
+                      <p className="font-medium text-gray-700">Clica para selecionar o ficheiro</p>
+                      <p className="text-sm text-gray-400 mt-1">Excel (.xlsx) ou CSV (.csv)</p>
+                    </div>
+                    <input type="file" accept=".xlsx,.xls,.csv" className="hidden"
+                      onChange={e => { const f = e.target.files?.[0]; if (f) handleFileSelect(f) }} />
+                  </label>
+                )}
+              </div>
+            )}
+
+            {importStep === 'mapping' && (
+              <div>
+                <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 mb-4 text-sm text-blue-700">
+                  Encontrámos <strong>{parsedHeaders.length} colunas</strong> no ficheiro. Confirma a associação:
+                </div>
+                <div className="space-y-3">
+                  {[
+                    { key: 'date', label: 'Data da transação', required: true },
+                    { key: 'description', label: 'Descrição / Movimento', required: true },
+                    { key: 'amount', label: 'Valor', required: true },
+                    { key: 'balance', label: 'Saldo após movimento', required: false },
+                    { key: 'type', label: 'Tipo (Débito/Crédito)', required: false },
+                  ].map(field => (
+                    <div key={field.key} className="flex items-center gap-4">
+                      <div className="w-48 flex-shrink-0">
+                        <p className="text-sm font-medium text-gray-700">{field.label}</p>
+                        {field.required && <p className="text-xs text-red-500">obrigatório</p>}
+                      </div>
+                      <ArrowRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                      <select className="input flex-1"
+                        value={(mapping as any)[field.key]}
+                        onChange={e => setMapping(m => ({ ...m, [field.key]: e.target.value }))}>
+                        <option value="">— Não importar —</option>
+                        {parsedHeaders.map(h => (
+                          <option key={h} value={h}>{h}</option>
+                        ))}
+                      </select>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex justify-between mt-6">
+                  <button className="btn-secondary" onClick={() => setImportStep('upload')}>← Voltar</button>
+                  <button className="btn-primary" onClick={handleMappingConfirm}>Ver pré-visualização →</button>
+                </div>
+              </div>
+            )}
+
+            {importStep === 'preview' && (
+              <div>
+                <p className="text-sm text-gray-500 mb-3">Pré-visualização das primeiras 5 linhas:</p>
+                <div className="overflow-x-auto rounded-lg border border-gray-100 mb-4">
+                  <table className="w-full text-xs">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-3 py-2 text-left text-gray-500">Data</th>
+                        <th className="px-3 py-2 text-left text-gray-500">Descrição</th>
+                        <th className="px-3 py-2 text-left text-gray-500">Valor</th>
+                        <th className="px-3 py-2 text-left text-gray-500">Saldo</th>
+                        <th className="px-3 py-2 text-left text-gray-500">Tipo</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {previewRows.map((row, i) => {
+                        const getVal = (field: string) => {
+                          const idx = headers.indexOf(field)
+                          return idx >= 0 ? String(row[idx] ?? '') : '—'
+                        }
+                        return (
+                          <tr key={i}>
+                            <td className="px-3 py-2">{getVal(mapping.date)}</td>
+                            <td className="px-3 py-2 max-w-xs truncate">{getVal(mapping.description)}</td>
+                            <td className="px-3 py-2">{getVal(mapping.amount)}</td>
+                            <td className="px-3 py-2">{mapping.balance ? getVal(mapping.balance) : '—'}</td>
+                            <td className="px-3 py-2">{mapping.type ? getVal(mapping.type) : '—'}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="bg-emerald-50 border border-emerald-100 rounded-lg p-3 text-sm text-emerald-700 mb-4">
+                  ✅ Linhas duplicadas serão automaticamente ignoradas. O mapeamento será guardado para importações futuras.
+                </div>
+                <div className="flex justify-between">
+                  <button className="btn-secondary" onClick={() => setImportStep('mapping')}>← Voltar</button>
+                  <button className="btn-primary" onClick={handleImport} disabled={importing}>
+                    {importing ? <><Loader2 className="w-4 h-4 animate-spin" /> A importar...</> : '✓ Importar'}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
