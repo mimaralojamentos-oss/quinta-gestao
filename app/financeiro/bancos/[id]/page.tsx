@@ -38,8 +38,8 @@ interface ColumnMapping {
   type: string
 }
 
-export default function BankDetailPage({ params }: { params: { id: string } }) {
-  const bankId = params?.id ?? ''
+export default function BankDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const [bankId, setBankId] = useState('')
   const [bank, setBank] = useState<Bank | null>(null)
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [loading, setLoading] = useState(true)
@@ -53,6 +53,10 @@ export default function BankDetailPage({ params }: { params: { id: string } }) {
   const [mapping, setMapping] = useState<ColumnMapping>({ date: '', description: '', amount: '', balance: '', type: '' })
   const [importFile, setImportFile] = useState<File | null>(null)
   const supabase = createClient()
+
+  useEffect(() => {
+    params.then(p => setBankId(p.id))
+  }, [])
 
   useEffect(() => { if (bankId) fetchData() }, [bankId])
 
