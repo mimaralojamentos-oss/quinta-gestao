@@ -1,7 +1,5 @@
 'use client'
 
-export const dynamic = 'force-dynamic'
-
 import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
@@ -73,7 +71,6 @@ export default function DespesasPage() {
           </button>
         </div>
 
-        {/* Summary */}
         <div className="grid grid-cols-3 gap-4 mb-6">
           <div className="card">
             <p className="text-sm text-gray-500 mb-1">Total de Despesas</p>
@@ -89,7 +86,6 @@ export default function DespesasPage() {
           </div>
         </div>
 
-        {/* Filters */}
         <div className="flex gap-3 mb-6">
           <div className="relative flex-1 max-w-xs">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
