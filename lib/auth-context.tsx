@@ -1,5 +1,5 @@
 'use client'
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import type { User } from '@supabase/supabase-js'
 
@@ -29,11 +29,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
   const [loading, setLoading] = useState(true)
-  const supabase = createClient()
+  const supabaseRef = useRef(createClient())
+  const supabase = supabaseRef.current
 
   useEffect(() => {
+    let mounted = true
+
     async function getUser() {
       const { data: { user } } = await supabase.auth.getUser()
+      if (!mounted) return
       setUser(user)
       if (user) {
         const { data } = await supabase
@@ -41,28 +45,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           .select('*')
           .eq('id', user.id)
           .single()
-        setProfile(data)
+        if (mounted) setProfile(data)
       }
-      setLoading(false)
+      if (mounted) setLoading(false)
     }
+
     getUser()
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      setUser(session?.user ?? null)
-      if (session?.user) {
+      if (!mounted) return
+      if (event === 'SIGNED_OUT') {
+        setUser(null)
+        setProfile(null)
+        setLoading(false)
+        return
+      }
+      if (event === 'SIGNED_IN' && session?.user) {
+        setUser(session.user)
         const { data } = await supabase
           .from('profiles')
           .select('*')
           .eq('id', session.user.id)
           .single()
-        setProfile(data)
-      } else {
-        setProfile(null)
-        setLoading(false)
+        if (mounted) setProfile(data)
       }
     })
 
-    return () => subscription.unsubscribe()
+    return () => {
+      mounted = false
+      subscription.unsubscribe()
+    }
   }, [])
 
   async function signOut() {
