@@ -39,6 +39,7 @@ interface ColumnMapping {
 }
 
 export default function BankDetailPage({ params }: { params: { id: string } }) {
+  const bankId = params?.id ?? ''
   const [bank, setBank] = useState<Bank | null>(null)
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [loading, setLoading] = useState(true)
@@ -53,17 +54,17 @@ export default function BankDetailPage({ params }: { params: { id: string } }) {
   const [importFile, setImportFile] = useState<File | null>(null)
   const supabase = createClient()
 
-  useEffect(() => { fetchData() }, [params.id])
+  useEffect(() => { if (bankId) fetchData() }, [bankId])
 
   async function fetchData() {
     setLoading(true)
     try {
-      const { data: bankData } = await supabase.from('banks').select('*').eq('id', params.id).single()
+      const { data: bankData } = await supabase.from('banks').select('*').eq('id', bankId).single()
       setBank(bankData)
       const { data: txData } = await supabase
         .from('bank_transactions')
         .select('*')
-        .eq('bank_id', params.id)
+        .eq('bank_id', bankId)
         .order('transaction_date', { ascending: false })
       setTransactions(txData ?? [])
     } catch (e) {
@@ -140,7 +141,7 @@ export default function BankDetailPage({ params }: { params: { id: string } }) {
       const balanceCol = mapping.balance ? getCol(mapping.balance) : -1
       const typeCol = mapping.type ? getCol(mapping.type) : -1
 
-      await supabase.from('banks').update({ column_mapping: mapping }).eq('id', params.id)
+      await supabase.from('banks').update({ column_mapping: mapping }).eq('id', bankId)
 
       const { data: leases } = await supabase
         .from('leases').select('id, monthly_rent').eq('status', 'ativo')
@@ -187,7 +188,7 @@ export default function BankDetailPage({ params }: { params: { id: string } }) {
           ? parseFloat(String(row[balanceCol] ?? '').replace(/[^\d,.\-]/g, '').replace(',', '.'))
           : null
 
-        const codeStr = `${params.id}|${txDate}|${amount}|${rawDesc}`
+        const codeStr = `${bankId}|${txDate}|${amount}|${rawDesc}`
         const importCode = await generateHash(codeStr)
 
         let suggestedType = null
@@ -198,7 +199,7 @@ export default function BankDetailPage({ params }: { params: { id: string } }) {
         }
 
         const { error } = await supabase.from('bank_transactions').insert({
-          bank_id: params.id,
+          bank_id: bankId,
           transaction_date: txDate,
           description: rawDesc,
           amount,
