@@ -78,7 +78,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       loading,
       signOut
     }}>
-      {!loading && children}
+      {children}
     </AuthContext.Provider>
   )
 }
