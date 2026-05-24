@@ -6,126 +6,70 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, getMonthLabel, getCurrentMonth } from '@/lib/utils'
-import {
-  Building2, Users, TrendingUp, TrendingDown, AlertTriangle, CheckCircle, Clock, Wallet
-} from 'lucide-react'
+import { Building2, Users, TrendingUp, AlertTriangle, CheckCircle, Clock, Wallet } from 'lucide-react'
 import Link from 'next/link'
 
-interface DashboardStats {
-  totalSpaces: number
-  occupiedSpaces: number
-  totalTenantsActive: number
-  monthlyRentExpected: number
-  monthlyRentReceived: number
-  pendingRents: number
-  cashFundBalance: number
-  recentAlerts: Alert[]
-}
-
-interface Alert {
-  id: string
-  type: 'late_rent' | 'expiring_contract'
-  message: string
-  tenant_name: string
-  space_ref: string
-}
-
 export default function Dashboard() {
-  const [stats, setStats] = useState<DashboardStats>({
-    totalSpaces: 0,
-    occupiedSpaces: 0,
-    totalTenantsActive: 0,
-    monthlyRentExpected: 0,
-    monthlyRentReceived: 0,
-    pendingRents: 0,
-    cashFundBalance: 0,
-    recentAlerts: [],
+  const [stats, setStats] = useState({
+    totalSpaces: 0, occupiedSpaces: 0, totalTenantsActive: 0,
+    monthlyRentExpected: 0, monthlyRentReceived: 0, pendingRents: 0,
+    cashFundBalance: 0, pendingLeases: [] as any[], alerts: [] as any[],
   })
   const [loading, setLoading] = useState(true)
   const currentMonth = getCurrentMonth()
-  const supabase = createClient()
 
   useEffect(() => {
-    async function fetchStats() {
-      try {
-        // Spaces
-        const { data: spaces } = await supabase.from('spaces').select('*')
-        const totalSpaces = spaces?.length ?? 0
-        const occupiedSpaces = spaces?.filter(s => s.status === 'arrendado').length ?? 0
-
-        // Active leases
-        const { data: leases } = await supabase
-          .from('leases')
-          .select('*, space:spaces(*), tenant:tenants(*)')
-          .eq('status', 'ativo')
-
-        const totalTenantsActive = leases?.length ?? 0
-        const monthlyRentExpected = leases?.reduce((sum, l) => sum + (l.monthly_rent ?? 0), 0) ?? 0
-
-        // Payments this month
-        const { data: payments } = await supabase
-          .from('rent_payments')
-          .select('*')
-          .gte('reference_month', currentMonth)
-          .lt('reference_month', getNextMonth(currentMonth))
-
-        const monthlyRentReceived = payments?.reduce((sum, p) => sum + (p.amount ?? 0), 0) ?? 0
-
-        // Leases with no payment this month
-        const paidLeaseIds = new Set(payments?.map(p => p.lease_id) ?? [])
-        const pendingRents = leases?.filter(l => !paidLeaseIds.has(l.id)).length ?? 0
-
-        // Cash fund balance
-        const { data: cashMovements } = await supabase
-          .from('cash_fund_movements')
-          .select('amount')
-        const cashFundBalance = cashMovements?.reduce((sum, m) => sum + (m.amount ?? 0), 0) ?? 0
-
-        // Build alerts
-        const alerts: Alert[] = []
-
-        // Unpaid rents (leases with no payment this month)
-        leases?.filter(l => !paidLeaseIds.has(l.id)).slice(0, 5).forEach(l => {
-          alerts.push({
-            id: `rent-${l.id}`,
-            type: 'late_rent',
-            message: `Renda de ${getMonthLabel(currentMonth)} por receber`,
-            tenant_name: l.tenant?.name ?? '—',
-            space_ref: l.space?.ref ?? '—',
-          })
-        })
-
-        // Contracts expiring in next 60 days
-        const sixtyDaysFromNow = new Date()
-        sixtyDaysFromNow.setDate(sixtyDaysFromNow.getDate() + 60)
-        leases?.filter(l => l.end_date && new Date(l.end_date) <= sixtyDaysFromNow).forEach(l => {
-          alerts.push({
-            id: `contract-${l.id}`,
-            type: 'expiring_contract',
-            message: `Contrato termina em ${new Date(l.end_date!).toLocaleDateString('pt-PT')}`,
-            tenant_name: l.tenant?.name ?? '—',
-            space_ref: l.space?.ref ?? '—',
-          })
-        })
-
-        setStats({
-          totalSpaces,
-          occupiedSpaces,
-          totalTenantsActive,
-          monthlyRentExpected,
-          monthlyRentReceived,
-          pendingRents,
-          cashFundBalance,
-          recentAlerts: alerts.slice(0, 8),
-        })
-      } catch (error) {
-        console.error(error)
-      } finally {
-        setLoading(false)
-      }
-    }
     fetchStats()
   }, [])
+
+  async function fetchStats() {
+    try {
+      const supabase = createClient()
+      const nextMonth = new Date(currentMonth)
+      nextMonth.setMonth(nextMonth.getMonth() + 1)
+      const nextMonthStr = nextMonth.toISOString().slice(0, 10)
+
+      const [spacesRes, leasesRes, paymentsRes, cashRes] = await Promise.all([
+        supabase.from('spaces').select('id, status'),
+        supabase.from('leases').select('id, monthly_rent, space:spaces(ref), tenant:tenants(name, phone)').eq('status', 'ativo'),
+        supabase.from('rent_payments').select('lease_id, amount, tipo').gte('reference_month', currentMonth).lt('reference_month', nextMonthStr),
+        supabase.from('cash_fund_movements').select('amount'),
+      ])
+
+      const spaces = spacesRes.data ?? []
+      const leases = leasesRes.data ?? []
+      const payments = paymentsRes.data ?? []
+      const cash = cashRes.data ?? []
+
+      const paidLeaseIds = new Set(
+        payments.filter(p => p.tipo === 'renda' || !p.tipo).map(p => p.lease_id)
+      )
+      const rentPayments = payments.filter(p => p.tipo === 'renda' || !p.tipo)
+
+      const pendingLeases = leases.filter(l => !paidLeaseIds.has(l.id))
+
+      setStats({
+        totalSpaces: spaces.length,
+        occupiedSpaces: spaces.filter(s => s.status === 'arrendado').length,
+        totalTenantsActive: leases.length,
+        monthlyRentExpected: leases.reduce((s, l) => s + (l.monthly_rent ?? 0), 0),
+        monthlyRentReceived: rentPayments.reduce((s, p) => s + (p.amount ?? 0), 0),
+        pendingRents: pendingLeases.length,
+        cashFundBalance: cash.reduce((s, m) => s + (m.amount ?? 0), 0),
+        pendingLeases: pendingLeases.slice(0, 5),
+        alerts: pendingLeases.slice(0, 5),
+      })
+    } catch (e) {
+      console.error('Dashboard error:', e)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const occupancyRate = stats.totalSpaces > 0
+    ? Math.round((stats.occupiedSpaces / stats.totalSpaces) * 100) : 0
+  const collectionRate = stats.monthlyRentExpected > 0
+    ? Math.round((stats.monthlyRentReceived / stats.monthlyRentExpected) * 100) : 0
 
   if (loading) {
     return (
@@ -137,24 +81,14 @@ export default function Dashboard() {
     )
   }
 
-  const occupancyRate = stats.totalSpaces > 0
-    ? Math.round((stats.occupiedSpaces / stats.totalSpaces) * 100)
-    : 0
-
-  const collectionRate = stats.monthlyRentExpected > 0
-    ? Math.round((stats.monthlyRentReceived / stats.monthlyRentExpected) * 100)
-    : 0
-
   return (
     <AppLayout>
       <div className="p-8">
-        {/* Header */}
         <div className="mb-8">
           <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
           <p className="text-gray-500 text-sm mt-1">{getMonthLabel(currentMonth)}</p>
         </div>
 
-        {/* KPI Cards */}
         <div className="grid grid-cols-4 gap-5 mb-8">
           <div className="card">
             <div className="flex items-center justify-between mb-3">
@@ -163,7 +97,9 @@ export default function Dashboard() {
                 <Building2 className="w-4 h-4 text-emerald-600" />
               </div>
             </div>
-            <p className="text-2xl font-bold text-gray-900">{stats.occupiedSpaces}<span className="text-lg text-gray-400">/{stats.totalSpaces}</span></p>
+            <p className="text-2xl font-bold text-gray-900">
+              {stats.occupiedSpaces}<span className="text-lg text-gray-400">/{stats.totalSpaces}</span>
+            </p>
             <p className="text-xs text-emerald-600 mt-1 font-medium">{occupancyRate}% de ocupação</p>
           </div>
 
@@ -186,7 +122,9 @@ export default function Dashboard() {
               </div>
             </div>
             <p className="text-2xl font-bold text-gray-900">{formatCurrency(stats.monthlyRentReceived)}</p>
-            <p className="text-xs text-gray-500 mt-1">de {formatCurrency(stats.monthlyRentExpected)} esperados ({collectionRate}%)</p>
+            <p className="text-xs text-gray-500 mt-1">
+              de {formatCurrency(stats.monthlyRentExpected)} ({collectionRate}%)
+            </p>
           </div>
 
           <div className="card">
@@ -201,9 +139,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Two-column layout */}
         <div className="grid grid-cols-2 gap-6">
-          {/* Pending rents */}
           <div className="card">
             <div className="flex items-center justify-between mb-4">
               <h2 className="font-semibold text-gray-900">Rendas Pendentes</h2>
@@ -218,20 +154,17 @@ export default function Dashboard() {
               </div>
             ) : (
               <div className="space-y-2">
-                {stats.recentAlerts
-                  .filter(a => a.type === 'late_rent')
-                  .slice(0, 6)
-                  .map(alert => (
-                    <div key={alert.id} className="flex items-center gap-3 py-2 border-b border-gray-50 last:border-0">
-                      <div className="w-8 h-8 bg-red-50 rounded-lg flex items-center justify-center flex-shrink-0">
-                        <Clock className="w-4 h-4 text-red-500" />
-                      </div>
-                      <div>
-                        <p className="text-sm font-medium text-gray-800">{alert.tenant_name}</p>
-                        <p className="text-xs text-gray-500">{alert.space_ref} · {alert.message}</p>
-                      </div>
+                {stats.pendingLeases.map((lease: any) => (
+                  <div key={lease.id} className="flex items-center gap-3 py-2 border-b border-gray-50 last:border-0">
+                    <div className="w-8 h-8 bg-red-50 rounded-lg flex items-center justify-center flex-shrink-0">
+                      <Clock className="w-4 h-4 text-red-500" />
                     </div>
-                  ))}
+                    <div>
+                      <p className="text-sm font-medium text-gray-800">{lease.tenant?.name}</p>
+                      <p className="text-xs text-gray-500">{lease.space?.ref} · Renda de {getMonthLabel(currentMonth)} por receber</p>
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
             <Link href="/pagamentos" className="mt-4 text-xs text-emerald-600 hover:underline font-medium block">
@@ -239,29 +172,28 @@ export default function Dashboard() {
             </Link>
           </div>
 
-          {/* Alerts */}
           <div className="card">
             <div className="flex items-center justify-between mb-4">
               <h2 className="font-semibold text-gray-900">Alertas</h2>
-              <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-yellow-100 text-yellow-700">
-                {stats.recentAlerts.length} alertas
+              <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${stats.pendingRents > 0 ? 'bg-yellow-100 text-yellow-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                {stats.pendingRents} alertas
               </span>
             </div>
-            {stats.recentAlerts.length === 0 ? (
+            {stats.pendingRents === 0 ? (
               <div className="flex items-center gap-2 text-emerald-600 text-sm py-4">
                 <CheckCircle className="w-5 h-5" />
                 Sem alertas ativos
               </div>
             ) : (
               <div className="space-y-2">
-                {stats.recentAlerts.map(alert => (
-                  <div key={alert.id} className="flex items-center gap-3 py-2 border-b border-gray-50 last:border-0">
-                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${alert.type === 'late_rent' ? 'bg-red-50' : 'bg-yellow-50'}`}>
-                      <AlertTriangle className={`w-4 h-4 ${alert.type === 'late_rent' ? 'text-red-500' : 'text-yellow-500'}`} />
+                {stats.alerts.map((lease: any) => (
+                  <div key={lease.id} className="flex items-center gap-3 py-2 border-b border-gray-50 last:border-0">
+                    <div className="w-8 h-8 bg-yellow-50 rounded-lg flex items-center justify-center flex-shrink-0">
+                      <AlertTriangle className="w-4 h-4 text-yellow-500" />
                     </div>
                     <div>
-                      <p className="text-sm font-medium text-gray-800">{alert.tenant_name}</p>
-                      <p className="text-xs text-gray-500">{alert.space_ref} · {alert.message}</p>
+                      <p className="text-sm font-medium text-gray-800">{lease.tenant?.name}</p>
+                      <p className="text-xs text-gray-500">{lease.space?.ref} · Renda em atraso</p>
                     </div>
                   </div>
                 ))}
@@ -275,10 +207,4 @@ export default function Dashboard() {
       </div>
     </AppLayout>
   )
-}
-
-function getNextMonth(dateString: string): string {
-  const d = new Date(dateString)
-  d.setMonth(d.getMonth() + 1)
-  return d.toISOString().slice(0, 10)
 }
