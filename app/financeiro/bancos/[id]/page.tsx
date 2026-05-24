@@ -80,6 +80,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
         .select('*')
         .eq('bank_id', bankId)
         .order('transaction_date', { ascending: false })
+        .order('balance', { ascending: true })
       setTransactions(txData ?? [])
     } catch (e) {
       console.error(e)
