@@ -1,7 +1,5 @@
 'use client'
 
-export const dynamic = 'force-dynamic'
-
 import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
@@ -46,7 +44,6 @@ export default function CaixaPage() {
           </button>
         </div>
 
-        {/* Balance display */}
         <div className="grid grid-cols-3 gap-5 mb-6">
           <div className="card border-l-4 border-l-emerald-500">
             <div className="flex items-center gap-3 mb-2">
@@ -92,33 +89,27 @@ export default function CaixaPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {movements.map((m, i) => {
-                  // Running balance from the bottom
-                  const runningBalance = movements
-                    .slice(i)
-                    .reduce((s, mv) => s + mv.amount, 0)
-                  return (
-                    <tr key={m.id} className="hover:bg-gray-50">
-                      <td className="table-cell text-sm">{formatDate(m.movement_date)}</td>
-                      <td className="table-cell font-medium text-gray-800">{m.description}</td>
-                      <td className="table-cell">
-                        <span className={`text-xs px-2 py-1 rounded-full font-medium ${
-                          m.type === 'entrada' ? 'bg-emerald-100 text-emerald-700' :
-                          m.type === 'saida' ? 'bg-red-100 text-red-700' :
-                          'bg-blue-100 text-blue-700'
-                        }`}>
-                          {m.type === 'entrada' ? '↑ Entrada' : m.type === 'saida' ? '↓ Saída' : '↔ Transferência'}
-                        </span>
-                      </td>
-                      <td className="table-cell">
-                        <span className={`font-semibold text-sm ${m.amount >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                          {m.amount >= 0 ? '+' : ''}{formatCurrency(m.amount)}
-                        </span>
-                      </td>
-                      <td className="table-cell text-xs text-gray-500">{m.notes ?? '—'}</td>
-                    </tr>
-                  )
-                })}
+                {movements.map((m, i) => (
+                  <tr key={m.id} className="hover:bg-gray-50">
+                    <td className="table-cell text-sm">{formatDate(m.movement_date)}</td>
+                    <td className="table-cell font-medium text-gray-800">{m.description}</td>
+                    <td className="table-cell">
+                      <span className={`text-xs px-2 py-1 rounded-full font-medium ${
+                        m.type === 'entrada' ? 'bg-emerald-100 text-emerald-700' :
+                        m.type === 'saida' ? 'bg-red-100 text-red-700' :
+                        'bg-blue-100 text-blue-700'
+                      }`}>
+                        {m.type === 'entrada' ? '↑ Entrada' : m.type === 'saida' ? '↓ Saída' : '↔ Transferência'}
+                      </span>
+                    </td>
+                    <td className="table-cell">
+                      <span className={`font-semibold text-sm ${m.amount >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                        {m.amount >= 0 ? '+' : ''}{formatCurrency(m.amount)}
+                      </span>
+                    </td>
+                    <td className="table-cell text-xs text-gray-500">{m.notes ?? '—'}</td>
+                  </tr>
+                ))}
                 {movements.length === 0 && (
                   <tr><td colSpan={5} className="py-12 text-center text-gray-400 text-sm">Sem movimentos registados</td></tr>
                 )}
