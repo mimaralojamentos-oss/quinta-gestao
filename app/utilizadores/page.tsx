@@ -1,7 +1,5 @@
 'use client'
 
-export const dynamic = 'force-dynamic'
-
 import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
@@ -19,11 +17,12 @@ interface Profile {
 }
 
 export default function UtilizadoresPage() {
-  const { isAdmin, loading: authLoading } = useAuth()
+  const { isAdmin, loading: authLoading, user } = useAuth()
   const router = useRouter()
   const [profiles, setProfiles] = useState<Profile[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
+  const [deleting, setDeleting] = useState<string | null>(null)
   const supabase = createClient()
 
   useEffect(() => {
@@ -49,6 +48,14 @@ export default function UtilizadoresPage() {
     fetchUsers()
   }
 
+  async function deleteUser(id: string, name: string) {
+    if (!confirm(`Tem a certeza que quer apagar o utilizador "${name}"? Esta ação não pode ser desfeita.`)) return
+    setDeleting(id)
+    await supabase.from('profiles').delete().eq('id', id)
+    await fetchUsers()
+    setDeleting(null)
+  }
+
   if (authLoading) return null
 
   return (
@@ -61,18 +68,17 @@ export default function UtilizadoresPage() {
           </div>
           <button className="btn-primary" onClick={() => setShowModal(true)}>
             <Plus className="w-4 h-4" />
-            Convidar Utilizador
+            Criar Utilizador
           </button>
         </div>
 
-        {/* Info box */}
         <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 mb-6">
           <div className="flex items-start gap-3">
             <ShieldCheck className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
             <div>
               <p className="text-sm font-medium text-blue-800">Níveis de acesso</p>
               <p className="text-sm text-blue-600 mt-1">
-                <strong>Administrador</strong> — acesso total (ler e escrever em todos os módulos) · <strong>Visualizador</strong> — apenas leitura, sem poder fazer alterações
+                <strong>Administrador</strong> — acesso total · <strong>Visualizador</strong> — apenas leitura
               </p>
             </div>
           </div>
@@ -88,54 +94,82 @@ export default function UtilizadoresPage() {
               <thead className="bg-gray-50 border-b border-gray-100">
                 <tr>
                   <th className="table-header">Utilizador</th>
-                  <th className="table-header">Perfil criado</th>
+                  <th className="table-header">Criado em</th>
                   <th className="table-header">Nível de Acesso</th>
+                  <th className="table-header">Alterar Papel</th>
                   <th className="table-header"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {profiles.map(profile => (
-                  <tr key={profile.id} className="hover:bg-gray-50">
-                    <td className="table-cell">
-                      <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 bg-emerald-100 rounded-full flex items-center justify-center flex-shrink-0">
-                          <span className="text-sm font-bold text-emerald-700">
-                            {profile.name.charAt(0).toUpperCase()}
-                          </span>
+                {profiles.map(profile => {
+                  const isCurrentUser = profile.id === user?.id
+                  return (
+                    <tr key={profile.id} className={`hover:bg-gray-50 ${isCurrentUser ? 'bg-emerald-50/40' : ''}`}>
+                      <td className="table-cell">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 bg-emerald-100 rounded-full flex items-center justify-center flex-shrink-0">
+                            <span className="text-sm font-bold text-emerald-700">
+                              {profile.name.charAt(0).toUpperCase()}
+                            </span>
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <p className="font-medium text-gray-800">{profile.name}</p>
+                              {isCurrentUser && (
+                                <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-medium">Você</span>
+                              )}
+                            </div>
+                            <p className="text-xs text-gray-400">{profile.id.slice(0, 8)}...</p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="font-medium text-gray-800">{profile.name}</p>
-                          <p className="text-xs text-gray-400">{profile.id.slice(0, 8)}...</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="table-cell text-sm text-gray-500">
-                      {formatDate(profile.created_at)}
-                    </td>
-                    <td className="table-cell">
-                      <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium ${
-                        profile.role === 'admin'
-                          ? 'bg-emerald-100 text-emerald-700'
-                          : 'bg-gray-100 text-gray-600'
-                      }`}>
-                        {profile.role === 'admin'
-                          ? <><ShieldCheck className="w-3 h-3" /> Administrador</>
-                          : <><Eye className="w-3 h-3" /> Visualizador</>
-                        }
-                      </span>
-                    </td>
-                    <td className="table-cell">
-                      <select
-                        value={profile.role}
-                        onChange={e => changeRole(profile.id, e.target.value as 'admin' | 'viewer')}
-                        className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-600 hover:border-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                      >
-                        <option value="admin">Tornar Administrador</option>
-                        <option value="viewer">Tornar Visualizador</option>
-                      </select>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td className="table-cell text-sm text-gray-500">
+                        {formatDate(profile.created_at)}
+                      </td>
+                      <td className="table-cell">
+                        <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium ${
+                          profile.role === 'admin'
+                            ? 'bg-emerald-100 text-emerald-700'
+                            : 'bg-gray-100 text-gray-600'
+                        }`}>
+                          {profile.role === 'admin'
+                            ? <><ShieldCheck className="w-3 h-3" /> Administrador</>
+                            : <><Eye className="w-3 h-3" /> Visualizador</>
+                          }
+                        </span>
+                      </td>
+                      <td className="table-cell">
+                        {!isCurrentUser && (
+                          <select
+                            value={profile.role}
+                            onChange={e => changeRole(profile.id, e.target.value as 'admin' | 'viewer')}
+                            className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-600 hover:border-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                          >
+                            <option value="admin">Tornar Administrador</option>
+                            <option value="viewer">Tornar Visualizador</option>
+                          </select>
+                        )}
+                        {isCurrentUser && (
+                          <span className="text-xs text-gray-400">Não pode alterar o seu próprio papel</span>
+                        )}
+                      </td>
+                      <td className="table-cell">
+                        {!isCurrentUser && (
+                          <button
+                            onClick={() => deleteUser(profile.id, profile.name)}
+                            disabled={deleting === profile.id}
+                            className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700 font-medium"
+                          >
+                            {deleting === profile.id
+                              ? <Loader2 className="w-3 h-3 animate-spin" />
+                              : <Trash2 className="w-3 h-3" />}
+                            Apagar
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
@@ -194,7 +228,7 @@ function InviteModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =>
         <div className="space-y-4">
           <div>
             <label className="label">Nome *</label>
-            <input className="input" placeholder="ex: miguelseverino" value={form.name}
+            <input className="input" placeholder="ex: João Silva" value={form.name}
               onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
           </div>
           <div>
