@@ -1,7 +1,5 @@
 'use client'
 
-export const dynamic = 'force-dynamic'
-
 import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
@@ -32,20 +30,17 @@ export default function AlertasPage() {
     nextMonth.setMonth(nextMonth.getMonth() + 1)
     const nextMonthStr = nextMonth.toISOString().slice(0, 10)
 
-    // Active leases
     const { data: leases } = await supabase
       .from('leases')
       .select('*, space:spaces(*), tenant:tenants(*)')
       .eq('status', 'ativo')
 
-    // Payments this month
     const { data: payments } = await supabase
       .from('rent_payments')
       .select('*')
       .gte('reference_month', currentMonth)
       .lt('reference_month', nextMonthStr)
 
-    // Unpaid electricity
     const { data: elec } = await supabase
       .from('electricity_charges')
       .select('*, lease:leases(*, space:spaces(*), tenant:tenants(*))')
@@ -54,7 +49,6 @@ export default function AlertasPage() {
     const newAlerts: AlertItem[] = []
     const paidLeaseIds = new Set((payments ?? []).map(p => p.lease_id))
 
-    // Unpaid rents
     ;(leases ?? []).forEach(l => {
       if (!paidLeaseIds.has(l.id)) {
         newAlerts.push({
@@ -70,7 +64,6 @@ export default function AlertasPage() {
       }
     })
 
-    // Contracts expiring in 90 days
     const ninetyDays = new Date()
     ninetyDays.setDate(ninetyDays.getDate() + 90)
     ;(leases ?? []).filter(l => l.end_date).forEach(l => {
@@ -89,7 +82,6 @@ export default function AlertasPage() {
       }
     })
 
-    // Unpaid electricity
     ;(elec ?? []).forEach(c => {
       newAlerts.push({
         id: `elec-${c.id}`,
@@ -103,7 +95,6 @@ export default function AlertasPage() {
       })
     })
 
-    // Sort by severity
     newAlerts.sort((a, b) => {
       const order = { high: 0, medium: 1, low: 2 }
       return order[a.severity] - order[b.severity]
@@ -136,7 +127,6 @@ export default function AlertasPage() {
           <p className="text-sm text-gray-500 mt-1">{alerts.length} alertas ativos</p>
         </div>
 
-        {/* Summary */}
         <div className="grid grid-cols-3 gap-4 mb-6">
           <div className="card border-l-4 border-l-red-500">
             <p className="text-sm text-gray-500">Urgentes</p>
