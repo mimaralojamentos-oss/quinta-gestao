@@ -54,7 +54,7 @@ export default function Sidebar() {
           const Icon = item.icon
           const isActive = pathname === item.href || pathname.startsWith(item.href + '/')
           return (
-            <Link key={item.href} href={item.href}
+            <Link key={item.href} href={item.href} prefetch={false}
               className={cn('sidebar-link', isActive ? 'active' : '')}>
               <Icon className="w-4 h-4 flex-shrink-0" />
               {item.label}
@@ -83,7 +83,7 @@ export default function Sidebar() {
                 const Icon = item.icon
                 const isActive = pathname === item.href || pathname.startsWith(item.href + '/')
                 return (
-                  <Link key={item.href} href={item.href}
+                  <Link key={item.href} href={item.href} prefetch={false}
                     className={cn('sidebar-link text-xs py-2', isActive ? 'active' : '')}>
                     <Icon className="w-3.5 h-3.5 flex-shrink-0" />
                     {item.label}
@@ -100,7 +100,7 @@ export default function Sidebar() {
             <div className="pt-3 pb-1">
               <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider px-4">Administração</p>
             </div>
-            <Link href="/utilizadores"
+            <Link href="/utilizadores" prefetch={false}
               className={cn('sidebar-link', pathname.startsWith('/utilizadores') ? 'active' : '')}>
               <ShieldCheck className="w-4 h-4 flex-shrink-0" />
               Utilizadores
