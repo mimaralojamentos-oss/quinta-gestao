@@ -1,7 +1,5 @@
 'use client'
 
-export const dynamic = 'force-dynamic'
-
 import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
@@ -242,7 +240,7 @@ export default function BankDetailPage({ params }: { params: { id: string } }) {
     <AppLayout>
       <div className="p-8">
         <div className="flex items-center gap-4 mb-6">
-          <Link href="/financeiro/bancos" className="text-gray-400 hover:text-gray-600">
+          <Link href="/financeiro/bancos" prefetch={false} className="text-gray-400 hover:text-gray-600">
             <ChevronLeft className="w-5 h-5" />
           </Link>
           <div className="flex-1">
