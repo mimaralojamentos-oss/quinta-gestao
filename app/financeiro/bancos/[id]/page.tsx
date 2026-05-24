@@ -38,6 +38,15 @@ interface ColumnMapping {
   type: string
 }
 
+function parsePortugueseNumber(raw: any): number {
+  if (typeof raw === 'number') return raw
+  const str = String(raw)
+    .replace(/[€\s]/g, '')   // remove € e espaços
+    .replace(/\./g, '')       // remove pontos (separador de milhar)
+    .replace(',', '.')        // substitui vírgula por ponto decimal
+  return parseFloat(str)
+}
+
 export default function BankDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const [bankId, setBankId] = useState('')
   const [bank, setBank] = useState<Bank | null>(null)
@@ -188,12 +197,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
           } else { txDate = String(rawDate) }
         }
 
-        let amount: number
-        if (typeof rawAmount === 'number') {
-          amount = rawAmount
-        } else {
-          amount = parseFloat(String(rawAmount).replace(/[^\d,.\-]/g, '').replace(',', '.'))
-        }
+        let amount = parsePortugueseNumber(rawAmount)
         if (isNaN(amount)) continue
 
         if (rawType.toLowerCase().includes('déb') || rawType.toLowerCase().includes('deb')) {
@@ -202,9 +206,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
           amount = Math.abs(amount)
         }
 
-        const balance = balanceCol >= 0
-          ? parseFloat(String(row[balanceCol] ?? '').replace(/[^\d,.\-]/g, '').replace(',', '.'))
-          : null
+        const balance = balanceCol >= 0 ? parsePortugueseNumber(row[balanceCol]) : null
 
         const codeStr = `${bankId}|${txDate}|${amount}|${rawDesc}`
         const importCode = await generateHash(codeStr)
@@ -268,15 +270,10 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
           </div>
           <div className="flex gap-3">
             {pending > 0 && (
-              <button
-                onClick={validateAll}
-                disabled={validatingAll}
-                className="btn-secondary"
-              >
+              <button onClick={validateAll} disabled={validatingAll} className="btn-secondary">
                 {validatingAll
                   ? <><Loader2 className="w-4 h-4 animate-spin" /> A validar...</>
-                  : <><CheckCircle className="w-4 h-4" /> Validar Todas ({pending})</>
-                }
+                  : <><CheckCircle className="w-4 h-4" /> Validar Todas ({pending})</>}
               </button>
             )}
             <button className="btn-primary" onClick={() => { setShowImport(true); setImportStep('upload') }}>
@@ -364,11 +361,9 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
                       {tx.balance != null ? formatCurrency(tx.balance) : '—'}
                     </td>
                     <td className="table-cell">
-                      {tx.suggested_type ? (
-                        <span className="text-xs text-blue-600">{tx.suggested_type}</span>
-                      ) : (
-                        <span className="text-xs text-gray-400">—</span>
-                      )}
+                      {tx.suggested_type
+                        ? <span className="text-xs text-blue-600">{tx.suggested_type}</span>
+                        : <span className="text-xs text-gray-400">—</span>}
                     </td>
                     <td className="table-cell">
                       {tx.status === 'validado' ? (
