@@ -44,6 +44,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [loading, setLoading] = useState(true)
   const [importing, setImporting] = useState(false)
+  const [validatingAll, setValidatingAll] = useState(false)
   const [showImport, setShowImport] = useState(false)
   const [filterStatus, setFilterStatus] = useState<'all' | 'por_validar' | 'validado' | 'ignorado'>('all')
   const [importStep, setImportStep] = useState<'upload' | 'mapping' | 'preview'>('upload')
@@ -76,6 +77,19 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     } finally {
       setLoading(false)
     }
+  }
+
+  async function validateAll() {
+    const pending = transactions.filter(t => t.status === 'por_validar')
+    if (pending.length === 0) return
+    setValidatingAll(true)
+    await supabase
+      .from('bank_transactions')
+      .update({ status: 'validado' })
+      .eq('bank_id', bankId)
+      .eq('status', 'por_validar')
+    await fetchData()
+    setValidatingAll(false)
   }
 
   async function handleFileSelect(file: File) {
@@ -252,9 +266,23 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
             <h1 className="text-2xl font-bold text-gray-900">{bank?.name ?? 'Banco'}</h1>
             {bank?.iban && <p className="text-sm text-gray-500 font-mono mt-0.5">{bank.iban}</p>}
           </div>
-          <button className="btn-primary" onClick={() => { setShowImport(true); setImportStep('upload') }}>
-            <Upload className="w-4 h-4" /> Importar Extrato
-          </button>
+          <div className="flex gap-3">
+            {pending > 0 && (
+              <button
+                onClick={validateAll}
+                disabled={validatingAll}
+                className="btn-secondary"
+              >
+                {validatingAll
+                  ? <><Loader2 className="w-4 h-4 animate-spin" /> A validar...</>
+                  : <><CheckCircle className="w-4 h-4" /> Validar Todas ({pending})</>
+                }
+              </button>
+            )}
+            <button className="btn-primary" onClick={() => { setShowImport(true); setImportStep('upload') }}>
+              <Upload className="w-4 h-4" /> Importar Extrato
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-4 gap-4 mb-6">
