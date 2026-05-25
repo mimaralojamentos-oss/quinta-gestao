@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase'
 import { formatCurrency, getMonthLabel, getCurrentMonth } from '@/lib/utils'
 import { Plus, ChevronLeft, ChevronRight, CheckCircle, Clock, Banknote, Building } from 'lucide-react'
 import PaymentModal from './PaymentModal'
+import { useAuth } from '@/lib/auth-context'
 
 interface LeaseWithDetails {
   id: string
@@ -31,6 +32,7 @@ const tipoLabels: Record<string, string> = {
 }
 
 export default function PagamentosPage() {
+  const { isAdmin } = useAuth()
   const [leases, setLeases] = useState<LeaseWithDetails[]>([])
   const [loading, setLoading] = useState(true)
   const [currentMonth, setCurrentMonth] = useState(getCurrentMonth())
@@ -158,7 +160,7 @@ export default function PagamentosPage() {
                   <th className="table-header">Pago</th>
                   <th className="table-header">Método</th>
                   <th className="table-header">Saldo</th>
-                  <th className="table-header"></th>
+                  {isAdmin && <th className="table-header"></th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
@@ -218,15 +220,17 @@ export default function PagamentosPage() {
                           {lease.balance >= 0 ? '+' : ''}{formatCurrency(lease.balance)}
                         </span>
                       </td>
-                      <td className="table-cell">
-                        <button
-                          onClick={() => { setSelectedLease(lease); setShowModal(true) }}
-                          className="btn-primary text-xs py-1.5 px-3"
-                        >
-                          <Plus className="w-3 h-3" />
-                          Registar
-                        </button>
-                      </td>
+                      {isAdmin && (
+                        <td className="table-cell">
+                          <button
+                            onClick={() => { setSelectedLease(lease); setShowModal(true) }}
+                            className="btn-primary text-xs py-1.5 px-3"
+                          >
+                            <Plus className="w-3 h-3" />
+                            Registar
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   )
                 })}
@@ -236,7 +240,7 @@ export default function PagamentosPage() {
         )}
       </div>
 
-      {showModal && selectedLease && (
+      {showModal && selectedLease && isAdmin && (
         <PaymentModal
           lease={selectedLease}
           currentMonth={currentMonth}
