@@ -5,10 +5,12 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Expense } from '@/lib/types'
 import { formatCurrency, formatDate, categoryLabel } from '@/lib/utils'
-import { Plus, Search, Upload, FileText } from 'lucide-react'
+import { Plus, Search, FileText } from 'lucide-react'
 import ExpenseModal from './ExpenseModal'
+import { useAuth } from '@/lib/auth-context'
 
 export default function DespesasPage() {
+  const { isAdmin } = useAuth()
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -65,10 +67,12 @@ export default function DespesasPage() {
             <h1 className="text-2xl font-bold text-gray-900">Despesas</h1>
             <p className="text-sm text-gray-500 mt-1">{expenses.length} registos</p>
           </div>
-          <button className="btn-primary" onClick={() => { setEditExpense(null); setShowModal(true) }}>
-            <Plus className="w-4 h-4" />
-            Nova Despesa
-          </button>
+          {isAdmin && (
+            <button className="btn-primary" onClick={() => { setEditExpense(null); setShowModal(true) }}>
+              <Plus className="w-4 h-4" />
+              Nova Despesa
+            </button>
+          )}
         </div>
 
         <div className="grid grid-cols-3 gap-4 mb-6">
@@ -125,7 +129,7 @@ export default function DespesasPage() {
                   <th className="table-header">Valor</th>
                   <th className="table-header">Pagamento</th>
                   <th className="table-header">Fatura</th>
-                  <th className="table-header"></th>
+                  {isAdmin && <th className="table-header"></th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
@@ -161,14 +165,16 @@ export default function DespesasPage() {
                         </button>
                       ) : '—'}
                     </td>
-                    <td className="table-cell">
-                      <button onClick={() => { setEditExpense(expense); setShowModal(true) }}
-                        className="text-xs text-emerald-600 hover:underline font-medium">Editar</button>
-                    </td>
+                    {isAdmin && (
+                      <td className="table-cell">
+                        <button onClick={() => { setEditExpense(expense); setShowModal(true) }}
+                          className="text-xs text-emerald-600 hover:underline font-medium">Editar</button>
+                      </td>
+                    )}
                   </tr>
                 ))}
                 {filtered.length === 0 && (
-                  <tr><td colSpan={9} className="py-12 text-center text-gray-400 text-sm">Nenhuma despesa encontrada</td></tr>
+                  <tr><td colSpan={isAdmin ? 9 : 8} className="py-12 text-center text-gray-400 text-sm">Nenhuma despesa encontrada</td></tr>
                 )}
               </tbody>
             </table>
@@ -176,7 +182,7 @@ export default function DespesasPage() {
         )}
       </div>
 
-      {showModal && (
+      {showModal && isAdmin && (
         <ExpenseModal
           expense={editExpense}
           onClose={() => setShowModal(false)}
