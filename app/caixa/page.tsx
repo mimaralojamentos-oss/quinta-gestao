@@ -7,8 +7,10 @@ import { CashFundMovement } from '@/lib/types'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { Plus, TrendingUp, TrendingDown, Wallet } from 'lucide-react'
 import CashModal from './CashModal'
+import { useAuth } from '@/lib/auth-context'
 
 export default function CaixaPage() {
+  const { isAdmin } = useAuth()
   const [movements, setMovements] = useState<CashFundMovement[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
@@ -38,10 +40,12 @@ export default function CaixaPage() {
             <h1 className="text-2xl font-bold text-gray-900">Fundo de Caixa</h1>
             <p className="text-sm text-gray-500 mt-1">Controlo de saldo em caixa</p>
           </div>
-          <button className="btn-primary" onClick={() => setShowModal(true)}>
-            <Plus className="w-4 h-4" />
-            Novo Movimento
-          </button>
+          {isAdmin && (
+            <button className="btn-primary" onClick={() => setShowModal(true)}>
+              <Plus className="w-4 h-4" />
+              Novo Movimento
+            </button>
+          )}
         </div>
 
         <div className="grid grid-cols-3 gap-5 mb-6">
@@ -89,7 +93,7 @@ export default function CaixaPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {movements.map((m, i) => (
+                {movements.map((m) => (
                   <tr key={m.id} className="hover:bg-gray-50">
                     <td className="table-cell text-sm">{formatDate(m.movement_date)}</td>
                     <td className="table-cell font-medium text-gray-800">{m.description}</td>
@@ -119,7 +123,7 @@ export default function CaixaPage() {
         )}
       </div>
 
-      {showModal && (
+      {showModal && isAdmin && (
         <CashModal
           onClose={() => setShowModal(false)}
           onSaved={() => { setShowModal(false); fetchData() }}
