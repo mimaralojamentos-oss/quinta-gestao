@@ -8,12 +8,14 @@ import { formatCurrency, formatDate } from '@/lib/utils'
 import { Plus, Search, FileText, Phone, Mail } from 'lucide-react'
 import TenantModal from './TenantModal'
 import LeaseModal from './LeaseModal'
+import { useAuth } from '@/lib/auth-context'
 
 interface TenantWithLease extends Tenant {
   leases?: (Lease & { space?: any })[]
 }
 
 export default function InquilinosPage() {
+  const { isAdmin } = useAuth()
   const [tenants, setTenants] = useState<TenantWithLease[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -54,10 +56,12 @@ export default function InquilinosPage() {
             <h1 className="text-2xl font-bold text-gray-900">Inquilinos</h1>
             <p className="text-sm text-gray-500 mt-1">{tenants.length} inquilinos registados</p>
           </div>
-          <button className="btn-primary" onClick={() => { setEditTenant(null); setShowTenantModal(true) }}>
-            <Plus className="w-4 h-4" />
-            Novo Inquilino
-          </button>
+          {isAdmin && (
+            <button className="btn-primary" onClick={() => { setEditTenant(null); setShowTenantModal(true) }}>
+              <Plus className="w-4 h-4" />
+              Novo Inquilino
+            </button>
+          )}
         </div>
 
         <div className="relative max-w-xs mb-6">
@@ -82,7 +86,7 @@ export default function InquilinosPage() {
                   <th className="table-header">Renda</th>
                   <th className="table-header">Contrato</th>
                   <th className="table-header">Notas</th>
-                  <th className="table-header"></th>
+                  {isAdmin && <th className="table-header"></th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
@@ -137,20 +141,22 @@ export default function InquilinosPage() {
                       <td className="table-cell max-w-[180px]">
                         <span className="text-xs text-gray-500 truncate block">{tenant.notes ?? '—'}</span>
                       </td>
-                      <td className="table-cell">
-                        <div className="flex gap-2">
-                          <button onClick={() => { setEditTenant(tenant); setShowTenantModal(true) }}
-                            className="text-xs text-emerald-600 hover:underline font-medium">Editar</button>
-                          <button onClick={() => { setSelectedTenant(tenant); setShowLeaseModal(true) }}
-                            className="text-xs text-blue-600 hover:underline font-medium">Contrato</button>
-                        </div>
-                      </td>
+                      {isAdmin && (
+                        <td className="table-cell">
+                          <div className="flex gap-2">
+                            <button onClick={() => { setEditTenant(tenant); setShowTenantModal(true) }}
+                              className="text-xs text-emerald-600 hover:underline font-medium">Editar</button>
+                            <button onClick={() => { setSelectedTenant(tenant); setShowLeaseModal(true) }}
+                              className="text-xs text-blue-600 hover:underline font-medium">Contrato</button>
+                          </div>
+                        </td>
+                      )}
                     </tr>
                   )
                 })}
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="py-12 text-center text-gray-400 text-sm">
+                    <td colSpan={isAdmin ? 8 : 7} className="py-12 text-center text-gray-400 text-sm">
                       Nenhum inquilino encontrado
                     </td>
                   </tr>
@@ -161,7 +167,7 @@ export default function InquilinosPage() {
         )}
       </div>
 
-      {showTenantModal && (
+      {showTenantModal && isAdmin && (
         <TenantModal
           tenant={editTenant}
           onClose={() => setShowTenantModal(false)}
@@ -169,7 +175,7 @@ export default function InquilinosPage() {
         />
       )}
 
-      {showLeaseModal && selectedTenant && (
+      {showLeaseModal && selectedTenant && isAdmin && (
         <LeaseModal
           tenant={selectedTenant}
           onClose={() => setShowLeaseModal(false)}
