@@ -1,7 +1,5 @@
 'use client'
 
-export const dynamic = 'force-dynamic'
-
 import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
@@ -45,7 +43,6 @@ export default function Dashboard() {
         payments.filter(p => p.tipo === 'renda' || !p.tipo).map(p => p.lease_id)
       )
       const rentPayments = payments.filter(p => p.tipo === 'renda' || !p.tipo)
-
       const pendingLeases = leases.filter(l => !paidLeaseIds.has(l.id))
 
       setStats({
@@ -167,7 +164,7 @@ export default function Dashboard() {
                 ))}
               </div>
             )}
-            <Link href="/pagamentos" className="mt-4 text-xs text-emerald-600 hover:underline font-medium block">
+            <Link prefetch={false} href="/pagamentos" className="mt-4 text-xs text-emerald-600 hover:underline font-medium block">
               Ver todos os pagamentos →
             </Link>
           </div>
@@ -199,7 +196,7 @@ export default function Dashboard() {
                 ))}
               </div>
             )}
-            <Link href="/alertas" className="mt-4 text-xs text-emerald-600 hover:underline font-medium block">
+            <Link prefetch={false} href="/alertas" className="mt-4 text-xs text-emerald-600 hover:underline font-medium block">
               Ver todos os alertas →
             </Link>
           </div>
