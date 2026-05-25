@@ -13,7 +13,6 @@ interface Profile {
   name: string
   role: 'admin' | 'viewer'
   created_at: string
-  email?: string
 }
 
 export default function UtilizadoresPage() {
@@ -139,7 +138,7 @@ export default function UtilizadoresPage() {
                         </span>
                       </td>
                       <td className="table-cell">
-                        {!isCurrentUser && (
+                        {!isCurrentUser ? (
                           <select
                             value={profile.role}
                             onChange={e => changeRole(profile.id, e.target.value as 'admin' | 'viewer')}
@@ -148,8 +147,7 @@ export default function UtilizadoresPage() {
                             <option value="admin">Tornar Administrador</option>
                             <option value="viewer">Tornar Visualizador</option>
                           </select>
-                        )}
-                        {isCurrentUser && (
+                        ) : (
                           <span className="text-xs text-gray-400">Não pode alterar o seu próprio papel</span>
                         )}
                       </td>
@@ -177,7 +175,7 @@ export default function UtilizadoresPage() {
       </div>
 
       {showModal && (
-        <InviteModal
+        <CreateUserModal
           onClose={() => setShowModal(false)}
           onSaved={() => { setShowModal(false); fetchUsers() }}
         />
@@ -186,11 +184,10 @@ export default function UtilizadoresPage() {
   )
 }
 
-function InviteModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+function CreateUserModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
   const [form, setForm] = useState({ email: '', name: '', password: '', role: 'viewer' })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const supabase = createClient()
 
   async function handleCreate() {
     if (!form.email || !form.name || !form.password) {
@@ -204,16 +201,16 @@ function InviteModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =>
     setSaving(true)
     setError('')
 
-    const { error: err } = await supabase.auth.signUp({
-      email: form.email,
-      password: form.password,
-      options: {
-        data: { name: form.name, role: form.role }
-      }
+    const res = await fetch('/api/create-user', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(form),
     })
 
+    const data = await res.json()
     setSaving(false)
-    if (err) { setError(err.message); return }
+
+    if (data.error) { setError(data.error); return }
     onSaved()
   }
 
