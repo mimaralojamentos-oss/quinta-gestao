@@ -7,12 +7,14 @@ import { Space, Lease } from '@/lib/types'
 import { formatCurrency, spaceTypeLabel } from '@/lib/utils'
 import { Plus, Search, Building2, Home, Warehouse } from 'lucide-react'
 import SpaceModal from './SpaceModal'
+import { useAuth } from '@/lib/auth-context'
 
 interface SpaceWithLease extends Space {
   activeLeases?: Lease[]
 }
 
 export default function EspacosPage() {
+  const { isAdmin } = useAuth()
   const [spaces, setSpaces] = useState<SpaceWithLease[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -66,10 +68,12 @@ export default function EspacosPage() {
             <h1 className="text-2xl font-bold text-gray-900">Espaços</h1>
             <p className="text-sm text-gray-500 mt-1">{spaces.length} espaços registados</p>
           </div>
-          <button className="btn-primary" onClick={() => { setEditSpace(null); setShowModal(true) }}>
-            <Plus className="w-4 h-4" />
-            Novo Espaço
-          </button>
+          {isAdmin && (
+            <button className="btn-primary" onClick={() => { setEditSpace(null); setShowModal(true) }}>
+              <Plus className="w-4 h-4" />
+              Novo Espaço
+            </button>
+          )}
         </div>
 
         <div className="flex gap-3 mb-6">
@@ -118,7 +122,7 @@ export default function EspacosPage() {
                   <th className="table-header">Renda Mensal</th>
                   <th className="table-header">Condição</th>
                   <th className="table-header">Notas</th>
-                  <th className="table-header"></th>
+                  {isAdmin && <th className="table-header"></th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
@@ -158,20 +162,22 @@ export default function EspacosPage() {
                       <td className="table-cell max-w-[200px]">
                         {space.notes ? <span className="text-xs text-gray-500 truncate block">{space.notes}</span> : <span className="text-gray-400">—</span>}
                       </td>
-                      <td className="table-cell">
-                        <button
-                          onClick={() => { setEditSpace(space); setShowModal(true) }}
-                          className="text-xs text-emerald-600 hover:underline font-medium"
-                        >
-                          Editar
-                        </button>
-                      </td>
+                      {isAdmin && (
+                        <td className="table-cell">
+                          <button
+                            onClick={() => { setEditSpace(space); setShowModal(true) }}
+                            className="text-xs text-emerald-600 hover:underline font-medium"
+                          >
+                            Editar
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   )
                 })}
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="py-12 text-center text-gray-400 text-sm">
+                    <td colSpan={isAdmin ? 8 : 7} className="py-12 text-center text-gray-400 text-sm">
                       Nenhum espaço encontrado
                     </td>
                   </tr>
@@ -182,7 +188,7 @@ export default function EspacosPage() {
         )}
       </div>
 
-      {showModal && (
+      {showModal && isAdmin && (
         <SpaceModal
           space={editSpace}
           onClose={() => setShowModal(false)}
