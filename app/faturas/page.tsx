@@ -142,9 +142,9 @@ export default function FaturasPage() {
   }
 
   async function viewPDF(filePath: string) {
-    const { data } = await supabase.storage.from('invoices').createSignedUrl(filePath, 60)
-    if (data?.signedUrl) window.open(data.signedUrl, '_blank')
-  }
+    const { data } = supabase.storage.from('invoices').getPublicUrl(filePath)
+    if (data?.publicUrl) window.open(data.publicUrl, '_blank')
+}
 
   const filtered = invoices.filter(inv => {
     const matchSearch = !search ||
