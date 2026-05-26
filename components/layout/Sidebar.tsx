@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, Building2, Users, CreditCard,
   Receipt, Wallet, Bell, Zap, Home, LogOut, ShieldCheck,
-  TrendingUp, Landmark, ChevronDown, ChevronRight,
+  TrendingUp, Landmark, ChevronDown, ChevronRight, FileText,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/lib/auth-context'
@@ -17,6 +17,7 @@ const navItems = [
   { href: '/inquilinos', label: 'Inquilinos', icon: Users },
   { href: '/eletricidade', label: 'Eletricidade', icon: Zap },
   { href: '/despesas', label: 'Despesas', icon: Receipt },
+  { href: '/faturas', label: 'Faturas', icon: FileText },
   { href: '/alertas', label: 'Alertas', icon: Bell },
 ]
 
