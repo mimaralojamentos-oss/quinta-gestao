@@ -60,7 +60,7 @@ export default function FaturasPage() {
   const [filterOwner, setFilterOwner] = useState('all')
   const [showUpload, setShowUpload] = useState(false)
   const [uploading, setUploading] = useState(false)
-  const [uploadForm, setUploadForm] = useState({ owner: '', files: [] as File[] })
+  const [files, setFiles] = useState<File[]>([])
   const [uploadError, setUploadError] = useState('')
   const [uploadResults, setUploadResults] = useState<UploadResult[]>([])
   const [uploadDone, setUploadDone] = useState(false)
@@ -79,8 +79,8 @@ export default function FaturasPage() {
   }
 
   async function handleUpload() {
-    if (uploadForm.files.length === 0 || !uploadForm.owner) {
-      setUploadError('Selecione pelo menos um ficheiro e o proprietário')
+    if (files.length === 0) {
+      setUploadError('Selecione pelo menos um ficheiro PDF')
       return
     }
 
@@ -88,14 +88,14 @@ export default function FaturasPage() {
     setUploadError('')
     setUploadDone(false)
 
-    const results: UploadResult[] = uploadForm.files.map(f => ({
+    const results: UploadResult[] = files.map(f => ({
       fileName: f.name,
       status: 'pending'
     }))
     setUploadResults(results)
 
-    for (let i = 0; i < uploadForm.files.length; i++) {
-      const file = uploadForm.files[i]
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i]
 
       setUploadResults(prev => prev.map((r, idx) =>
         idx === i ? { ...r, status: 'processing' } : r
@@ -104,7 +104,6 @@ export default function FaturasPage() {
       try {
         const formData = new FormData()
         formData.append('file', file)
-        formData.append('owner', uploadForm.owner)
 
         const res = await fetch('/api/process-invoice', {
           method: 'POST',
@@ -136,7 +135,7 @@ export default function FaturasPage() {
 
   function handleClose() {
     setShowUpload(false)
-    setUploadForm({ owner: '', files: [] })
+    setFiles([])
     setUploadResults([])
     setUploadDone(false)
     setUploadError('')
@@ -252,7 +251,7 @@ export default function FaturasPage() {
                         {categoryLabels[inv.category ?? 'outros'] ?? 'Outros'}
                       </span>
                     </td>
-                    <td className="table-cell text-sm">{inv.owner ?? '—'}</td>
+                    <td className="table-cell text-sm">{inv.owner ?? 'N/D'}</td>
                     <td className="table-cell font-semibold text-red-600">
                       {inv.amount ? formatCurrency(inv.amount) : '—'}
                     </td>
@@ -287,34 +286,28 @@ export default function FaturasPage() {
               <button onClick={handleClose}><X className="w-5 h-5 text-gray-400" /></button>
             </div>
 
-            {!uploadDone ? (
+            {!uploading && !uploadDone && (
               <div className="space-y-4">
                 <div>
-                  <label className="label">Proprietário *</label>
-                  <input className="input" placeholder="ex: Miguel Severino"
-                    value={uploadForm.owner}
-                    onChange={e => setUploadForm(f => ({ ...f, owner: e.target.value }))} />
-                </div>
-                <div>
-                  <label className="label">Ficheiros PDF * <span className="text-gray-400 font-normal">(pode selecionar vários)</span></label>
+                  <label className="label">Ficheiros PDF <span className="text-gray-400 font-normal">(pode selecionar vários)</span></label>
                   <label className="flex flex-col items-center gap-3 border-2 border-dashed border-gray-200 rounded-xl p-6 cursor-pointer hover:border-emerald-400 transition-colors">
                     <Upload className="w-8 h-8 text-gray-300" />
                     <div className="text-center">
                       <p className="font-medium text-gray-700 text-sm">
-                        {uploadForm.files.length > 0
-                          ? `${uploadForm.files.length} ficheiro(s) selecionado(s)`
+                        {files.length > 0
+                          ? `${files.length} ficheiro(s) selecionado(s)`
                           : 'Clica para selecionar PDFs'}
                       </p>
-                      <p className="text-xs text-gray-400 mt-1">Podes selecionar múltiplos PDFs de uma vez</p>
+                      <p className="text-xs text-gray-400 mt-1">O proprietário é identificado automaticamente pelo NIF</p>
                     </div>
                     <input type="file" accept=".pdf" multiple className="hidden"
-                      onChange={e => setUploadForm(f => ({ ...f, files: Array.from(e.target.files ?? []) }))} />
+                      onChange={e => setFiles(Array.from(e.target.files ?? []))} />
                   </label>
-                  {uploadForm.files.length > 0 && (
-                    <div className="mt-2 space-y-1 max-h-32 overflow-y-auto">
-                      {uploadForm.files.map((f, i) => (
+                  {files.length > 0 && (
+                    <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
+                      {files.map((f, i) => (
                         <p key={i} className="text-xs text-gray-500 flex items-center gap-1">
-                          <FileText className="w-3 h-3" /> {f.name}
+                          <FileText className="w-3 h-3 flex-shrink-0" /> {f.name}
                         </p>
                       ))}
                     </div>
@@ -322,25 +315,12 @@ export default function FaturasPage() {
                 </div>
                 {uploadError && <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg">{uploadError}</p>}
               </div>
-            ) : (
-              <div className="space-y-2">
-                <p className="text-sm text-gray-600 mb-3">Processamento concluído:</p>
-                {uploadResults.map((r, i) => (
-                  <div key={i} className={`flex items-center gap-3 p-3 rounded-lg ${r.status === 'success' ? 'bg-emerald-50' : r.status === 'error' ? 'bg-red-50' : 'bg-gray-50'}`}>
-                    {r.status === 'success' && <CheckCircle className="w-4 h-4 text-emerald-600 flex-shrink-0" />}
-                    {r.status === 'error' && <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />}
-                    {r.status === 'processing' && <Loader2 className="w-4 h-4 animate-spin text-blue-600 flex-shrink-0" />}
-                    <div className="min-w-0">
-                      <p className="text-xs font-medium text-gray-800 truncate">{r.fileName}</p>
-                      {r.error && <p className="text-xs text-red-600">{r.error}</p>}
-                    </div>
-                  </div>
-                ))}
-              </div>
             )}
 
-            {uploading && (
-              <div className="mt-4 space-y-2">
+            {(uploading || uploadDone) && (
+              <div className="space-y-2">
+                {!uploadDone && <p className="text-sm text-gray-600 mb-3">A processar faturas com IA...</p>}
+                {uploadDone && <p className="text-sm text-gray-600 mb-3">Processamento concluído!</p>}
                 {uploadResults.map((r, i) => (
                   <div key={i} className={`flex items-center gap-3 p-3 rounded-lg ${
                     r.status === 'success' ? 'bg-emerald-50' :
@@ -351,7 +331,10 @@ export default function FaturasPage() {
                     {r.status === 'error' && <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />}
                     {r.status === 'processing' && <Loader2 className="w-4 h-4 animate-spin text-blue-600 flex-shrink-0" />}
                     {r.status === 'pending' && <div className="w-4 h-4 rounded-full border-2 border-gray-300 flex-shrink-0" />}
-                    <p className="text-xs font-medium text-gray-800 truncate">{r.fileName}</p>
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium text-gray-800 truncate">{r.fileName}</p>
+                      {r.error && <p className="text-xs text-red-600">{r.error}</p>}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -361,11 +344,10 @@ export default function FaturasPage() {
               <button className="btn-secondary" onClick={handleClose}>
                 {uploadDone ? 'Fechar' : 'Cancelar'}
               </button>
-              {!uploadDone && (
-                <button className="btn-primary" onClick={handleUpload} disabled={uploading}>
-                  {uploading
-                    ? <><Loader2 className="w-4 h-4 animate-spin" /> A processar {uploadResults.filter(r => r.status === 'success' || r.status === 'error').length}/{uploadForm.files.length}...</>
-                    : <><FileText className="w-4 h-4" /> Importar {uploadForm.files.length > 0 ? `${uploadForm.files.length} fatura(s)` : 'Faturas'}</>}
+              {!uploadDone && !uploading && (
+                <button className="btn-primary" onClick={handleUpload}>
+                  <FileText className="w-4 h-4" />
+                  Importar {files.length > 0 ? `${files.length} fatura(s)` : ''}
                 </button>
               )}
             </div>
