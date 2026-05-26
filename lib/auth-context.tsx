@@ -25,22 +25,22 @@ const AuthContext = createContext<AuthContextType>({
   signOut: async () => {},
 })
 
+const supabaseClient = createClient()
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
   const [loading, setLoading] = useState(true)
-  const supabaseRef = useRef(createClient())
-  const supabase = supabaseRef.current
 
   useEffect(() => {
     let mounted = true
 
     async function getUser() {
-      const { data: { user } } = await supabase.auth.getUser()
+      const { data: { user } } = await supabaseClient.auth.getUser()
       if (!mounted) return
       setUser(user)
       if (user) {
-        const { data } = await supabase
+        const { data } = await supabaseClient
           .from('profiles')
           .select('*')
           .eq('id', user.id)
@@ -52,7 +52,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     getUser()
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+    const { data: { subscription } } = supabaseClient.auth.onAuthStateChange(async (event, session) => {
       if (!mounted) return
       if (event === 'SIGNED_OUT') {
         setUser(null)
@@ -62,7 +62,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       if (event === 'SIGNED_IN' && session?.user) {
         setUser(session.user)
-        const { data } = await supabase
+        const { data } = await supabaseClient
           .from('profiles')
           .select('*')
           .eq('id', session.user.id)
@@ -78,7 +78,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   async function signOut() {
-    await supabase.auth.signOut()
+    await supabaseClient.auth.signOut()
     window.location.href = '/login'
   }
 
