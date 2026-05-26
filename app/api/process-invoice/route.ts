@@ -64,7 +64,8 @@ export async function POST(request: Request) {
     }
 
     // Guardar PDF no Supabase Storage
-    const fileName = `${Date.now()}_${file.name}`
+    const cleanName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+    const fileName = `${Date.now()}_${cleanName}`
     await supabase.storage.from('invoices').upload(fileName, bytes, {
       contentType: 'application/pdf'
     })
