@@ -1,5 +1,5 @@
 'use client'
-import { createContext, useContext, useEffect, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import type { User } from '@supabase/supabase-js'
 
@@ -38,7 +38,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async function getUser() {
       const { data: { user } } = await supabaseClient.auth.getUser()
       if (!mounted) return
+
       setUser(user)
+
       if (user) {
         const { data } = await supabaseClient
           .from('profiles')
@@ -47,6 +49,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           .single()
         if (mounted) setProfile(data)
       }
+
       if (mounted) setLoading(false)
     }
 
@@ -54,21 +57,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const { data: { subscription } } = supabaseClient.auth.onAuthStateChange(async (event, session) => {
       if (!mounted) return
+
+      // Só reagir a SIGNED_OUT — ignorar TOKEN_REFRESHED, INITIAL_SESSION, etc.
       if (event === 'SIGNED_OUT') {
         setUser(null)
         setProfile(null)
         setLoading(false)
         return
       }
-      if (event === 'SIGNED_IN' && session?.user) {
-        setUser(session.user)
-        const { data } = await supabaseClient
-          .from('profiles')
-          .select('*')
-          .eq('id', session.user.id)
-          .single()
-        if (mounted) setProfile(data)
-      }
+
+      // Ignorar todos os outros eventos (TOKEN_REFRESHED, USER_UPDATED, etc.)
+      // O utilizador já foi carregado no getUser() acima
     })
 
     return () => {
