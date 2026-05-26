@@ -12,6 +12,8 @@ import { useAuth } from '@/lib/auth-context'
 
 interface TenantWithLease extends Tenant {
   leases?: (Lease & { space?: any })[]
+  spaces?: { ref: string }[]
+  debt?: number
 }
 
 export default function InquilinosPage() {
@@ -28,17 +30,44 @@ export default function InquilinosPage() {
 
   async function fetchTenants() {
     setLoading(true)
-    const { data: tenantsData } = await supabase.from('tenants').select('*').order('name')
+
+    const { data: tenantsData } = await supabase
+      .from('tenants')
+      .select('*')
+      .order('name')
+
     const { data: leasesData } = await supabase
       .from('leases')
       .select('*, space:spaces(*)')
 
-    const tenantsWithLeases = (tenantsData ?? []).map(t => ({
-      ...t,
-      leases: (leasesData ?? []).filter(l => l.tenant_id === t.id)
-    }))
+    const { data: spacesData } = await supabase
+      .from('spaces')
+      .select('ref, tenant_id')
+      .not('tenant_id', 'is', null)
 
-    setTenants(tenantsWithLeases)
+    // Buscar rendas por pagar (payment_date a null)
+    const { data: paymentsData } = await supabase
+      .from('rent_payments')
+      .select('amount, lease_id')
+      .is('payment_date', null)
+
+    const tenantsWithData = (tenantsData ?? []).map(t => {
+      // Contratos deste inquilino
+      const leases = (leasesData ?? []).filter(l => l.tenant_id === t.id)
+
+      // Espaços diretamente associados via tenant_id
+      const spaces = (spacesData ?? []).filter(s => s.tenant_id === t.id)
+
+      // Calcular dívida: rendas por pagar nos contratos deste inquilino
+      const leaseIds = leases.map(l => l.id)
+      const debt = (paymentsData ?? [])
+        .filter(p => leaseIds.includes(p.lease_id))
+        .reduce((sum, p) => sum + (p.amount ?? 0), 0)
+
+      return { ...t, leases, spaces, debt }
+    })
+
+    setTenants(tenantsWithData)
     setLoading(false)
   }
 
@@ -84,6 +113,7 @@ export default function InquilinosPage() {
                   <th className="table-header">NIF</th>
                   <th className="table-header">Espaço(s)</th>
                   <th className="table-header">Renda</th>
+                  <th className="table-header">Dívida</th>
                   <th className="table-header">Contrato</th>
                   <th className="table-header">Notas</th>
                   {isAdmin && <th className="table-header"></th>}
@@ -92,6 +122,7 @@ export default function InquilinosPage() {
               <tbody className="divide-y divide-gray-50">
                 {filtered.map(tenant => {
                   const activeLease = tenant.leases?.find(l => l.status === 'ativo')
+                  const hasDebt = (tenant.debt ?? 0) > 0
                   return (
                     <tr key={tenant.id} className="hover:bg-gray-50 transition-colors">
                       <td className="table-cell">
@@ -115,13 +146,33 @@ export default function InquilinosPage() {
                       </td>
                       <td className="table-cell text-sm">{tenant.nif ?? '—'}</td>
                       <td className="table-cell">
-                        {tenant.leases?.filter(l => l.status === 'ativo').map(l => (
-                          <span key={l.id} className="badge-verde mr-1">{l.space?.ref}</span>
-                        ))}
-                        {!activeLease && <span className="text-gray-400 text-sm">—</span>}
+                        <div className="flex flex-wrap gap-1">
+                          {tenant.spaces && tenant.spaces.length > 0
+                            ? tenant.spaces.map(s => (
+                                <span key={s.ref} className="badge-verde">{s.ref}</span>
+                              ))
+                            : tenant.leases?.filter(l => l.status === 'ativo').map(l => (
+                                <span key={l.id} className="badge-verde">{l.space?.ref}</span>
+                              ))
+                          }
+                          {(!tenant.spaces || tenant.spaces.length === 0) && !activeLease && (
+                            <span className="text-gray-400 text-sm">—</span>
+                          )}
+                        </div>
                       </td>
                       <td className="table-cell font-medium">
                         {activeLease ? formatCurrency(activeLease.monthly_rent) : '—'}
+                      </td>
+                      <td className="table-cell">
+                        {hasDebt ? (
+                          <span className="inline-flex items-center gap-1 text-sm font-semibold text-red-600 bg-red-50 px-2 py-0.5 rounded-full">
+                            {formatCurrency(tenant.debt!)}
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center text-sm text-emerald-600 font-medium">
+                            ✓ Sem dívida
+                          </span>
+                        )}
                       </td>
                       <td className="table-cell text-sm">
                         {activeLease?.start_date ? (
@@ -156,7 +207,7 @@ export default function InquilinosPage() {
                 })}
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={isAdmin ? 8 : 7} className="py-12 text-center text-gray-400 text-sm">
+                    <td colSpan={isAdmin ? 9 : 8} className="py-12 text-center text-gray-400 text-sm">
                       Nenhum inquilino encontrado
                     </td>
                   </tr>
