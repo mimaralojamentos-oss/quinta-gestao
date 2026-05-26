@@ -4,7 +4,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Plus, Search, FileText, Upload, Loader2, X, Eye } from 'lucide-react'
+import { Plus, Search, FileText, Upload, Loader2, X, Eye, CheckCircle, AlertCircle } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 
 interface Invoice {
@@ -45,6 +45,12 @@ const categoryLabels: Record<string, string> = {
   outros: 'Outros',
 }
 
+interface UploadResult {
+  fileName: string
+  status: 'pending' | 'processing' | 'success' | 'error'
+  error?: string
+}
+
 export default function FaturasPage() {
   const { isAdmin } = useAuth()
   const [invoices, setInvoices] = useState<Invoice[]>([])
@@ -54,8 +60,10 @@ export default function FaturasPage() {
   const [filterOwner, setFilterOwner] = useState('all')
   const [showUpload, setShowUpload] = useState(false)
   const [uploading, setUploading] = useState(false)
-  const [uploadForm, setUploadForm] = useState({ owner: '', file: null as File | null })
+  const [uploadForm, setUploadForm] = useState({ owner: '', files: [] as File[] })
   const [uploadError, setUploadError] = useState('')
+  const [uploadResults, setUploadResults] = useState<UploadResult[]>([])
+  const [uploadDone, setUploadDone] = useState(false)
   const supabase = createClient()
 
   useEffect(() => { fetchInvoices() }, [])
@@ -71,33 +79,67 @@ export default function FaturasPage() {
   }
 
   async function handleUpload() {
-    if (!uploadForm.file || !uploadForm.owner) {
-      setUploadError('Selecione um ficheiro e o proprietário')
+    if (uploadForm.files.length === 0 || !uploadForm.owner) {
+      setUploadError('Selecione pelo menos um ficheiro e o proprietário')
       return
     }
+
     setUploading(true)
     setUploadError('')
+    setUploadDone(false)
 
-    const formData = new FormData()
-    formData.append('file', uploadForm.file)
-    formData.append('owner', uploadForm.owner)
+    const results: UploadResult[] = uploadForm.files.map(f => ({
+      fileName: f.name,
+      status: 'pending'
+    }))
+    setUploadResults(results)
 
-    const res = await fetch('/api/process-invoice', {
-      method: 'POST',
-      body: formData,
-    })
+    for (let i = 0; i < uploadForm.files.length; i++) {
+      const file = uploadForm.files[i]
 
-    const data = await res.json()
-    setUploading(false)
+      setUploadResults(prev => prev.map((r, idx) =>
+        idx === i ? { ...r, status: 'processing' } : r
+      ))
 
-    if (data.error) {
-      setUploadError(data.error)
-      return
+      try {
+        const formData = new FormData()
+        formData.append('file', file)
+        formData.append('owner', uploadForm.owner)
+
+        const res = await fetch('/api/process-invoice', {
+          method: 'POST',
+          body: formData,
+        })
+
+        const data = await res.json()
+
+        if (data.error) {
+          setUploadResults(prev => prev.map((r, idx) =>
+            idx === i ? { ...r, status: 'error', error: data.error } : r
+          ))
+        } else {
+          setUploadResults(prev => prev.map((r, idx) =>
+            idx === i ? { ...r, status: 'success' } : r
+          ))
+        }
+      } catch (e: any) {
+        setUploadResults(prev => prev.map((r, idx) =>
+          idx === i ? { ...r, status: 'error', error: e.message } : r
+        ))
+      }
     }
 
-    setShowUpload(false)
-    setUploadForm({ owner: '', file: null })
+    setUploading(false)
+    setUploadDone(true)
     fetchInvoices()
+  }
+
+  function handleClose() {
+    setShowUpload(false)
+    setUploadForm({ owner: '', files: [] })
+    setUploadResults([])
+    setUploadDone(false)
+    setUploadError('')
   }
 
   async function viewPDF(filePath: string) {
@@ -130,12 +172,11 @@ export default function FaturasPage() {
           {isAdmin && (
             <button className="btn-primary" onClick={() => setShowUpload(true)}>
               <Plus className="w-4 h-4" />
-              Importar Fatura
+              Importar Faturas
             </button>
           )}
         </div>
 
-        {/* Summary */}
         <div className="grid grid-cols-4 gap-4 mb-6">
           <div className="card">
             <p className="text-sm text-gray-500 mb-1">Total Faturas</p>
@@ -157,7 +198,6 @@ export default function FaturasPage() {
           </div>
         </div>
 
-        {/* Filters */}
         <div className="flex gap-3 mb-6">
           <div className="relative flex-1 max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -239,46 +279,95 @@ export default function FaturasPage() {
         )}
       </div>
 
-      {/* Upload Modal */}
       {showUpload && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-5">
-              <h2 className="font-semibold text-lg text-gray-900">Importar Fatura</h2>
-              <button onClick={() => setShowUpload(false)}><X className="w-5 h-5 text-gray-400" /></button>
+              <h2 className="font-semibold text-lg text-gray-900">Importar Faturas</h2>
+              <button onClick={handleClose}><X className="w-5 h-5 text-gray-400" /></button>
             </div>
 
-            <div className="space-y-4">
-              <div>
-                <label className="label">Proprietário *</label>
-                <input className="input" placeholder="ex: Miguel Severino"
-                  value={uploadForm.owner}
-                  onChange={e => setUploadForm(f => ({ ...f, owner: e.target.value }))} />
+            {!uploadDone ? (
+              <div className="space-y-4">
+                <div>
+                  <label className="label">Proprietário *</label>
+                  <input className="input" placeholder="ex: Miguel Severino"
+                    value={uploadForm.owner}
+                    onChange={e => setUploadForm(f => ({ ...f, owner: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="label">Ficheiros PDF * <span className="text-gray-400 font-normal">(pode selecionar vários)</span></label>
+                  <label className="flex flex-col items-center gap-3 border-2 border-dashed border-gray-200 rounded-xl p-6 cursor-pointer hover:border-emerald-400 transition-colors">
+                    <Upload className="w-8 h-8 text-gray-300" />
+                    <div className="text-center">
+                      <p className="font-medium text-gray-700 text-sm">
+                        {uploadForm.files.length > 0
+                          ? `${uploadForm.files.length} ficheiro(s) selecionado(s)`
+                          : 'Clica para selecionar PDFs'}
+                      </p>
+                      <p className="text-xs text-gray-400 mt-1">Podes selecionar múltiplos PDFs de uma vez</p>
+                    </div>
+                    <input type="file" accept=".pdf" multiple className="hidden"
+                      onChange={e => setUploadForm(f => ({ ...f, files: Array.from(e.target.files ?? []) }))} />
+                  </label>
+                  {uploadForm.files.length > 0 && (
+                    <div className="mt-2 space-y-1 max-h-32 overflow-y-auto">
+                      {uploadForm.files.map((f, i) => (
+                        <p key={i} className="text-xs text-gray-500 flex items-center gap-1">
+                          <FileText className="w-3 h-3" /> {f.name}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {uploadError && <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg">{uploadError}</p>}
               </div>
-              <div>
-                <label className="label">Ficheiro PDF *</label>
-                <label className="flex flex-col items-center gap-3 border-2 border-dashed border-gray-200 rounded-xl p-6 cursor-pointer hover:border-emerald-400 transition-colors">
-                  <Upload className="w-8 h-8 text-gray-300" />
-                  <div className="text-center">
-                    <p className="font-medium text-gray-700 text-sm">
-                      {uploadForm.file ? uploadForm.file.name : 'Clica para selecionar o PDF'}
-                    </p>
-                    <p className="text-xs text-gray-400 mt-1">PDF até 10MB</p>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-sm text-gray-600 mb-3">Processamento concluído:</p>
+                {uploadResults.map((r, i) => (
+                  <div key={i} className={`flex items-center gap-3 p-3 rounded-lg ${r.status === 'success' ? 'bg-emerald-50' : r.status === 'error' ? 'bg-red-50' : 'bg-gray-50'}`}>
+                    {r.status === 'success' && <CheckCircle className="w-4 h-4 text-emerald-600 flex-shrink-0" />}
+                    {r.status === 'error' && <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />}
+                    {r.status === 'processing' && <Loader2 className="w-4 h-4 animate-spin text-blue-600 flex-shrink-0" />}
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium text-gray-800 truncate">{r.fileName}</p>
+                      {r.error && <p className="text-xs text-red-600">{r.error}</p>}
+                    </div>
                   </div>
-                  <input type="file" accept=".pdf" className="hidden"
-                    onChange={e => setUploadForm(f => ({ ...f, file: e.target.files?.[0] ?? null }))} />
-                </label>
+                ))}
               </div>
-              {uploadError && <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg">{uploadError}</p>}
-            </div>
+            )}
+
+            {uploading && (
+              <div className="mt-4 space-y-2">
+                {uploadResults.map((r, i) => (
+                  <div key={i} className={`flex items-center gap-3 p-3 rounded-lg ${
+                    r.status === 'success' ? 'bg-emerald-50' :
+                    r.status === 'error' ? 'bg-red-50' :
+                    r.status === 'processing' ? 'bg-blue-50' : 'bg-gray-50'
+                  }`}>
+                    {r.status === 'success' && <CheckCircle className="w-4 h-4 text-emerald-600 flex-shrink-0" />}
+                    {r.status === 'error' && <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />}
+                    {r.status === 'processing' && <Loader2 className="w-4 h-4 animate-spin text-blue-600 flex-shrink-0" />}
+                    {r.status === 'pending' && <div className="w-4 h-4 rounded-full border-2 border-gray-300 flex-shrink-0" />}
+                    <p className="text-xs font-medium text-gray-800 truncate">{r.fileName}</p>
+                  </div>
+                ))}
+              </div>
+            )}
 
             <div className="flex justify-end gap-3 mt-6">
-              <button className="btn-secondary" onClick={() => setShowUpload(false)}>Cancelar</button>
-              <button className="btn-primary" onClick={handleUpload} disabled={uploading}>
-                {uploading
-                  ? <><Loader2 className="w-4 h-4 animate-spin" /> A processar...</>
-                  : <><FileText className="w-4 h-4" /> Importar e Extrair</>}
+              <button className="btn-secondary" onClick={handleClose}>
+                {uploadDone ? 'Fechar' : 'Cancelar'}
               </button>
+              {!uploadDone && (
+                <button className="btn-primary" onClick={handleUpload} disabled={uploading}>
+                  {uploading
+                    ? <><Loader2 className="w-4 h-4 animate-spin" /> A processar {uploadResults.filter(r => r.status === 'success' || r.status === 'error').length}/{uploadForm.files.length}...</>
+                    : <><FileText className="w-4 h-4" /> Importar {uploadForm.files.length > 0 ? `${uploadForm.files.length} fatura(s)` : 'Faturas'}</>}
+                </button>
+              )}
             </div>
           </div>
         </div>
