@@ -44,8 +44,8 @@ export async function POST(request: Request) {
     })
 
     const text = response.content[0].type === 'text' ? response.content[0].text : ''
-    const extracted = JSON.parse(text)
-
+    const clean = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+    const extracted = JSON.parse(clean)
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!,
