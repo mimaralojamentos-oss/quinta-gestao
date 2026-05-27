@@ -25,11 +25,16 @@ export async function middleware(request: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser()
 
-  const isLoginPage = request.nextUrl.pathname === '/login'
-  const isPublicPath = request.nextUrl.pathname.startsWith('/_next') ||
-    request.nextUrl.pathname.startsWith('/favicon')
+  const pathname = request.nextUrl.pathname
+
+  const isPublicPath =
+    pathname.startsWith('/_next') ||
+    pathname.startsWith('/favicon') ||
+    pathname.match(/\.(jpg|jpeg|png|gif|svg|ico|webp|mp4|pdf)$/i) !== null
 
   if (isPublicPath) return supabaseResponse
+
+  const isLoginPage = pathname === '/login'
 
   if (!user && !isLoginPage) {
     const url = request.nextUrl.clone()
