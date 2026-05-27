@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Tenant, Lease, Space } from '@/lib/types'
-import { X, Upload, FileText } from 'lucide-react'
+import { X, Upload, FileText, Loader2, Sparkles } from 'lucide-react'
 
 interface Props {
   tenant: Tenant
@@ -26,6 +26,8 @@ export default function LeaseModal({ tenant, onClose, onSaved }: Props) {
   const [contractFile, setContractFile] = useState<File | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [processingOCR, setProcessingOCR] = useState(false)
+  const [ocrDone, setOcrDone] = useState(false)
 
   useEffect(() => {
     async function load() {
@@ -55,6 +57,61 @@ export default function LeaseModal({ tenant, onClose, onSaved }: Props) {
     load()
   }, [tenant.id])
 
+  async function handleFileChange(file: File) {
+    setContractFile(file)
+    setOcrDone(false)
+    setError('')
+
+    // Processar OCR automaticamente ao selecionar o ficheiro
+    setProcessingOCR(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+
+      const res = await fetch('/api/process-contract', {
+        method: 'POST',
+        body: formData,
+      })
+
+      const result = await res.json()
+
+      if (result.error) {
+        setError('Erro no OCR: ' + result.error)
+        setProcessingOCR(false)
+        return
+      }
+
+      const d = result.data
+
+      // Preencher formulário com dados extraídos (só os que estiverem vazios)
+      setForm(f => ({
+        ...f,
+        monthly_rent: d.monthly_rent ? String(d.monthly_rent) : f.monthly_rent,
+        deposit: d.deposit ? String(d.deposit) : f.deposit,
+        start_date: d.start_date ?? f.start_date,
+        end_date: d.end_date ?? f.end_date,
+        notes: d.notes ?? f.notes,
+      }))
+
+      // Atualizar dados do inquilino se encontrados
+      if (d.tenant_name || d.tenant_nif || d.tenant_phone || d.tenant_email) {
+        const updatePayload: any = {}
+        if (d.tenant_nif && !tenant.nif) updatePayload.nif = d.tenant_nif
+        if (d.tenant_phone && !tenant.phone) updatePayload.phone = d.tenant_phone
+        if (d.tenant_email && !tenant.email) updatePayload.email = d.tenant_email
+
+        if (Object.keys(updatePayload).length > 0) {
+          await supabase.from('tenants').update(updatePayload).eq('id', tenant.id)
+        }
+      }
+
+      setOcrDone(true)
+    } catch (e: any) {
+      setError('Erro ao processar contrato: ' + e.message)
+    }
+    setProcessingOCR(false)
+  }
+
   async function handleSave() {
     if (!form.space_id || !form.monthly_rent || !form.start_date) {
       setError('Espaço, renda e data de início são obrigatórios')
@@ -64,7 +121,6 @@ export default function LeaseModal({ tenant, onClose, onSaved }: Props) {
 
     let contractPath = existingLease?.contract_file_path ?? null
 
-    // Upload contract if provided
     if (contractFile) {
       const filename = `contracts/${tenant.id}/${Date.now()}_${contractFile.name}`
       const { error: uploadErr } = await supabase.storage
@@ -91,7 +147,6 @@ export default function LeaseModal({ tenant, onClose, onSaved }: Props) {
       ;({ error: err } = await supabase.from('leases').update(payload).eq('id', existingLease.id))
     } else {
       ;({ error: err } = await supabase.from('leases').insert(payload))
-      // Update space status
       if (!err) {
         await supabase.from('spaces').update({ status: 'arrendado' }).eq('id', form.space_id)
       }
@@ -120,9 +175,59 @@ export default function LeaseModal({ tenant, onClose, onSaved }: Props) {
         </div>
 
         <div className="space-y-4">
+
+          {/* Upload do contrato — no topo para fazer OCR primeiro */}
+          <div>
+            <label className="label">Contrato (PDF)</label>
+            {existingLease?.contract_file_path && !contractFile && (
+              <button onClick={downloadContract}
+                className="flex items-center gap-2 text-sm text-emerald-600 hover:underline mb-2">
+                <FileText className="w-4 h-4" />
+                Ver contrato atual
+              </button>
+            )}
+            <label className={`flex items-center gap-3 border-2 border-dashed rounded-lg p-4 cursor-pointer transition-colors ${
+              processingOCR ? 'border-blue-300 bg-blue-50' :
+              ocrDone ? 'border-emerald-400 bg-emerald-50' :
+              'border-gray-200 hover:border-emerald-400'
+            }`}>
+              {processingOCR ? (
+                <Loader2 className="w-5 h-5 text-blue-500 animate-spin flex-shrink-0" />
+              ) : ocrDone ? (
+                <Sparkles className="w-5 h-5 text-emerald-500 flex-shrink-0" />
+              ) : (
+                <Upload className="w-5 h-5 text-gray-400 flex-shrink-0" />
+              )}
+              <div>
+                {processingOCR && (
+                  <p className="text-sm text-blue-600 font-medium">A ler contrato com IA...</p>
+                )}
+                {ocrDone && (
+                  <p className="text-sm text-emerald-600 font-medium">✓ Dados extraídos automaticamente!</p>
+                )}
+                {!processingOCR && !ocrDone && (
+                  <p className="text-sm text-gray-600">
+                    {contractFile ? contractFile.name : 'Clique para fazer upload do contrato'}
+                  </p>
+                )}
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {processingOCR ? 'A preencher os campos abaixo...' :
+                   ocrDone ? contractFile?.name :
+                   'PDF — os campos serão preenchidos automaticamente pela IA'}
+                </p>
+              </div>
+              <input type="file" accept=".pdf" className="hidden"
+                onChange={e => {
+                  const f = e.target.files?.[0]
+                  if (f) handleFileChange(f)
+                }} />
+            </label>
+          </div>
+
           <div>
             <label className="label">Espaço *</label>
-            <select className="input" value={form.space_id} onChange={e => setForm(f => ({ ...f, space_id: e.target.value }))}>
+            <select className="input" value={form.space_id}
+              onChange={e => setForm(f => ({ ...f, space_id: e.target.value }))}>
               <option value="">Selecionar espaço...</option>
               {spaces.map(s => (
                 <option key={s.id} value={s.id}>{s.ref} — {s.type}</option>
@@ -158,7 +263,8 @@ export default function LeaseModal({ tenant, onClose, onSaved }: Props) {
 
           <div>
             <label className="label">Estado do Contrato</label>
-            <select className="input" value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))}>
+            <select className="input" value={form.status}
+              onChange={e => setForm(f => ({ ...f, status: e.target.value }))}>
               <option value="ativo">Ativo</option>
               <option value="terminado">Terminado</option>
             </select>
@@ -170,33 +276,12 @@ export default function LeaseModal({ tenant, onClose, onSaved }: Props) {
               onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
           </div>
 
-          {/* Contract file upload */}
-          <div>
-            <label className="label">Contrato (PDF)</label>
-            {existingLease?.contract_file_path && (
-              <button onClick={downloadContract}
-                className="flex items-center gap-2 text-sm text-emerald-600 hover:underline mb-2">
-                <FileText className="w-4 h-4" />
-                Ver contrato atual
-              </button>
-            )}
-            <label className="flex items-center gap-3 border-2 border-dashed border-gray-200 rounded-lg p-4 cursor-pointer hover:border-emerald-400 transition-colors">
-              <Upload className="w-5 h-5 text-gray-400" />
-              <div>
-                <p className="text-sm text-gray-600">{contractFile ? contractFile.name : 'Clique para fazer upload do contrato'}</p>
-                <p className="text-xs text-gray-400">PDF, máximo 10MB</p>
-              </div>
-              <input type="file" accept=".pdf" className="hidden"
-                onChange={e => setContractFile(e.target.files?.[0] ?? null)} />
-            </label>
-          </div>
-
           {error && <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg">{error}</p>}
         </div>
 
         <div className="flex justify-end gap-3 mt-6">
           <button className="btn-secondary" onClick={onClose}>Cancelar</button>
-          <button className="btn-primary" onClick={handleSave} disabled={saving}>
+          <button className="btn-primary" onClick={handleSave} disabled={saving || processingOCR}>
             {saving ? 'A guardar...' : 'Guardar'}
           </button>
         </div>
