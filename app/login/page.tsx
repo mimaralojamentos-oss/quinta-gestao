@@ -1,5 +1,4 @@
 'use client'
-
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { Home, Eye, EyeOff, Loader2 } from 'lucide-react'
@@ -23,16 +22,28 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-50 to-gray-100 flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
+    <div
+      className="min-h-screen flex items-center justify-center p-4"
+      style={{
+        backgroundImage: 'url(/QdBC1.jpeg)',
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat',
+      }}
+    >
+      {/* Overlay escuro para melhorar legibilidade */}
+      <div className="absolute inset-0 bg-black/40" />
+
+      <div className="relative z-10 w-full max-w-md">
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-16 h-16 bg-emerald-600 rounded-2xl shadow-lg mb-4">
             <Home className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-2xl font-bold text-gray-900">Gestão da Quinta</h1>
-          <p className="text-gray-500 text-sm mt-1">Évora · Sistema de Arrendamentos</p>
+          <h1 className="text-2xl font-bold text-white drop-shadow-lg">Gestão da Quinta</h1>
+          <p className="text-white/80 text-sm mt-1 drop-shadow">Évora · Sistema de Arrendamentos</p>
         </div>
-        <div className="bg-white rounded-2xl shadow-xl p-8">
+
+        <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-2xl p-8">
           <h2 className="text-xl font-semibold text-gray-800 mb-6">Entrar na aplicação</h2>
           <form onSubmit={handleLogin} className="space-y-5">
             <div>
@@ -57,7 +68,8 @@ export default function LoginPage() {
             </button>
           </form>
         </div>
-        <p className="text-center text-xs text-gray-400 mt-6">Acesso restrito a utilizadores autorizados</p>
+
+        <p className="text-center text-xs text-white/60 mt-6 drop-shadow">Acesso restrito a utilizadores autorizados</p>
       </div>
     </div>
   )
