@@ -3,13 +3,13 @@ import { NextResponse } from 'next/server'
 
 export async function POST(request: Request) {
   try {
-    const { userId, password } = await request.json()
+    const { userId, password, email } = await request.json()
 
-    if (!userId || !password) {
-      return NextResponse.json({ error: 'userId e password são obrigatórios' }, { status: 400 })
+    if (!userId) {
+      return NextResponse.json({ error: 'userId é obrigatório' }, { status: 400 })
     }
 
-    if (password.length < 6) {
+    if (password && password.length < 6) {
       return NextResponse.json({ error: 'A password deve ter pelo menos 6 caracteres' }, { status: 400 })
     }
 
@@ -19,7 +19,15 @@ export async function POST(request: Request) {
       { auth: { autoRefreshToken: false, persistSession: false } }
     )
 
-    const { error } = await supabase.auth.admin.updateUserById(userId, { password })
+    const updates: any = {}
+    if (password) updates.password = password
+    if (email) updates.email = email
+
+    if (Object.keys(updates).length === 0) {
+      return NextResponse.json({ success: true })
+    }
+
+    const { error } = await supabase.auth.admin.updateUserById(userId, updates)
 
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })
 
