@@ -31,7 +31,6 @@ export function spaceTypeLabel(type: string): string {
   const map: Record<string, string> = {
     pavilhao: 'Pavilhão',
     habitacao: 'Habitação',
-    casa: 'Casa',
     loja: 'Loja',
   }
   return map[type] ?? type
