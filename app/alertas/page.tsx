@@ -4,7 +4,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency, formatDate, getMonthLabel, getCurrentMonth } from '@/lib/utils'
-import { AlertTriangle, Clock, FileText, CheckCircle, Zap } from 'lucide-react'
+import { AlertTriangle, Clock, FileText, CheckCircle, Zap, X } from 'lucide-react'
 
 interface AlertItem {
   id: string
@@ -19,7 +19,9 @@ interface AlertItem {
 
 export default function AlertasPage() {
   const [alerts, setAlerts] = useState<AlertItem[]>([])
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
+  const [showDismissed, setShowDismissed] = useState(false)
 
   useEffect(() => { fetchAlerts() }, [])
 
@@ -46,9 +48,18 @@ export default function AlertasPage() {
       .select('*, lease:leases(*, space:spaces(*), tenant:tenants(*))')
       .eq('paid', false)
 
+    // Carregar alertas dispensados
+    const { data: dismissedData } = await supabase
+      .from('dismissed_alerts')
+      .select('alert_key')
+
+    const dismissedKeys = new Set((dismissedData ?? []).map(d => d.alert_key))
+    setDismissed(dismissedKeys)
+
     const newAlerts: AlertItem[] = []
     const paidLeaseIds = new Set((payments ?? []).map(p => p.lease_id))
 
+    // Rendas em falta
     ;(leases ?? []).forEach(l => {
       if (!paidLeaseIds.has(l.id)) {
         newAlerts.push({
@@ -64,16 +75,17 @@ export default function AlertasPage() {
       }
     })
 
-    const ninetyDays = new Date()
-    ninetyDays.setDate(ninetyDays.getDate() + 90)
+    // Contratos a expirar — agora até 180 dias
+    const oneEightyDays = new Date()
+    oneEightyDays.setDate(oneEightyDays.getDate() + 180)
     ;(leases ?? []).filter(l => l.end_date).forEach(l => {
       const endDate = new Date(l.end_date)
-      if (endDate <= ninetyDays) {
+      if (endDate <= oneEightyDays) {
         const daysLeft = Math.ceil((endDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24))
         newAlerts.push({
           id: `contract-${l.id}`,
           type: 'contrato_a_expirar',
-          severity: daysLeft <= 30 ? 'high' : 'medium',
+          severity: daysLeft <= 30 ? 'high' : daysLeft <= 90 ? 'medium' : 'low',
           title: 'Contrato a expirar',
           description: `Contrato termina em ${formatDate(l.end_date)} (${daysLeft > 0 ? `em ${daysLeft} dias` : 'EXPIRADO'})`,
           spaceRef: l.space?.ref ?? '—',
@@ -82,6 +94,7 @@ export default function AlertasPage() {
       }
     })
 
+    // Luz pendente
     ;(elec ?? []).forEach(c => {
       newAlerts.push({
         id: `elec-${c.id}`,
@@ -104,6 +117,23 @@ export default function AlertasPage() {
     setLoading(false)
   }
 
+  async function dismissAlert(alertId: string) {
+    await supabase.from('dismissed_alerts').upsert({ alert_key: alertId })
+    setDismissed(prev => new Set([...prev, alertId]))
+  }
+
+  async function restoreAlert(alertId: string) {
+    await supabase.from('dismissed_alerts').delete().eq('alert_key', alertId)
+    setDismissed(prev => {
+      const next = new Set(prev)
+      next.delete(alertId)
+      return next
+    })
+  }
+
+  const activeAlerts = alerts.filter(a => !dismissed.has(a.id))
+  const dismissedAlerts = alerts.filter(a => dismissed.has(a.id))
+
   const severityConfig = {
     high: { bg: 'bg-red-50 border-red-100', icon: 'text-red-500', badge: 'bg-red-100 text-red-700', label: 'Urgente' },
     medium: { bg: 'bg-yellow-50 border-yellow-100', icon: 'text-yellow-500', badge: 'bg-yellow-100 text-yellow-700', label: 'Atenção' },
@@ -116,15 +146,15 @@ export default function AlertasPage() {
     return <Zap className="w-5 h-5" />
   }
 
-  const highCount = alerts.filter(a => a.severity === 'high').length
-  const medCount = alerts.filter(a => a.severity === 'medium').length
+  const highCount = activeAlerts.filter(a => a.severity === 'high').length
+  const medCount = activeAlerts.filter(a => a.severity === 'medium').length
 
   return (
     <AppLayout>
       <div className="p-8">
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-gray-900">Alertas</h1>
-          <p className="text-sm text-gray-500 mt-1">{alerts.length} alertas ativos</p>
+          <p className="text-sm text-gray-500 mt-1">{activeAlerts.length} alertas ativos</p>
         </div>
 
         <div className="grid grid-cols-3 gap-4 mb-6">
@@ -137,8 +167,8 @@ export default function AlertasPage() {
             <p className="text-2xl font-bold text-yellow-600">{medCount}</p>
           </div>
           <div className="card border-l-4 border-l-emerald-500">
-            <p className="text-sm text-gray-500">Total</p>
-            <p className="text-2xl font-bold text-gray-800">{alerts.length}</p>
+            <p className="text-sm text-gray-500">Total ativos</p>
+            <p className="text-2xl font-bold text-gray-800">{activeAlerts.length}</p>
           </div>
         </div>
 
@@ -146,7 +176,7 @@ export default function AlertasPage() {
           <div className="flex justify-center py-12">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600" />
           </div>
-        ) : alerts.length === 0 ? (
+        ) : activeAlerts.length === 0 ? (
           <div className="card flex flex-col items-center py-16">
             <CheckCircle className="w-12 h-12 text-emerald-500 mb-3" />
             <p className="text-lg font-semibold text-gray-700">Tudo em ordem!</p>
@@ -154,7 +184,7 @@ export default function AlertasPage() {
           </div>
         ) : (
           <div className="space-y-3">
-            {alerts.map(alert => {
+            {activeAlerts.map(alert => {
               const config = severityConfig[alert.severity]
               return (
                 <div key={alert.id} className={`rounded-xl border p-4 ${config.bg} flex items-start gap-4`}>
@@ -174,10 +204,50 @@ export default function AlertasPage() {
                       <p className="text-sm font-semibold text-gray-800 mt-1">{formatCurrency(alert.value)}</p>
                     )}
                   </div>
-                  <AlertTriangle className={`w-5 h-5 flex-shrink-0 mt-0.5 ${config.icon}`} />
+                  <button
+                    onClick={() => dismissAlert(alert.id)}
+                    title="Dispensar alerta"
+                    className="text-gray-400 hover:text-gray-600 flex-shrink-0 mt-0.5 transition-colors"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
                 </div>
               )
             })}
+          </div>
+        )}
+
+        {/* Alertas dispensados */}
+        {dismissedAlerts.length > 0 && (
+          <div className="mt-8">
+            <button
+              onClick={() => setShowDismissed(v => !v)}
+              className="text-sm text-gray-400 hover:text-gray-600 underline"
+            >
+              {showDismissed ? 'Ocultar' : `Mostrar ${dismissedAlerts.length} alerta(s) dispensado(s)`}
+            </button>
+
+            {showDismissed && (
+              <div className="space-y-2 mt-3">
+                {dismissedAlerts.map(alert => (
+                  <div key={alert.id} className="rounded-xl border border-gray-100 bg-gray-50 p-4 flex items-start gap-4 opacity-60">
+                    <div className="w-10 h-10 rounded-lg bg-white flex items-center justify-center flex-shrink-0 text-gray-400">
+                      {typeIcon(alert.type)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-600">{alert.title} — {alert.spaceRef}</p>
+                      <p className="text-xs text-gray-500">{alert.tenantName} — {alert.description}</p>
+                    </div>
+                    <button
+                      onClick={() => restoreAlert(alert.id)}
+                      className="text-xs text-emerald-600 hover:underline flex-shrink-0"
+                    >
+                      Reativar
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
