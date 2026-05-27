@@ -22,7 +22,7 @@ export default function InquilinosPage() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [filterSpace, setFilterSpace] = useState('')
-  const [filterSpaceType, setFilterSpaceType] = useState<'all' | 'pavilhao' | 'habitacao' | 'casa'>('all')
+  const [filterSpaceType, setFilterSpaceType] = useState<'all' | 'pavilhao' | 'habitacao' | 'loja'>('all')
   const [filterDebt, setFilterDebt] = useState<'all' | 'com_divida' | 'sem_divida'>('all')
   const [filterContract, setFilterContract] = useState<'all' | '30dias' | '60dias' | '90dias' | '180dias' | 'expirado'>('all')
   const [showTenantModal, setShowTenantModal] = useState(false)
@@ -152,7 +152,6 @@ export default function InquilinosPage() {
           )}
         </div>
 
-        {/* Filtros */}
         <div className="grid grid-cols-3 gap-3 mb-3">
           <div className="relative col-span-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -169,7 +168,7 @@ export default function InquilinosPage() {
             <option value="all">Todos os tipos</option>
             <option value="pavilhao">🏭 Pavilhões</option>
             <option value="habitacao">🏠 Habitações</option>
-            <option value="casa">🏡 Casas</option>
+            <option value="loja">🛍️ Lojas</option>
           </select>
         </div>
         <div className="grid grid-cols-2 gap-3 mb-4">
