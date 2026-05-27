@@ -9,17 +9,18 @@ import { Plus, Search, Building2, Home, Warehouse, ShoppingBag } from 'lucide-re
 import SpaceModal from './SpaceModal'
 import { useAuth } from '@/lib/auth-context'
 
-interface SpaceWithLease extends Space {
+interface SpaceWithDetails extends Space {
   activeLeases?: Lease[]
+  directTenant?: { id: string; name: string; phone: string | null } | null
 }
 
 export default function EspacosPage() {
   const { isAdmin } = useAuth()
-  const [spaces, setSpaces] = useState<SpaceWithLease[]>([])
+  const [spaces, setSpaces] = useState<SpaceWithDetails[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [filterStatus, setFilterStatus] = useState<'all' | 'arrendado' | 'disponivel'>('all')
-  const [filterType, setFilterType] = useState<'all' | 'pavilhao' | 'habitacao' | 'casa' | 'loja'>('all')
+  const [filterType, setFilterType] = useState<'all' | 'pavilhao' | 'habitacao' | 'loja'>('all')
   const [showModal, setShowModal] = useState(false)
   const [editSpace, setEditSpace] = useState<Space | null>(null)
 
@@ -27,9 +28,10 @@ export default function EspacosPage() {
 
   async function fetchSpaces() {
     setLoading(true)
+
     const { data: spacesData } = await supabase
       .from('spaces')
-      .select('*')
+      .select('*, directTenant:tenants(id, name, phone)')
       .order('ref')
 
     const { data: leasesData } = await supabase
@@ -37,18 +39,19 @@ export default function EspacosPage() {
       .select('*, tenant:tenants(*)')
       .eq('status', 'ativo')
 
-    const spacesWithLeases = (spacesData ?? []).map(s => ({
+    const spacesWithDetails = (spacesData ?? []).map(s => ({
       ...s,
       activeLeases: (leasesData ?? []).filter(l => l.space_id === s.id)
     }))
 
-    setSpaces(spacesWithLeases)
+    setSpaces(spacesWithDetails)
     setLoading(false)
   }
 
   const filtered = spaces.filter(s => {
+    const tenantName = s.directTenant?.name ?? (s.activeLeases?.[0] as any)?.tenant?.name ?? ''
     const matchSearch = s.ref.toLowerCase().includes(search.toLowerCase()) ||
-      s.activeLeases?.some(l => (l as any).tenant?.name?.toLowerCase().includes(search.toLowerCase()))
+      tenantName.toLowerCase().includes(search.toLowerCase())
     const matchStatus = filterStatus === 'all' || s.status === filterStatus
     const matchType = filterType === 'all' || s.type === filterType
     return matchSearch && matchStatus && matchType
@@ -96,7 +99,6 @@ export default function EspacosPage() {
             <option value="all">Todos os tipos</option>
             <option value="pavilhao">Pavilhões</option>
             <option value="habitacao">Habitações</option>
-            <option value="casa">Casas</option>
             <option value="loja">Lojas</option>
           </select>
         </div>
@@ -131,7 +133,9 @@ export default function EspacosPage() {
               <tbody className="divide-y divide-gray-50">
                 {filtered.map(space => {
                   const lease = space.activeLeases?.[0]
-                  const tenant = (lease as any)?.tenant
+                  const leaseTenant = (lease as any)?.tenant
+                  // Usar inquilino direto ou via contrato
+                  const tenant = space.directTenant ?? leaseTenant
                   return (
                     <tr key={space.id} className="hover:bg-gray-50 transition-colors">
                       <td className="table-cell">
