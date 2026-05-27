@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Space, Lease } from '@/lib/types'
 import { formatCurrency, spaceTypeLabel } from '@/lib/utils'
-import { Plus, Search, Building2, Home, Warehouse } from 'lucide-react'
+import { Plus, Search, Building2, Home, Warehouse, ShoppingBag } from 'lucide-react'
 import SpaceModal from './SpaceModal'
 import { useAuth } from '@/lib/auth-context'
 
@@ -19,7 +19,7 @@ export default function EspacosPage() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [filterStatus, setFilterStatus] = useState<'all' | 'arrendado' | 'disponivel'>('all')
-  const [filterType, setFilterType] = useState<'all' | 'pavilhao' | 'habitacao' | 'casa'>('all')
+  const [filterType, setFilterType] = useState<'all' | 'pavilhao' | 'habitacao' | 'casa' | 'loja'>('all')
   const [showModal, setShowModal] = useState(false)
   const [editSpace, setEditSpace] = useState<Space | null>(null)
 
@@ -57,6 +57,7 @@ export default function EspacosPage() {
   const TypeIcon = ({ type }: { type: string }) => {
     if (type === 'habitacao') return <Home className="w-4 h-4" />
     if (type === 'pavilhao') return <Warehouse className="w-4 h-4" />
+    if (type === 'loja') return <ShoppingBag className="w-4 h-4" />
     return <Building2 className="w-4 h-4" />
   }
 
@@ -96,6 +97,7 @@ export default function EspacosPage() {
             <option value="pavilhao">Pavilhões</option>
             <option value="habitacao">Habitações</option>
             <option value="casa">Casas</option>
+            <option value="loja">Lojas</option>
           </select>
         </div>
 
@@ -104,6 +106,7 @@ export default function EspacosPage() {
           <span className="badge-cinza">{spaces.filter(s => s.status === 'disponivel').length} disponíveis</span>
           <span className="badge-cinza">{spaces.filter(s => s.type === 'pavilhao').length} pavilhões</span>
           <span className="badge-cinza">{spaces.filter(s => s.type === 'habitacao').length} habitações</span>
+          <span className="badge-cinza">{spaces.filter(s => s.type === 'loja').length} lojas</span>
         </div>
 
         {loading ? (
