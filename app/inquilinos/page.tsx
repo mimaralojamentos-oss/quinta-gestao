@@ -12,7 +12,7 @@ import { useAuth } from '@/lib/auth-context'
 
 interface TenantWithLease extends Tenant {
   leases?: (Lease & { space?: any })[]
-  spaces?: { ref: string }[]
+  spaces?: { ref: string; type: string }[]
   debt?: number
 }
 
@@ -22,7 +22,8 @@ export default function InquilinosPage() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [filterSpace, setFilterSpace] = useState('')
-  const [filterDebt, setFilterDebt] = useState<'all' | 'com_divida' | 'sem_divida' | 'a_mais'>('all')
+  const [filterSpaceType, setFilterSpaceType] = useState<'all' | 'pavilhao' | 'habitacao' | 'casa'>('all')
+  const [filterDebt, setFilterDebt] = useState<'all' | 'com_divida' | 'sem_divida'>('all')
   const [filterContract, setFilterContract] = useState<'all' | '30dias' | '60dias' | '90dias' | 'expirado'>('all')
   const [showTenantModal, setShowTenantModal] = useState(false)
   const [showLeaseModal, setShowLeaseModal] = useState(false)
@@ -46,7 +47,7 @@ export default function InquilinosPage() {
 
     const { data: spacesData } = await supabase
       .from('spaces')
-      .select('ref, tenant_id')
+      .select('ref, type, tenant_id')
       .not('tenant_id', 'is', null)
 
     const { data: paymentsData } = await supabase
@@ -57,7 +58,6 @@ export default function InquilinosPage() {
     const today = new Date()
     today.setDate(1)
 
-    // Lista de refs para o filtro de espaço
     const refs = [...new Set((spacesData ?? []).map(s => s.ref))].sort()
     setAllSpaceRefs(refs)
 
@@ -66,12 +66,10 @@ export default function InquilinosPage() {
       const spaces = (spacesData ?? []).filter(s => s.tenant_id === t.id)
       const leaseIds = leases.map(l => l.id)
 
-      // Dívidas explícitas
       const explicitDebt = (paymentsData ?? [])
         .filter(p => leaseIds.includes(p.lease_id) && !p.payment_date)
         .reduce((sum, p) => sum + (p.amount ?? 0), 0)
 
-      // Meses em falta desde Maio 2026
       let missingDebt = 0
       for (const lease of leases.filter(l => l.status === 'ativo')) {
         if (!lease.start_date) continue
@@ -91,9 +89,7 @@ export default function InquilinosPage() {
         }
       }
 
-      const debt = explicitDebt + missingDebt
-
-      return { ...t, leases, spaces, debt }
+      return { ...t, leases, spaces, debt: explicitDebt + missingDebt }
     })
 
     setTenants(tenantsWithData)
@@ -103,30 +99,25 @@ export default function InquilinosPage() {
   const today = new Date()
 
   const filtered = tenants.filter(t => {
-    // Filtro por texto (nome, telefone, email)
     const matchSearch = !search ||
       t.name.toLowerCase().includes(search.toLowerCase()) ||
       t.phone?.includes(search) ||
       t.email?.toLowerCase().includes(search.toLowerCase())
 
-    // Filtro por espaço
     const matchSpace = !filterSpace ||
       t.spaces?.some(s => s.ref === filterSpace) ||
       t.leases?.some(l => l.status === 'ativo' && l.space?.ref === filterSpace)
 
-    // Filtro por dívida
+    const matchSpaceType = filterSpaceType === 'all' ||
+      t.spaces?.some(s => s.type === filterSpaceType) ||
+      t.leases?.some(l => l.status === 'ativo' && l.space?.type === filterSpaceType)
+
     const debt = t.debt ?? 0
-    const totalPago = (t.leases ?? []).flatMap(l => []).reduce((s: number) => s, 0)
-    const activeLease = t.leases?.find(l => l.status === 'ativo')
     let matchDebt = true
     if (filterDebt === 'com_divida') matchDebt = debt > 0
     else if (filterDebt === 'sem_divida') matchDebt = debt === 0
-    else if (filterDebt === 'a_mais') {
-      // Pagamentos cujo total excede a renda do mês (pagou a mais)
-      matchDebt = false // simplificado — mostra todos com debt negativo se implementarmos
-    }
 
-    // Filtro por data de fim de contrato
+    const activeLease = t.leases?.find(l => l.status === 'ativo')
     let matchContract = true
     if (filterContract !== 'all' && activeLease?.end_date) {
       const endDate = new Date(activeLease.end_date)
@@ -139,8 +130,10 @@ export default function InquilinosPage() {
       matchContract = false
     }
 
-    return matchSearch && matchSpace && matchDebt && matchContract
+    return matchSearch && matchSpace && matchSpaceType && matchDebt && matchContract
   })
+
+  const hasFilters = search || filterSpace || filterSpaceType !== 'all' || filterDebt !== 'all' || filterContract !== 'all'
 
   return (
     <AppLayout>
@@ -159,10 +152,10 @@ export default function InquilinosPage() {
         </div>
 
         {/* Filtros */}
-        <div className="grid grid-cols-2 gap-3 mb-3">
-          <div className="relative">
+        <div className="grid grid-cols-3 gap-3 mb-3">
+          <div className="relative col-span-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <input className="input pl-9 w-full" placeholder="Pesquisar por nome, telefone, email..." value={search}
+            <input className="input pl-9 w-full" placeholder="Nome, telefone, email..." value={search}
               onChange={e => setSearch(e.target.value)} />
           </div>
           <select className="input" value={filterSpace} onChange={e => setFilterSpace(e.target.value)}>
@@ -171,8 +164,14 @@ export default function InquilinosPage() {
               <option key={ref} value={ref}>{ref}</option>
             ))}
           </select>
+          <select className="input" value={filterSpaceType} onChange={e => setFilterSpaceType(e.target.value as any)}>
+            <option value="all">Todos os tipos</option>
+            <option value="pavilhao">🏭 Pavilhões</option>
+            <option value="habitacao">🏠 Habitações</option>
+            <option value="casa">🏡 Casas</option>
+          </select>
         </div>
-        <div className="grid grid-cols-2 gap-3 mb-6">
+        <div className="grid grid-cols-2 gap-3 mb-4">
           <select className="input" value={filterDebt} onChange={e => setFilterDebt(e.target.value as any)}>
             <option value="all">Todos (dívida)</option>
             <option value="com_divida">⚠ Com dívida</option>
@@ -187,11 +186,10 @@ export default function InquilinosPage() {
           </select>
         </div>
 
-        {/* Contador de resultados */}
-        {(search || filterSpace || filterDebt !== 'all' || filterContract !== 'all') && (
+        {hasFilters && (
           <p className="text-sm text-gray-500 mb-3">
             {filtered.length} resultado(s)
-            <button onClick={() => { setSearch(''); setFilterSpace(''); setFilterDebt('all'); setFilterContract('all') }}
+            <button onClick={() => { setSearch(''); setFilterSpace(''); setFilterSpaceType('all'); setFilterDebt('all'); setFilterContract('all') }}
               className="ml-2 text-xs text-emerald-600 hover:underline">
               Limpar filtros
             </button>
@@ -223,7 +221,6 @@ export default function InquilinosPage() {
                   const activeLease = tenant.leases?.find(l => l.status === 'ativo')
                   const hasDebt = (tenant.debt ?? 0) > 0
 
-                  // Calcular dias para fim de contrato
                   let contractAlert = null
                   if (activeLease?.end_date) {
                     const endDate = new Date(activeLease.end_date)
