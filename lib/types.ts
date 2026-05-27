@@ -1,9 +1,8 @@
-export type SpaceType = 'pavilhao' | 'habitacao' | 'casa'
+export type SpaceType = 'pavilhao' | 'habitacao' | 'casa' | 'loja'
 export type SpaceStatus = 'arrendado' | 'disponivel'
 export type PaymentMethod = 'dinheiro' | 'banco' | 'transferencia'
 export type ExpenseCategory = 'obras' | 'edp' | 'pessoal' | 'contabilidade' | 'manutencao' | 'outros'
 export type ExpenseType = 'recorrente' | 'pontual'
-
 export interface Space {
   id: string
   ref: string
@@ -14,7 +13,6 @@ export interface Space {
   notes: string | null
   created_at: string
 }
-
 export interface Tenant {
   id: string
   name: string
@@ -24,7 +22,6 @@ export interface Tenant {
   notes: string | null
   created_at: string
 }
-
 export interface Lease {
   id: string
   space_id: string
@@ -40,7 +37,6 @@ export interface Lease {
   space?: Space
   tenant?: Tenant
 }
-
 export interface RentPayment {
   id: string
   lease_id: string
@@ -52,7 +48,6 @@ export interface RentPayment {
   created_at: string
   lease?: Lease
 }
-
 export interface ElectricityReading {
   id: string
   space_id: string
@@ -62,7 +57,6 @@ export interface ElectricityReading {
   created_at: string
   space?: Space
 }
-
 export interface ElectricityCharge {
   id: string
   lease_id: string
@@ -77,7 +71,6 @@ export interface ElectricityCharge {
   created_at: string
   lease?: Lease
 }
-
 export interface Expense {
   id: string
   expense_date: string
@@ -91,7 +84,6 @@ export interface Expense {
   notes: string | null
   created_at: string
 }
-
 export interface CashFundMovement {
   id: string
   movement_date: string
