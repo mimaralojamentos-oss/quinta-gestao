@@ -26,7 +26,7 @@ const AuthContext = createContext<AuthContextType>({
 })
 
 const supabaseClient = createClient()
-const INACTIVITY_TIMEOUT = 60 * 60 * 1000 // 1 hora em milissegundos
+const INACTIVITY_TIMEOUT = 60 * 60 * 1000 // 1 hora
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
@@ -34,7 +34,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true)
   const inactivityTimer = useRef<NodeJS.Timeout | null>(null)
 
-  // Logout automático por inatividade
   function resetInactivityTimer() {
     if (inactivityTimer.current) clearTimeout(inactivityTimer.current)
     inactivityTimer.current = setTimeout(async () => {
@@ -64,7 +63,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           .eq('id', user.id)
           .single()
         if (mounted) setProfile(data)
-        // Iniciar timer de inatividade quando há utilizador
         resetInactivityTimer()
       }
       if (mounted) setLoading(false)
@@ -79,33 +77,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setProfile(null)
         setLoading(false)
         clearInactivityTimer()
-        return
       }
     })
 
-    // Eventos de atividade do utilizador — resetar o timer
+    // Resetar timer com qualquer atividade
     const activityEvents = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart', 'click']
     const handleActivity = () => {
-      if (user) resetInactivityTimer()
+      if (inactivityTimer.current) resetInactivityTimer()
     }
     activityEvents.forEach(event => window.addEventListener(event, handleActivity))
-
-    // Logout ao fechar a janela/tab
-    const handleBeforeUnload = () => {
-      supabaseClient.auth.signOut()
-    }
-    window.addEventListener('beforeunload', handleBeforeUnload)
 
     return () => {
       mounted = false
       subscription.unsubscribe()
       clearInactivityTimer()
       activityEvents.forEach(event => window.removeEventListener(event, handleActivity))
-      window.removeEventListener('beforeunload', handleBeforeUnload)
     }
   }, [])
 
-  // Atualizar o timer quando o user muda
   useEffect(() => {
     if (user) {
       resetInactivityTimer()
