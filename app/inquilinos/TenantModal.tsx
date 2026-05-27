@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Tenant } from '@/lib/types'
-import { X, User, Home, FileText, Plus, Trash2, Pencil } from 'lucide-react'
+import { X, User, Home, FileText, Plus, Trash2, Pencil, ChevronRight, ChevronLeft } from 'lucide-react'
 import { formatCurrency, formatDate } from '@/lib/utils'
 
 interface Props {
@@ -32,7 +32,15 @@ interface PaymentRow {
 }
 
 export default function TenantModal({ tenant, onClose, onSaved }: Props) {
+  const isNew = !tenant
+
+  // Para novo inquilino: passo 1 = dados, passo 2 = contrato
+  const [step, setStep] = useState<1 | 2>(1)
+  const [newTenantId, setNewTenantId] = useState<string | null>(null)
+
+  // Para edição: separadores
   const [tab, setTab] = useState<'dados' | 'espacos' | 'conta'>('dados')
+
   const [form, setForm] = useState({
     name: tenant?.name ?? '',
     phone: tenant?.phone ?? '',
@@ -43,17 +51,30 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
-  // Espaços
+  // Contrato (passo 2 para novo inquilino)
+  const [spaces, setSpaces] = useState<any[]>([])
+  const [contractForm, setContractForm] = useState({
+    space_id: '',
+    monthly_rent: '',
+    deposit: '',
+    start_date: '',
+    end_date: '',
+    notes: '',
+    status: 'ativo',
+    skip: false, // se true, salta o contrato
+  })
+  const [savingContract, setSavingContract] = useState(false)
+  const [contractError, setContractError] = useState('')
+
+  // Espaços (edição)
   const [allSpaces, setAllSpaces] = useState<any[]>([])
   const [assignedSpaces, setAssignedSpaces] = useState<string[]>([])
   const [savingSpaces, setSavingSpaces] = useState(false)
 
-  // Conta corrente
+  // Conta corrente (edição)
   const [payments, setPayments] = useState<PaymentRow[]>([])
   const [leases, setLeases] = useState<any[]>([])
   const [loadingPayments, setLoadingPayments] = useState(false)
-
-  // Formulário de novo pagamento / edição
   const [showPaymentForm, setShowPaymentForm] = useState(false)
   const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null)
   const [paymentForm, setPaymentForm] = useState({
@@ -74,6 +95,13 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
       fetchSpaces()
       fetchPayments()
     }
+    // Carregar espaços disponíveis para o contrato
+    async function loadSpaces() {
+      const { data } = await supabase.from('spaces').select('*').order('ref')
+      setSpaces(data ?? [])
+      setAllSpaces(data ?? [])
+    }
+    loadSpaces()
   }, [tenant])
 
   async function fetchSpaces() {
@@ -115,7 +143,6 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
     }
 
     const leaseIds = leasesData.map(l => l.id)
-
     const { data: pays } = await supabase
       .from('rent_payments')
       .select('*')
@@ -128,7 +155,6 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
       isMissing: false,
     }))
 
-    // Calcular meses em falta desde Maio 2026
     const missingRows: PaymentRow[] = []
     const mayStart = new Date('2026-05-01')
     const today = new Date()
@@ -171,9 +197,11 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
     setLoadingPayments(false)
   }
 
-  async function handleSave() {
+  // PASSO 1: Guardar inquilino e avançar para passo 2
+  async function handleSaveStep1() {
     if (!form.name.trim()) { setError('O nome é obrigatório'); return }
     setSaving(true); setError('')
+
     const payload = {
       name: form.name.trim(),
       phone: form.phone || null,
@@ -181,14 +209,52 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
       nif: form.nif || null,
       notes: form.notes || null,
     }
-    let err
-    if (tenant) {
-      ;({ error: err } = await supabase.from('tenants').update(payload).eq('id', tenant.id))
+
+    if (isNew) {
+      const { data, error: err } = await supabase.from('tenants').insert(payload).select().single()
+      setSaving(false)
+      if (err) { setError(err.message); return }
+      setNewTenantId(data.id)
+      setStep(2)
     } else {
-      ;({ error: err } = await supabase.from('tenants').insert(payload))
+      const { error: err } = await supabase.from('tenants').update(payload).eq('id', tenant!.id)
+      setSaving(false)
+      if (err) { setError(err.message); return }
+      onSaved()
     }
-    setSaving(false)
-    if (err) { setError(err.message); return }
+  }
+
+  // PASSO 2: Guardar contrato
+  async function handleSaveContract() {
+    if (contractForm.skip) { onSaved(); return }
+    if (!contractForm.space_id || !contractForm.monthly_rent || !contractForm.start_date) {
+      setContractError('Espaço, renda e data de início são obrigatórios')
+      return
+    }
+    setSavingContract(true); setContractError('')
+
+    const tenantId = newTenantId!
+
+    const { error: err } = await supabase.from('leases').insert({
+      space_id: contractForm.space_id,
+      tenant_id: tenantId,
+      monthly_rent: parseFloat(contractForm.monthly_rent),
+      deposit: contractForm.deposit ? parseFloat(contractForm.deposit) : null,
+      start_date: contractForm.start_date,
+      end_date: contractForm.end_date || null,
+      notes: contractForm.notes || null,
+      status: contractForm.status,
+    })
+
+    if (!err) {
+      await supabase.from('spaces').update({
+        status: 'arrendado',
+        tenant_id: tenantId,
+      }).eq('id', contractForm.space_id)
+    }
+
+    setSavingContract(false)
+    if (err) { setContractError(err.message); return }
     onSaved()
   }
 
@@ -259,13 +325,8 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
 
     let err
     if (editingPaymentId) {
-      // Editar existente
-      ;({ error: err } = await supabase
-        .from('rent_payments')
-        .update(payload)
-        .eq('id', editingPaymentId))
+      ;({ error: err } = await supabase.from('rent_payments').update(payload).eq('id', editingPaymentId))
     } else {
-      // Novo registo
       ;({ error: err } = await supabase.from('rent_payments').insert(payload))
     }
 
@@ -293,16 +354,31 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
 
         {/* Header */}
         <div className="flex items-center justify-between mb-4">
-          <h2 className="font-semibold text-lg text-gray-900">
-            {tenant ? tenant.name : 'Novo Inquilino'}
-          </h2>
+          <div>
+            <h2 className="font-semibold text-lg text-gray-900">
+              {isNew ? (step === 1 ? 'Novo Inquilino' : `${form.name} — Contrato`) : tenant!.name}
+            </h2>
+            {isNew && (
+              <p className="text-xs text-gray-400 mt-0.5">
+                Passo {step} de 2 — {step === 1 ? 'Dados pessoais' : 'Contrato de arrendamento'}
+              </p>
+            )}
+          </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Tabs */}
-        {tenant && (
+        {/* Indicador de passos (só para novo) */}
+        {isNew && (
+          <div className="flex gap-2 mb-5">
+            <div className={`flex-1 h-1.5 rounded-full ${step >= 1 ? 'bg-emerald-500' : 'bg-gray-200'}`} />
+            <div className={`flex-1 h-1.5 rounded-full ${step >= 2 ? 'bg-emerald-500' : 'bg-gray-200'}`} />
+          </div>
+        )}
+
+        {/* Tabs (só para edição) */}
+        {!isNew && (
           <div className="flex gap-1 mb-5 bg-gray-100 rounded-lg p-1">
             <button onClick={() => setTab('dados')}
               className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-md text-sm font-medium transition-colors ${tab === 'dados' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
@@ -327,8 +403,8 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
         {/* Conteúdo */}
         <div className="flex-1 overflow-y-auto">
 
-          {/* TAB: DADOS */}
-          {tab === 'dados' && (
+          {/* NOVO INQUILINO — PASSO 1: Dados */}
+          {isNew && step === 1 && (
             <div className="space-y-4">
               <div>
                 <label className="label">Nome completo *</label>
@@ -361,8 +437,105 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
             </div>
           )}
 
-          {/* TAB: ESPAÇOS */}
-          {tab === 'espacos' && (
+          {/* NOVO INQUILINO — PASSO 2: Contrato */}
+          {isNew && step === 2 && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-3 mb-2">
+                <button
+                  onClick={() => setContractForm(f => ({ ...f, skip: false }))}
+                  className={`py-3 rounded-lg border-2 text-sm font-medium transition-colors ${!contractForm.skip ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-gray-200 text-gray-500'}`}>
+                  📄 Adicionar contrato agora
+                </button>
+                <button
+                  onClick={() => setContractForm(f => ({ ...f, skip: true }))}
+                  className={`py-3 rounded-lg border-2 text-sm font-medium transition-colors ${contractForm.skip ? 'border-gray-400 bg-gray-50 text-gray-700' : 'border-gray-200 text-gray-500'}`}>
+                  ⏭ Saltar por agora
+                </button>
+              </div>
+
+              {!contractForm.skip && (
+                <>
+                  <div>
+                    <label className="label">Espaço *</label>
+                    <select className="input" value={contractForm.space_id}
+                      onChange={e => setContractForm(f => ({ ...f, space_id: e.target.value }))}>
+                      <option value="">Selecionar espaço...</option>
+                      {spaces.map(s => (
+                        <option key={s.id} value={s.id}>{s.ref} — {s.type}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="label">Renda Mensal (€) *</label>
+                      <input className="input" type="number" placeholder="0.00" value={contractForm.monthly_rent}
+                        onChange={e => setContractForm(f => ({ ...f, monthly_rent: e.target.value }))} />
+                    </div>
+                    <div>
+                      <label className="label">Caução / Sinal (€)</label>
+                      <input className="input" type="number" placeholder="0.00" value={contractForm.deposit}
+                        onChange={e => setContractForm(f => ({ ...f, deposit: e.target.value }))} />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="label">Data de Início *</label>
+                      <input className="input" type="date" value={contractForm.start_date}
+                        onChange={e => setContractForm(f => ({ ...f, start_date: e.target.value }))} />
+                    </div>
+                    <div>
+                      <label className="label">Data de Fim</label>
+                      <input className="input" type="date" value={contractForm.end_date}
+                        onChange={e => setContractForm(f => ({ ...f, end_date: e.target.value }))} />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="label">Notas do contrato</label>
+                    <textarea className="input" rows={2} value={contractForm.notes}
+                      onChange={e => setContractForm(f => ({ ...f, notes: e.target.value }))} />
+                  </div>
+                  {contractError && <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg">{contractError}</p>}
+                </>
+              )}
+            </div>
+          )}
+
+          {/* EDIÇÃO — TAB: DADOS */}
+          {!isNew && tab === 'dados' && (
+            <div className="space-y-4">
+              <div>
+                <label className="label">Nome completo *</label>
+                <input className="input" placeholder="Nome do inquilino" value={form.name}
+                  onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="label">Telefone</label>
+                  <input className="input" placeholder="9XX XXX XXX" value={form.phone}
+                    onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="label">NIF</label>
+                  <input className="input" placeholder="XXX XXX XXX" value={form.nif}
+                    onChange={e => setForm(f => ({ ...f, nif: e.target.value }))} />
+                </div>
+              </div>
+              <div>
+                <label className="label">Email</label>
+                <input className="input" type="email" placeholder="email@exemplo.com" value={form.email}
+                  onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
+              </div>
+              <div>
+                <label className="label">Notas</label>
+                <textarea className="input" rows={3} placeholder="Observações..." value={form.notes}
+                  onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
+              </div>
+              {error && <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg">{error}</p>}
+            </div>
+          )}
+
+          {/* EDIÇÃO — TAB: ESPAÇOS */}
+          {!isNew && tab === 'espacos' && (
             <div>
               <p className="text-sm text-gray-500 mb-4">Clica num espaço para associar ou desassociar.</p>
               {savingSpaces && <p className="text-xs text-emerald-600 mb-3">A guardar...</p>}
@@ -389,8 +562,8 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
             </div>
           )}
 
-          {/* TAB: CONTA CORRENTE */}
-          {tab === 'conta' && (
+          {/* EDIÇÃO — TAB: CONTA CORRENTE */}
+          {!isNew && tab === 'conta' && (
             <div>
               <div className="grid grid-cols-3 gap-3 mb-4">
                 <div className="bg-gray-50 rounded-lg p-3 text-center">
@@ -568,15 +741,33 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
         </div>
 
         {/* Footer */}
-        {tab === 'dados' && (
+        {isNew && step === 1 && (
           <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-100">
             <button className="btn-secondary" onClick={onClose}>Cancelar</button>
-            <button className="btn-primary" onClick={handleSave} disabled={saving}>
+            <button className="btn-primary" onClick={handleSaveStep1} disabled={saving}>
+              {saving ? 'A guardar...' : 'Seguinte'} <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+        {isNew && step === 2 && (
+          <div className="flex justify-between gap-3 mt-6 pt-4 border-t border-gray-100">
+            <button className="btn-secondary flex items-center gap-1" onClick={() => setStep(1)}>
+              <ChevronLeft className="w-4 h-4" /> Voltar
+            </button>
+            <button className="btn-primary" onClick={handleSaveContract} disabled={savingContract}>
+              {savingContract ? 'A guardar...' : contractForm.skip ? 'Concluir sem contrato' : 'Guardar tudo'}
+            </button>
+          </div>
+        )}
+        {!isNew && tab === 'dados' && (
+          <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-100">
+            <button className="btn-secondary" onClick={onClose}>Cancelar</button>
+            <button className="btn-primary" onClick={handleSaveStep1} disabled={saving}>
               {saving ? 'A guardar...' : 'Guardar'}
             </button>
           </div>
         )}
-        {(tab === 'espacos' || tab === 'conta') && (
+        {!isNew && (tab === 'espacos' || tab === 'conta') && (
           <div className="flex justify-end mt-6 pt-4 border-t border-gray-100">
             <button className="btn-secondary" onClick={onClose}>Fechar</button>
           </div>
