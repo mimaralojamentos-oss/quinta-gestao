@@ -1,4 +1,4 @@
-export type SpaceType = 'pavilhao' | 'habitacao' | 'casa' | 'loja'
+export type SpaceType = 'pavilhao' | 'habitacao' | 'loja'
 export type SpaceStatus = 'arrendado' | 'disponivel'
 export type PaymentMethod = 'dinheiro' | 'banco' | 'transferencia'
 export type ExpenseCategory = 'obras' | 'edp' | 'pessoal' | 'contabilidade' | 'manutencao' | 'outros'
