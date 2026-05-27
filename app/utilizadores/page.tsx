@@ -248,6 +248,7 @@ function EditUserModal({ profile, isCurrentUser, onClose, onSaved }: {
 }) {
   const [form, setForm] = useState({
     name: profile.name,
+    email: '',
     role: profile.role,
     password: '',
     confirmPassword: '',
@@ -260,6 +261,8 @@ function EditUserModal({ profile, isCurrentUser, onClose, onSaved }: {
     if (!form.name.trim()) { setError('O nome é obrigatório'); return }
     if (form.password && form.password.length < 6) { setError('A password deve ter pelo menos 6 caracteres'); return }
     if (form.password && form.password !== form.confirmPassword) { setError('As passwords não coincidem'); return }
+    if (form.email && !/\S+@\S+\.\S+/.test(form.email)) { setError('Email inválido'); return }
+
     setSaving(true); setError('')
 
     const { error: profileErr } = await supabase
@@ -269,11 +272,15 @@ function EditUserModal({ profile, isCurrentUser, onClose, onSaved }: {
 
     if (profileErr) { setError(profileErr.message); setSaving(false); return }
 
-    if (form.password) {
+    if (form.password || form.email) {
       const res = await fetch('/api/update-user', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: profile.id, password: form.password }),
+        body: JSON.stringify({
+          userId: profile.id,
+          password: form.password || undefined,
+          email: form.email || undefined,
+        }),
       })
       const data = await res.json()
       if (data.error) { setError(data.error); setSaving(false); return }
@@ -301,15 +308,22 @@ function EditUserModal({ profile, isCurrentUser, onClose, onSaved }: {
             {isCurrentUser ? (
               <p className="text-sm text-gray-400 mt-1">Não pode alterar o seu próprio nível de acesso</p>
             ) : (
-              <select className="input" value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value as any }))}>
+              <select className="input" value={form.role}
+                onChange={e => setForm(f => ({ ...f, role: e.target.value as any }))}>
                 <option value="viewer">👁 Visualizador (só leitura)</option>
                 <option value="admin">🔑 Administrador (acesso total)</option>
               </select>
             )}
           </div>
+
           <div className="border-t border-gray-100 pt-4">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Alterar Password</p>
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Alterar Email / Password</p>
             <div className="space-y-3">
+              <div>
+                <label className="label">Novo Email</label>
+                <input className="input" type="email" placeholder="Deixa em branco para não alterar" value={form.email}
+                  onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
+              </div>
               <div>
                 <label className="label">Nova Password</label>
                 <input className="input" type="password" placeholder="Deixa em branco para não alterar" value={form.password}
@@ -324,6 +338,7 @@ function EditUserModal({ profile, isCurrentUser, onClose, onSaved }: {
               )}
             </div>
           </div>
+
           {error && <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg">{error}</p>}
         </div>
         <div className="flex justify-end gap-3 mt-6">
