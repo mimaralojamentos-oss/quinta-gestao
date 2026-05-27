@@ -3,15 +3,18 @@ import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Space } from '@/lib/types'
 import { X } from 'lucide-react'
+
 interface Tenant {
   id: string
   name: string
 }
+
 interface Props {
   space: Space | null
   onClose: () => void
   onSaved: () => void
 }
+
 export default function SpaceModal({ space, onClose, onSaved }: Props) {
   const [form, setForm] = useState({
     ref: space?.ref ?? '',
@@ -78,7 +81,6 @@ export default function SpaceModal({ space, onClose, onSaved }: Props) {
               <select className="input" value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value as any }))}>
                 <option value="pavilhao">Pavilhão</option>
                 <option value="habitacao">Habitação</option>
-                <option value="casa">Casa</option>
                 <option value="loja">Loja</option>
               </select>
             </div>
