@@ -24,7 +24,7 @@ export default function InquilinosPage() {
   const [filterSpace, setFilterSpace] = useState('')
   const [filterSpaceType, setFilterSpaceType] = useState<'all' | 'pavilhao' | 'habitacao' | 'casa'>('all')
   const [filterDebt, setFilterDebt] = useState<'all' | 'com_divida' | 'sem_divida'>('all')
-  const [filterContract, setFilterContract] = useState<'all' | '30dias' | '60dias' | '90dias' | 'expirado'>('all')
+  const [filterContract, setFilterContract] = useState<'all' | '30dias' | '60dias' | '90dias' | '180dias' | 'expirado'>('all')
   const [showTenantModal, setShowTenantModal] = useState(false)
   const [showLeaseModal, setShowLeaseModal] = useState(false)
   const [editTenant, setEditTenant] = useState<Tenant | null>(null)
@@ -126,6 +126,7 @@ export default function InquilinosPage() {
       else if (filterContract === '30dias') matchContract = diffDays >= 0 && diffDays <= 30
       else if (filterContract === '60dias') matchContract = diffDays >= 0 && diffDays <= 60
       else if (filterContract === '90dias') matchContract = diffDays >= 0 && diffDays <= 90
+      else if (filterContract === '180dias') matchContract = diffDays >= 0 && diffDays <= 180
     } else if (filterContract !== 'all' && !activeLease?.end_date) {
       matchContract = false
     }
@@ -183,6 +184,7 @@ export default function InquilinosPage() {
             <option value="30dias">🔴 Expira em 30 dias</option>
             <option value="60dias">🟠 Expira em 60 dias</option>
             <option value="90dias">🟡 Expira em 90 dias</option>
+            <option value="180dias">🟢 Expira em 180 dias</option>
           </select>
         </div>
 
@@ -229,6 +231,7 @@ export default function InquilinosPage() {
                     else if (diffDays <= 30) contractAlert = { label: `🔴 ${diffDays}d`, color: 'text-red-600' }
                     else if (diffDays <= 60) contractAlert = { label: `🟠 ${diffDays}d`, color: 'text-orange-600' }
                     else if (diffDays <= 90) contractAlert = { label: `🟡 ${diffDays}d`, color: 'text-yellow-600' }
+                    else if (diffDays <= 180) contractAlert = { label: `🟢 ${diffDays}d`, color: 'text-green-600' }
                   }
 
                   return (
