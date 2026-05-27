@@ -45,24 +45,50 @@ export default function InquilinosPage() {
       .select('ref, tenant_id')
       .not('tenant_id', 'is', null)
 
-    // Buscar rendas por pagar (payment_date a null)
+    // Buscar todos os pagamentos de renda
     const { data: paymentsData } = await supabase
       .from('rent_payments')
-      .select('amount, lease_id')
-      .is('payment_date', null)
+      .select('amount, lease_id, payment_date, reference_month, tipo')
+
+    const mayStart = new Date('2026-05-01')
+    const today = new Date()
+    today.setDate(1)
 
     const tenantsWithData = (tenantsData ?? []).map(t => {
-      // Contratos deste inquilino
       const leases = (leasesData ?? []).filter(l => l.tenant_id === t.id)
-
-      // Espaços diretamente associados via tenant_id
       const spaces = (spacesData ?? []).filter(s => s.tenant_id === t.id)
 
-      // Calcular dívida: rendas por pagar nos contratos deste inquilino
+      // 1. Dívidas explícitas (registos com payment_date a null)
       const leaseIds = leases.map(l => l.id)
-      const debt = (paymentsData ?? [])
-        .filter(p => leaseIds.includes(p.lease_id))
+      const explicitDebt = (paymentsData ?? [])
+        .filter(p => leaseIds.includes(p.lease_id) && !p.payment_date)
         .reduce((sum, p) => sum + (p.amount ?? 0), 0)
+
+      // 2. Meses em falta desde Maio 2026 (sem qualquer registo de renda)
+      let missingDebt = 0
+      for (const lease of leases.filter(l => l.status === 'ativo')) {
+        if (!lease.start_date) continue
+
+        const contractStart = new Date(lease.start_date)
+        contractStart.setDate(1)
+        const start = contractStart > mayStart ? contractStart : mayStart
+        const cursor = new Date(start)
+
+        while (cursor <= today) {
+          const monthStr = cursor.toISOString().slice(0, 7)
+          const hasPayment = (paymentsData ?? []).some(p =>
+            p.lease_id === lease.id &&
+            p.reference_month?.slice(0, 7) === monthStr &&
+            (p.tipo === 'renda' || !p.tipo)
+          )
+          if (!hasPayment) {
+            missingDebt += lease.monthly_rent
+          }
+          cursor.setMonth(cursor.getMonth() + 1)
+        }
+      }
+
+      const debt = explicitDebt + missingDebt
 
       return { ...t, leases, spaces, debt }
     })
@@ -182,7 +208,7 @@ export default function InquilinosPage() {
                               <p className="text-xs text-orange-600">Fim: {formatDate(activeLease.end_date)}</p>
                             )}
                             {activeLease.contract_file_path && (
-                              <a href={`#`} className="text-xs text-emerald-600 flex items-center gap-1 mt-0.5">
+                              <a href="#" className="text-xs text-emerald-600 flex items-center gap-1 mt-0.5">
                                 <FileText className="w-3 h-3" /> Ver contrato
                               </a>
                             )}
