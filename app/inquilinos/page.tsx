@@ -21,10 +21,14 @@ export default function InquilinosPage() {
   const [tenants, setTenants] = useState<TenantWithLease[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [filterSpace, setFilterSpace] = useState('')
+  const [filterDebt, setFilterDebt] = useState<'all' | 'com_divida' | 'sem_divida' | 'a_mais'>('all')
+  const [filterContract, setFilterContract] = useState<'all' | '30dias' | '60dias' | '90dias' | 'expirado'>('all')
   const [showTenantModal, setShowTenantModal] = useState(false)
   const [showLeaseModal, setShowLeaseModal] = useState(false)
   const [editTenant, setEditTenant] = useState<Tenant | null>(null)
   const [selectedTenant, setSelectedTenant] = useState<Tenant | null>(null)
+  const [allSpaceRefs, setAllSpaceRefs] = useState<string[]>([])
 
   useEffect(() => { fetchTenants() }, [])
 
@@ -45,7 +49,6 @@ export default function InquilinosPage() {
       .select('ref, tenant_id')
       .not('tenant_id', 'is', null)
 
-    // Buscar todos os pagamentos de renda
     const { data: paymentsData } = await supabase
       .from('rent_payments')
       .select('amount, lease_id, payment_date, reference_month, tipo')
@@ -54,26 +57,28 @@ export default function InquilinosPage() {
     const today = new Date()
     today.setDate(1)
 
+    // Lista de refs para o filtro de espaço
+    const refs = [...new Set((spacesData ?? []).map(s => s.ref))].sort()
+    setAllSpaceRefs(refs)
+
     const tenantsWithData = (tenantsData ?? []).map(t => {
       const leases = (leasesData ?? []).filter(l => l.tenant_id === t.id)
       const spaces = (spacesData ?? []).filter(s => s.tenant_id === t.id)
-
-      // 1. Dívidas explícitas (registos com payment_date a null)
       const leaseIds = leases.map(l => l.id)
+
+      // Dívidas explícitas
       const explicitDebt = (paymentsData ?? [])
         .filter(p => leaseIds.includes(p.lease_id) && !p.payment_date)
         .reduce((sum, p) => sum + (p.amount ?? 0), 0)
 
-      // 2. Meses em falta desde Maio 2026 (sem qualquer registo de renda)
+      // Meses em falta desde Maio 2026
       let missingDebt = 0
       for (const lease of leases.filter(l => l.status === 'ativo')) {
         if (!lease.start_date) continue
-
         const contractStart = new Date(lease.start_date)
         contractStart.setDate(1)
         const start = contractStart > mayStart ? contractStart : mayStart
         const cursor = new Date(start)
-
         while (cursor <= today) {
           const monthStr = cursor.toISOString().slice(0, 7)
           const hasPayment = (paymentsData ?? []).some(p =>
@@ -81,9 +86,7 @@ export default function InquilinosPage() {
             p.reference_month?.slice(0, 7) === monthStr &&
             (p.tipo === 'renda' || !p.tipo)
           )
-          if (!hasPayment) {
-            missingDebt += lease.monthly_rent
-          }
+          if (!hasPayment) missingDebt += lease.monthly_rent
           cursor.setMonth(cursor.getMonth() + 1)
         }
       }
@@ -97,11 +100,47 @@ export default function InquilinosPage() {
     setLoading(false)
   }
 
-  const filtered = tenants.filter(t =>
-    t.name.toLowerCase().includes(search.toLowerCase()) ||
-    t.phone?.includes(search) ||
-    t.email?.toLowerCase().includes(search.toLowerCase())
-  )
+  const today = new Date()
+
+  const filtered = tenants.filter(t => {
+    // Filtro por texto (nome, telefone, email)
+    const matchSearch = !search ||
+      t.name.toLowerCase().includes(search.toLowerCase()) ||
+      t.phone?.includes(search) ||
+      t.email?.toLowerCase().includes(search.toLowerCase())
+
+    // Filtro por espaço
+    const matchSpace = !filterSpace ||
+      t.spaces?.some(s => s.ref === filterSpace) ||
+      t.leases?.some(l => l.status === 'ativo' && l.space?.ref === filterSpace)
+
+    // Filtro por dívida
+    const debt = t.debt ?? 0
+    const totalPago = (t.leases ?? []).flatMap(l => []).reduce((s: number) => s, 0)
+    const activeLease = t.leases?.find(l => l.status === 'ativo')
+    let matchDebt = true
+    if (filterDebt === 'com_divida') matchDebt = debt > 0
+    else if (filterDebt === 'sem_divida') matchDebt = debt === 0
+    else if (filterDebt === 'a_mais') {
+      // Pagamentos cujo total excede a renda do mês (pagou a mais)
+      matchDebt = false // simplificado — mostra todos com debt negativo se implementarmos
+    }
+
+    // Filtro por data de fim de contrato
+    let matchContract = true
+    if (filterContract !== 'all' && activeLease?.end_date) {
+      const endDate = new Date(activeLease.end_date)
+      const diffDays = Math.ceil((endDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+      if (filterContract === 'expirado') matchContract = diffDays < 0
+      else if (filterContract === '30dias') matchContract = diffDays >= 0 && diffDays <= 30
+      else if (filterContract === '60dias') matchContract = diffDays >= 0 && diffDays <= 60
+      else if (filterContract === '90dias') matchContract = diffDays >= 0 && diffDays <= 90
+    } else if (filterContract !== 'all' && !activeLease?.end_date) {
+      matchContract = false
+    }
+
+    return matchSearch && matchSpace && matchDebt && matchContract
+  })
 
   return (
     <AppLayout>
@@ -119,11 +158,45 @@ export default function InquilinosPage() {
           )}
         </div>
 
-        <div className="relative max-w-xs mb-6">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input className="input pl-9" placeholder="Pesquisar inquilino..." value={search}
-            onChange={e => setSearch(e.target.value)} />
+        {/* Filtros */}
+        <div className="grid grid-cols-2 gap-3 mb-3">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <input className="input pl-9 w-full" placeholder="Pesquisar por nome, telefone, email..." value={search}
+              onChange={e => setSearch(e.target.value)} />
+          </div>
+          <select className="input" value={filterSpace} onChange={e => setFilterSpace(e.target.value)}>
+            <option value="">Todos os espaços</option>
+            {allSpaceRefs.map(ref => (
+              <option key={ref} value={ref}>{ref}</option>
+            ))}
+          </select>
         </div>
+        <div className="grid grid-cols-2 gap-3 mb-6">
+          <select className="input" value={filterDebt} onChange={e => setFilterDebt(e.target.value as any)}>
+            <option value="all">Todos (dívida)</option>
+            <option value="com_divida">⚠ Com dívida</option>
+            <option value="sem_divida">✓ Sem dívida</option>
+          </select>
+          <select className="input" value={filterContract} onChange={e => setFilterContract(e.target.value as any)}>
+            <option value="all">Todos (contrato)</option>
+            <option value="expirado">⛔ Contrato expirado</option>
+            <option value="30dias">🔴 Expira em 30 dias</option>
+            <option value="60dias">🟠 Expira em 60 dias</option>
+            <option value="90dias">🟡 Expira em 90 dias</option>
+          </select>
+        </div>
+
+        {/* Contador de resultados */}
+        {(search || filterSpace || filterDebt !== 'all' || filterContract !== 'all') && (
+          <p className="text-sm text-gray-500 mb-3">
+            {filtered.length} resultado(s)
+            <button onClick={() => { setSearch(''); setFilterSpace(''); setFilterDebt('all'); setFilterContract('all') }}
+              className="ml-2 text-xs text-emerald-600 hover:underline">
+              Limpar filtros
+            </button>
+          </p>
+        )}
 
         {loading ? (
           <div className="flex justify-center py-12">
@@ -149,6 +222,18 @@ export default function InquilinosPage() {
                 {filtered.map(tenant => {
                   const activeLease = tenant.leases?.find(l => l.status === 'ativo')
                   const hasDebt = (tenant.debt ?? 0) > 0
+
+                  // Calcular dias para fim de contrato
+                  let contractAlert = null
+                  if (activeLease?.end_date) {
+                    const endDate = new Date(activeLease.end_date)
+                    const diffDays = Math.ceil((endDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+                    if (diffDays < 0) contractAlert = { label: '⛔ Expirado', color: 'text-red-600' }
+                    else if (diffDays <= 30) contractAlert = { label: `🔴 ${diffDays}d`, color: 'text-red-600' }
+                    else if (diffDays <= 60) contractAlert = { label: `🟠 ${diffDays}d`, color: 'text-orange-600' }
+                    else if (diffDays <= 90) contractAlert = { label: `🟡 ${diffDays}d`, color: 'text-yellow-600' }
+                  }
+
                   return (
                     <tr key={tenant.id} className="hover:bg-gray-50 transition-colors">
                       <td className="table-cell">
@@ -158,14 +243,12 @@ export default function InquilinosPage() {
                         <div className="space-y-0.5">
                           {tenant.phone && (
                             <div className="flex items-center gap-1.5 text-xs text-gray-600">
-                              <Phone className="w-3 h-3" />
-                              {tenant.phone}
+                              <Phone className="w-3 h-3" />{tenant.phone}
                             </div>
                           )}
                           {tenant.email && (
                             <div className="flex items-center gap-1.5 text-xs text-gray-600">
-                              <Mail className="w-3 h-3" />
-                              {tenant.email}
+                              <Mail className="w-3 h-3" />{tenant.email}
                             </div>
                           )}
                         </div>
@@ -205,7 +288,10 @@ export default function InquilinosPage() {
                           <div>
                             <p className="text-xs">Início: {formatDate(activeLease.start_date)}</p>
                             {activeLease.end_date && (
-                              <p className="text-xs text-orange-600">Fim: {formatDate(activeLease.end_date)}</p>
+                              <p className={`text-xs font-medium ${contractAlert?.color ?? 'text-gray-500'}`}>
+                                Fim: {formatDate(activeLease.end_date)}
+                                {contractAlert && <span className="ml-1">{contractAlert.label}</span>}
+                              </p>
                             )}
                             {activeLease.contract_file_path && (
                               <a href="#" className="text-xs text-emerald-600 flex items-center gap-1 mt-0.5">
