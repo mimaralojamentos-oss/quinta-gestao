@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Tenant } from '@/lib/types'
-import { X, User, Home, FileText, Plus, Trash2 } from 'lucide-react'
+import { X, User, Home, FileText, Plus, Trash2, Pencil } from 'lucide-react'
 import { formatCurrency, formatDate } from '@/lib/utils'
 
 interface Props {
@@ -53,8 +53,9 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
   const [leases, setLeases] = useState<any[]>([])
   const [loadingPayments, setLoadingPayments] = useState(false)
 
-  // Formulário de novo pagamento
+  // Formulário de novo pagamento / edição
   const [showPaymentForm, setShowPaymentForm] = useState(false)
+  const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null)
   const [paymentForm, setPaymentForm] = useState({
     lease_id: '',
     reference_month: new Date().toISOString().slice(0, 7),
@@ -127,31 +128,26 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
       isMissing: false,
     }))
 
-    // Calcular meses em falta para contratos ativos — só a partir de Maio 2026
+    // Calcular meses em falta desde Maio 2026
     const missingRows: PaymentRow[] = []
+    const mayStart = new Date('2026-05-01')
+    const today = new Date()
+    today.setDate(1)
 
     for (const lease of leasesData.filter(l => l.status === 'ativo')) {
       if (!lease.start_date) continue
-
       const contractStart = new Date(lease.start_date)
       contractStart.setDate(1)
-      const mayStart = new Date('2026-05-01')
-      const today = new Date()
-      today.setDate(1)
-
-      // Começar em Maio 2026 ou na data do contrato, o que for mais recente
       const start = contractStart > mayStart ? contractStart : mayStart
       const cursor = new Date(start)
 
       while (cursor <= today) {
-        const monthStr = cursor.toISOString().slice(0, 7) // YYYY-MM
-
+        const monthStr = cursor.toISOString().slice(0, 7)
         const hasPayment = enriched.some(p =>
           p.lease_id === lease.id &&
           p.reference_month?.slice(0, 7) === monthStr &&
           (p.tipo === 'renda' || !p.tipo)
         )
-
         if (!hasPayment) {
           missingRows.push({
             reference_month: monthStr + '-01',
@@ -163,12 +159,10 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
             isMissing: true,
           })
         }
-
         cursor.setMonth(cursor.getMonth() + 1)
       }
     }
 
-    // Juntar e ordenar por mês descendente
     const allRows = [...enriched, ...missingRows].sort((a, b) =>
       b.reference_month.localeCompare(a.reference_month)
     )
@@ -213,6 +207,39 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
     await fetchSpaces()
   }
 
+  function handleEditPayment(p: PaymentRow) {
+    setEditingPaymentId(p.id ?? null)
+    setPaymentForm({
+      lease_id: p.lease_id ?? leases[0]?.id ?? '',
+      reference_month: p.reference_month?.slice(0, 7) ?? '',
+      amount: String(p.amount),
+      payment_date: p.payment_date ?? new Date().toISOString().slice(0, 10),
+      payment_method: p.payment_method ?? 'dinheiro',
+      tipo: p.tipo ?? 'renda',
+      notes: p.notes ?? '',
+      is_debt: !p.payment_date,
+    })
+    setShowPaymentForm(true)
+    setPaymentError('')
+  }
+
+  function handleNewPayment() {
+    setEditingPaymentId(null)
+    const activeLease = leases.find(l => l.status === 'ativo')
+    setPaymentForm({
+      lease_id: activeLease?.id ?? '',
+      reference_month: new Date().toISOString().slice(0, 7),
+      amount: String(activeLease?.monthly_rent ?? ''),
+      payment_date: new Date().toISOString().slice(0, 10),
+      payment_method: 'dinheiro',
+      tipo: 'renda',
+      notes: '',
+      is_debt: false,
+    })
+    setShowPaymentForm(true)
+    setPaymentError('')
+  }
+
   async function handleSavePayment() {
     if (!paymentForm.lease_id) { setPaymentError('Seleciona um contrato'); return }
     if (!paymentForm.amount) { setPaymentError('O valor é obrigatório'); return }
@@ -220,7 +247,7 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
 
     setSavingPayment(true); setPaymentError('')
 
-    const { error: err } = await supabase.from('rent_payments').insert({
+    const payload = {
       lease_id: paymentForm.lease_id,
       reference_month: paymentForm.reference_month + '-01',
       payment_date: paymentForm.is_debt ? null : paymentForm.payment_date,
@@ -228,12 +255,25 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
       payment_method: paymentForm.is_debt ? null : paymentForm.payment_method,
       tipo: paymentForm.tipo,
       notes: paymentForm.notes || null,
-    })
+    }
+
+    let err
+    if (editingPaymentId) {
+      // Editar existente
+      ;({ error: err } = await supabase
+        .from('rent_payments')
+        .update(payload)
+        .eq('id', editingPaymentId))
+    } else {
+      // Novo registo
+      ;({ error: err } = await supabase.from('rent_payments').insert(payload))
+    }
 
     setSavingPayment(false)
     if (err) { setPaymentError(err.message); return }
 
     setShowPaymentForm(false)
+    setEditingPaymentId(null)
     await fetchPayments()
   }
 
@@ -372,14 +412,16 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
               </div>
 
               {!showPaymentForm && (
-                <button onClick={() => setShowPaymentForm(true)} className="btn-primary w-full mb-4 justify-center">
+                <button onClick={handleNewPayment} className="btn-primary w-full mb-4 justify-center">
                   <Plus className="w-4 h-4" /> Registar Pagamento / Dívida
                 </button>
               )}
 
               {showPaymentForm && (
                 <div className="border border-emerald-200 bg-emerald-50 rounded-xl p-4 mb-4">
-                  <h3 className="font-medium text-gray-800 mb-3">Novo Registo</h3>
+                  <h3 className="font-medium text-gray-800 mb-3">
+                    {editingPaymentId ? '✏️ Editar Registo' : 'Novo Registo'}
+                  </h3>
                   <div className="space-y-3">
                     {leases.length > 1 && (
                       <div>
@@ -451,14 +493,14 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
                     )}
                     <div>
                       <label className="label">Notas (opcional)</label>
-                      <input className="input" placeholder="ex: dívida de Janeiro 2025" value={paymentForm.notes}
+                      <input className="input" placeholder="ex: pagamento parcial" value={paymentForm.notes}
                         onChange={e => setPaymentForm(f => ({ ...f, notes: e.target.value }))} />
                     </div>
                     {paymentError && <p className="text-sm text-red-600 bg-red-100 px-3 py-2 rounded-lg">{paymentError}</p>}
                     <div className="flex gap-2 pt-1">
-                      <button className="btn-secondary flex-1" onClick={() => setShowPaymentForm(false)}>Cancelar</button>
+                      <button className="btn-secondary flex-1" onClick={() => { setShowPaymentForm(false); setEditingPaymentId(null) }}>Cancelar</button>
                       <button className="btn-primary flex-1 justify-center" onClick={handleSavePayment} disabled={savingPayment}>
-                        {savingPayment ? 'A guardar...' : 'Guardar'}
+                        {savingPayment ? 'A guardar...' : editingPaymentId ? 'Guardar alterações' : 'Guardar'}
                       </button>
                     </div>
                   </div>
@@ -500,15 +542,21 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
                         }
                         {p.notes && <p className="text-xs text-gray-400 mt-0.5">{p.notes}</p>}
                       </div>
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2">
                         <span className={`font-semibold text-sm ${p.payment_date ? 'text-gray-900' : 'text-red-600'}`}>
                           {formatCurrency(p.amount)}
                         </span>
                         {!p.isMissing && p.id && (
-                          <button onClick={() => handleDeletePayment(p.id!)}
-                            className="text-gray-300 hover:text-red-500 transition-colors" title="Apagar">
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          <>
+                            <button onClick={() => handleEditPayment(p)}
+                              className="text-gray-300 hover:text-blue-500 transition-colors" title="Editar">
+                              <Pencil className="w-4 h-4" />
+                            </button>
+                            <button onClick={() => handleDeletePayment(p.id!)}
+                              className="text-gray-300 hover:text-red-500 transition-colors" title="Apagar">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </>
                         )}
                       </div>
                     </div>
