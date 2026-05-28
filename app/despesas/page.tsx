@@ -5,9 +5,14 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Expense } from '@/lib/types'
 import { formatCurrency, formatDate, categoryLabel } from '@/lib/utils'
-import { Plus, Search, FileText } from 'lucide-react'
+import { Plus, Search, FileText, Trash2, X } from 'lucide-react'
 import ExpenseModal from './ExpenseModal'
 import { useAuth } from '@/lib/auth-context'
+
+interface DeleteConfirm {
+  expense: any
+  hasInvoice: boolean
+}
 
 export default function DespesasPage() {
   const { isAdmin } = useAuth()
@@ -21,25 +26,23 @@ export default function DespesasPage() {
   const [showModal, setShowModal] = useState(false)
   const [editExpense, setEditExpense] = useState<Expense | null>(null)
   const [summary, setSummary] = useState({ total: 0, cash: 0, bank: 0 })
+  const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirm | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => { fetchAll() }, [])
 
   async function fetchAll() {
     setLoading(true)
-
     const { data: expensesData } = await supabase
       .from('expenses')
       .select('*, project:projects(id, name, type, location_label, space:spaces(ref))')
       .order('expense_date', { ascending: false })
-
     const { data: projectsData } = await supabase
       .from('projects')
       .select('id, name, type, location_label, space:spaces(ref)')
       .order('name')
-
     setExpenses(expensesData ?? [])
     setProjects(projectsData ?? [])
-
     const total = (expensesData ?? []).reduce((s, e) => s + e.amount, 0)
     const cash = (expensesData ?? []).filter(e => e.payment_method === 'dinheiro').reduce((s, e) => s + e.amount, 0)
     setSummary({ total, cash, bank: total - cash })
@@ -47,11 +50,7 @@ export default function DespesasPage() {
   }
 
   async function handleProjectChange(expenseId: string, projectId: string) {
-    await supabase
-      .from('expenses')
-      .update({ project_id: projectId || null })
-      .eq('id', expenseId)
-    // Atualizar localmente sem reload
+    await supabase.from('expenses').update({ project_id: projectId || null }).eq('id', expenseId)
     setExpenses(prev => prev.map(e => {
       if (e.id !== expenseId) return e
       const project = projects.find(p => p.id === projectId) ?? null
@@ -59,10 +58,57 @@ export default function DespesasPage() {
     }))
   }
 
-  async function downloadInvoice(expense: any) {
-    if (!expense.invoice_file_path) return
-    const { data } = await supabase.storage.from('documents').createSignedUrl(expense.invoice_file_path, 60)
-    if (data?.signedUrl) window.open(data.signedUrl, '_blank')
+  function handleDeleteClick(expense: any) {
+    setDeleteConfirm({
+      expense,
+      hasInvoice: !!(expense.invoice_id || expense.invoice_file_path),
+    })
+  }
+
+  async function handleDeleteConfirm(deleteInvoice: boolean) {
+    if (!deleteConfirm) return
+    setDeleting(true)
+    const { expense } = deleteConfirm
+
+    // Apagar movimento de caixa associado
+    await supabase.from('cash_fund_movements').delete().eq('source_id', expense.id)
+
+    // Apagar fatura se pedido
+    if (deleteInvoice && expense.invoice_id) {
+      // Apagar ficheiro do storage
+      const { data: inv } = await supabase
+        .from('invoices').select('file_path').eq('id', expense.invoice_id).single()
+      if (inv?.file_path) {
+        await supabase.storage.from('invoices').remove([inv.file_path])
+      }
+      await supabase.from('invoices').delete().eq('id', expense.invoice_id)
+    }
+
+    // Apagar ficheiro de invoice_file_path (storage documents) se existir e não houver invoice_id
+    if (deleteInvoice && expense.invoice_file_path && !expense.invoice_id) {
+      await supabase.storage.from('documents').remove([expense.invoice_file_path])
+    }
+
+    // Apagar despesa
+    await supabase.from('expenses').delete().eq('id', expense.id)
+
+    setDeleting(false)
+    setDeleteConfirm(null)
+    fetchAll()
+  }
+
+  async function viewInvoice(expense: any) {
+    if (expense.invoice_id) {
+      const { data: inv } = await supabase
+        .from('invoices').select('file_path').eq('id', expense.invoice_id).single()
+      if (inv?.file_path) {
+        const { data } = supabase.storage.from('invoices').getPublicUrl(inv.file_path)
+        if (data?.publicUrl) window.open(data.publicUrl, '_blank')
+      }
+    } else if (expense.invoice_file_path) {
+      const { data } = await supabase.storage.from('documents').createSignedUrl(expense.invoice_file_path, 60)
+      if (data?.signedUrl) window.open(data.signedUrl, '_blank')
+    }
   }
 
   function projectLabel(p: any) {
@@ -128,18 +174,10 @@ export default function DespesasPage() {
           </div>
         </div>
 
-        {/* Alerta despesas sem projeto */}
         {semProjeto > 0 && (
           <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-4 py-2 mb-4 flex items-center justify-between">
-            <p className="text-sm text-yellow-700">
-              ⚠ <strong>{semProjeto}</strong> despesa(s) sem projeto associado
-            </p>
-            <button
-              onClick={() => setFilterProject('none')}
-              className="text-xs text-yellow-700 hover:underline font-medium"
-            >
-              Ver só estas
-            </button>
+            <p className="text-sm text-yellow-700">⚠ <strong>{semProjeto}</strong> despesa(s) sem projeto associado</p>
+            <button onClick={() => setFilterProject('none')} className="text-xs text-yellow-700 hover:underline font-medium">Ver só estas</button>
           </div>
         )}
 
@@ -214,29 +252,21 @@ export default function DespesasPage() {
                     </td>
                     <td className="table-cell">
                       {isAdmin ? (
-                        <select
-                          value={expense.project_id ?? ''}
+                        <select value={expense.project_id ?? ''}
                           onChange={e => handleProjectChange(expense.id, e.target.value)}
-                          className={`text-xs border rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-emerald-500 max-w-[180px] ${
-                            expense.project_id
-                              ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                              : 'border-yellow-200 bg-yellow-50 text-yellow-700'
-                          }`}
-                        >
+                          className={`text-xs border rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-emerald-500 max-w-[180px] ${expense.project_id ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-yellow-200 bg-yellow-50 text-yellow-700'}`}>
                           <option value="">— Sem projeto —</option>
                           {projects.map(p => (
                             <option key={p.id} value={p.id}>{projectLabel(p)}</option>
                           ))}
                         </select>
                       ) : (
-                        <span className="text-xs text-gray-600">
-                          {expense.project ? projectLabel(expense.project) : '—'}
-                        </span>
+                        <span className="text-xs text-gray-600">{expense.project ? projectLabel(expense.project) : '—'}</span>
                       )}
                     </td>
                     <td className="table-cell">
-                      {expense.invoice_file_path ? (
-                        <button onClick={() => downloadInvoice(expense)}
+                      {(expense.invoice_id || expense.invoice_file_path) ? (
+                        <button onClick={() => viewInvoice(expense)}
                           className="flex items-center gap-1 text-xs text-emerald-600 hover:underline">
                           <FileText className="w-3 h-3" /> Ver
                         </button>
@@ -244,8 +274,14 @@ export default function DespesasPage() {
                     </td>
                     {isAdmin && (
                       <td className="table-cell">
-                        <button onClick={() => { setEditExpense(expense); setShowModal(true) }}
-                          className="text-xs text-emerald-600 hover:underline font-medium">Editar</button>
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => { setEditExpense(expense); setShowModal(true) }}
+                            className="text-xs text-emerald-600 hover:underline font-medium">Editar</button>
+                          <button onClick={() => handleDeleteClick(expense)}
+                            className="text-gray-300 hover:text-red-500 transition-colors">
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </td>
                     )}
                   </tr>
@@ -258,6 +294,67 @@ export default function DespesasPage() {
           </div>
         )}
       </div>
+
+      {/* Modal de confirmação de apagar */}
+      {deleteConfirm && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-semibold text-lg text-gray-900">Apagar Despesa</h2>
+              <button onClick={() => setDeleteConfirm(null)}><X className="w-5 h-5 text-gray-400" /></button>
+            </div>
+
+            <p className="text-sm text-gray-600 mb-2">
+              Tens a certeza que queres apagar a despesa:
+            </p>
+            <p className="font-medium text-gray-900 mb-1">{deleteConfirm.expense.description}</p>
+            <p className="text-sm text-red-600 font-semibold mb-4">{formatCurrency(deleteConfirm.expense.amount)}</p>
+
+            {deleteConfirm.hasInvoice && (
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-5">
+                <p className="text-sm text-yellow-800 font-medium mb-3">
+                  📄 Esta despesa tem uma fatura associada. O que queres fazer?
+                </p>
+                <div className="flex flex-col gap-2">
+                  <button
+                    onClick={() => handleDeleteConfirm(true)}
+                    disabled={deleting}
+                    className="w-full py-2.5 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-700 transition-colors disabled:opacity-50"
+                  >
+                    {deleting ? 'A apagar...' : '🗑️ Apagar despesa e fatura'}
+                  </button>
+                  <button
+                    onClick={() => handleDeleteConfirm(false)}
+                    disabled={deleting}
+                    className="w-full py-2.5 rounded-lg bg-orange-500 text-white text-sm font-medium hover:bg-orange-600 transition-colors disabled:opacity-50"
+                  >
+                    {deleting ? 'A apagar...' : '📄 Apagar só a despesa (manter fatura)'}
+                  </button>
+                  <button
+                    onClick={() => setDeleteConfirm(null)}
+                    className="w-full py-2.5 rounded-lg border border-gray-200 text-gray-600 text-sm font-medium hover:bg-gray-50 transition-colors"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {!deleteConfirm.hasInvoice && (
+              <div className="flex justify-end gap-3">
+                <button className="btn-secondary" onClick={() => setDeleteConfirm(null)}>Cancelar</button>
+                <button
+                  onClick={() => handleDeleteConfirm(false)}
+                  disabled={deleting}
+                  className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-700 disabled:opacity-50"
+                >
+                  {deleting ? 'A apagar...' : 'Apagar'}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {showModal && isAdmin && (
         <ExpenseModal
