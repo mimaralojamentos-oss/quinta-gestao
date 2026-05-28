@@ -1,7 +1,9 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { Home, Eye, EyeOff, Loader2 } from 'lucide-react'
+
+const images = ['/QdBC1.jpeg', '/QdBC2.jpeg']
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -9,7 +11,15 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [currentImage, setCurrentImage] = useState(0)
   const supabase = createClient()
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentImage(prev => (prev + 1) % images.length)
+    }, 5000)
+    return () => clearInterval(interval)
+  }, [])
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
@@ -22,16 +32,23 @@ export default function LoginPage() {
   }
 
   return (
-    <div
-      className="min-h-screen flex items-center justify-center p-4"
-      style={{
-        backgroundImage: 'url(/QdBC1.jpeg)',
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        backgroundRepeat: 'no-repeat',
-      }}
-    >
-      {/* Overlay escuro para melhorar legibilidade */}
+    <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden">
+      {/* Imagens de fundo com transição */}
+      {images.map((img, idx) => (
+        <div
+          key={img}
+          className="absolute inset-0 transition-opacity duration-1000"
+          style={{
+            backgroundImage: `url(${img})`,
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+            backgroundRepeat: 'no-repeat',
+            opacity: idx === currentImage ? 1 : 0,
+          }}
+        />
+      ))}
+
+      {/* Overlay escuro */}
       <div className="absolute inset-0 bg-black/40" />
 
       <div className="relative z-10 w-full max-w-md">
@@ -69,7 +86,18 @@ export default function LoginPage() {
           </form>
         </div>
 
-        <p className="text-center text-xs text-white/60 mt-6 drop-shadow">Acesso restrito a utilizadores autorizados</p>
+        {/* Indicadores de imagem */}
+        <div className="flex justify-center gap-2 mt-4">
+          {images.map((_, idx) => (
+            <button
+              key={idx}
+              onClick={() => setCurrentImage(idx)}
+              className={`w-2 h-2 rounded-full transition-all ${idx === currentImage ? 'bg-white w-4' : 'bg-white/50'}`}
+            />
+          ))}
+        </div>
+
+        <p className="text-center text-xs text-white/60 mt-4 drop-shadow">Acesso restrito a utilizadores autorizados</p>
       </div>
     </div>
   )
