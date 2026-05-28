@@ -4,7 +4,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Plus, Search, FileText, Upload, Loader2, X, Eye, CheckCircle, AlertCircle, ArrowRightCircle } from 'lucide-react'
+import { Plus, Search, FileText, Upload, Loader2, X, Eye, CheckCircle, AlertCircle, ArrowRightCircle, Trash2 } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 
 interface Invoice {
@@ -28,6 +28,11 @@ interface Invoice {
   created_at: string
 }
 
+interface DeleteConfirm {
+  invoice: Invoice
+  hasExpense: boolean
+}
+
 const categoryColors: Record<string, string> = {
   obras: 'bg-orange-100 text-orange-700',
   edp: 'bg-yellow-100 text-yellow-700',
@@ -38,12 +43,8 @@ const categoryColors: Record<string, string> = {
 }
 
 const categoryLabels: Record<string, string> = {
-  obras: 'Obras',
-  edp: 'Eletricidade',
-  pessoal: 'Pessoal',
-  contabilidade: 'Contabilidade',
-  manutencao: 'Manutenção',
-  outros: 'Outros',
+  obras: 'Obras', edp: 'Eletricidade', pessoal: 'Pessoal',
+  contabilidade: 'Contabilidade', manutencao: 'Manutenção', outros: 'Outros',
 }
 
 interface UploadResult {
@@ -68,6 +69,8 @@ export default function FaturasPage() {
   const [uploadResults, setUploadResults] = useState<UploadResult[]>([])
   const [uploadDone, setUploadDone] = useState(false)
   const [converting, setConverting] = useState<string | null>(null)
+  const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirm | null>(null)
+  const [deleting, setDeleting] = useState(false)
   const supabase = createClient()
 
   useEffect(() => { fetchInvoices() }, [])
@@ -85,10 +88,8 @@ export default function FaturasPage() {
   async function handleUpload() {
     if (files.length === 0) { setUploadError('Selecione pelo menos um ficheiro PDF'); return }
     setUploading(true); setUploadError(''); setUploadDone(false)
-
     const results: UploadResult[] = files.map(f => ({ fileName: f.name, status: 'pending' }))
     setUploadResults(results)
-
     for (let i = 0; i < files.length; i++) {
       const file = files[i]
       setUploadResults(prev => prev.map((r, idx) => idx === i ? { ...r, status: 'processing' } : r))
@@ -100,17 +101,12 @@ export default function FaturasPage() {
         if (data.error) {
           setUploadResults(prev => prev.map((r, idx) => idx === i ? { ...r, status: 'error', error: data.error } : r))
         } else {
-          setUploadResults(prev => prev.map((r, idx) => idx === i ? {
-            ...r,
-            status: 'success',
-            autoExpense: data.autoExpense
-          } : r))
+          setUploadResults(prev => prev.map((r, idx) => idx === i ? { ...r, status: 'success', autoExpense: data.autoExpense } : r))
         }
       } catch (e: any) {
         setUploadResults(prev => prev.map((r, idx) => idx === i ? { ...r, status: 'error', error: e.message } : r))
       }
     }
-
     setUploading(false); setUploadDone(true)
     fetchInvoices()
   }
@@ -118,7 +114,6 @@ export default function FaturasPage() {
   async function handleConvertToExpense(inv: Invoice) {
     setConverting(inv.id)
     try {
-      // Criar despesa a partir da fatura
       const { data: newExpense, error: expErr } = await supabase
         .from('expenses')
         .insert({
@@ -132,25 +127,46 @@ export default function FaturasPage() {
           notes: `Convertido da fatura ${inv.invoice_number ?? ''}`.trim(),
           invoice_id: inv.id,
         })
-        .select()
-        .single()
-
+        .select().single()
       if (expErr) { alert('Erro: ' + expErr.message); setConverting(null); return }
-
-      // Atualizar fatura com referência à despesa
-      await supabase.from('invoices').update({
-        expense_id: newExpense.id,
-        status: 'categorizada',
-      }).eq('id', inv.id)
-
-      // Atualizar localmente
-      setInvoices(prev => prev.map(i =>
-        i.id === inv.id ? { ...i, expense_id: newExpense.id, status: 'categorizada' } : i
-      ))
+      await supabase.from('invoices').update({ expense_id: newExpense.id, status: 'categorizada' }).eq('id', inv.id)
+      setInvoices(prev => prev.map(i => i.id === inv.id ? { ...i, expense_id: newExpense.id, status: 'categorizada' } : i))
     } catch (e: any) {
       alert('Erro: ' + e.message)
     }
     setConverting(null)
+  }
+
+  async function handleDeleteConfirm(deleteExpense: boolean) {
+    if (!deleteConfirm) return
+    setDeleting(true)
+    const { invoice } = deleteConfirm
+
+    try {
+      // 1. Apagar despesa associada se pedido
+      if (deleteExpense && invoice.expense_id) {
+        await supabase.from('cash_fund_movements').delete().eq('source_id', invoice.expense_id)
+        await supabase.from('expenses').delete().eq('id', invoice.expense_id)
+      } else if (invoice.expense_id) {
+        // Manter despesa mas desligar a fatura
+        await supabase.from('expenses').update({ invoice_id: null }).eq('id', invoice.expense_id)
+      }
+
+      // 2. Apagar ficheiro do storage
+      if (invoice.file_path) {
+        await supabase.storage.from('invoices').remove([invoice.file_path])
+      }
+
+      // 3. Apagar fatura
+      await supabase.from('invoices').delete().eq('id', invoice.id)
+
+    } catch (e: any) {
+      console.error('Erro ao apagar:', e)
+    }
+
+    setDeleting(false)
+    setDeleteConfirm(null)
+    fetchInvoices()
   }
 
   function handleClose() {
@@ -209,29 +225,19 @@ export default function FaturasPage() {
           <div className="card cursor-pointer hover:border-emerald-300 transition-colors"
             onClick={() => setFilterStatus(filterStatus === 'convertida' ? 'all' : 'convertida')}>
             <p className="text-sm text-gray-500 mb-1">Convertidas em Despesa</p>
-            <p className="text-xl font-bold text-emerald-600">
-              {invoices.filter(i => i.expense_id).length}
-            </p>
+            <p className="text-xl font-bold text-emerald-600">{invoices.filter(i => i.expense_id).length}</p>
           </div>
           <div className="card cursor-pointer hover:border-yellow-300 transition-colors"
             onClick={() => setFilterStatus(filterStatus === 'por_converter' ? 'all' : 'por_converter')}>
             <p className="text-sm text-gray-500 mb-1">Por Converter</p>
-            <p className={`text-xl font-bold ${porConverter > 0 ? 'text-yellow-600' : 'text-gray-400'}`}>
-              {porConverter}
-            </p>
+            <p className={`text-xl font-bold ${porConverter > 0 ? 'text-yellow-600' : 'text-gray-400'}`}>{porConverter}</p>
           </div>
         </div>
 
-        {/* Aviso faturas por converter */}
         {porConverter > 0 && (
           <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-4 py-2 mb-4 flex items-center justify-between">
-            <p className="text-sm text-yellow-700">
-              ⚠ <strong>{porConverter}</strong> fatura(s) ainda não convertidas em despesa
-            </p>
-            <button onClick={() => setFilterStatus('por_converter')}
-              className="text-xs text-yellow-700 hover:underline font-medium">
-              Ver só estas
-            </button>
+            <p className="text-sm text-yellow-700">⚠ <strong>{porConverter}</strong> fatura(s) ainda não convertidas em despesa</p>
+            <button onClick={() => setFilterStatus('por_converter')} className="text-xs text-yellow-700 hover:underline font-medium">Ver só estas</button>
           </div>
         )}
 
@@ -243,9 +249,7 @@ export default function FaturasPage() {
           </div>
           <select className="input w-44" value={filterCategory} onChange={e => setFilterCategory(e.target.value)}>
             <option value="all">Todas as categorias</option>
-            {Object.entries(categoryLabels).map(([k, v]) => (
-              <option key={k} value={k}>{v}</option>
-            ))}
+            {Object.entries(categoryLabels).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
           </select>
           <select className="input w-44" value={filterOwner} onChange={e => setFilterOwner(e.target.value)}>
             <option value="all">Todos os proprietários</option>
@@ -319,37 +323,76 @@ export default function FaturasPage() {
                     </td>
                     {isAdmin && (
                       <td className="table-cell">
-                        {!inv.expense_id ? (
-                          <button
-                            onClick={() => handleConvertToExpense(inv)}
-                            disabled={converting === inv.id}
-                            className="flex items-center gap-1 text-xs text-blue-600 hover:underline font-medium whitespace-nowrap"
-                          >
-                            {converting === inv.id
-                              ? <Loader2 className="w-3 h-3 animate-spin" />
-                              : <ArrowRightCircle className="w-3 h-3" />
-                            }
-                            Converter
+                        <div className="flex items-center gap-2">
+                          {!inv.expense_id && (
+                            <button onClick={() => handleConvertToExpense(inv)} disabled={converting === inv.id}
+                              className="flex items-center gap-1 text-xs text-blue-600 hover:underline font-medium whitespace-nowrap">
+                              {converting === inv.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <ArrowRightCircle className="w-3 h-3" />}
+                              Converter
+                            </button>
+                          )}
+                          <button onClick={() => setDeleteConfirm({ invoice: inv, hasExpense: !!inv.expense_id })}
+                            className="text-gray-300 hover:text-red-500 transition-colors">
+                            <Trash2 className="w-3.5 h-3.5" />
                           </button>
-                        ) : (
-                          <span className="text-xs text-gray-400">—</span>
-                        )}
+                        </div>
                       </td>
                     )}
                   </tr>
                 ))}
                 {filtered.length === 0 && (
-                  <tr>
-                    <td colSpan={isAdmin ? 9 : 8} className="py-12 text-center text-gray-400 text-sm">
-                      Nenhuma fatura encontrada
-                    </td>
-                  </tr>
+                  <tr><td colSpan={isAdmin ? 9 : 8} className="py-12 text-center text-gray-400 text-sm">Nenhuma fatura encontrada</td></tr>
                 )}
               </tbody>
             </table>
           </div>
         )}
       </div>
+
+      {/* Modal apagar fatura */}
+      {deleteConfirm && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-semibold text-lg text-gray-900">Apagar Fatura</h2>
+              <button onClick={() => setDeleteConfirm(null)}><X className="w-5 h-5 text-gray-400" /></button>
+            </div>
+            <p className="text-sm text-gray-600 mb-1">Tens a certeza que queres apagar a fatura de:</p>
+            <p className="font-medium text-gray-900 mb-1">{deleteConfirm.invoice.supplier_name ?? '—'}</p>
+            <p className="text-sm text-red-600 font-semibold mb-4">{deleteConfirm.invoice.amount ? formatCurrency(deleteConfirm.invoice.amount) : '—'}</p>
+
+            {deleteConfirm.hasExpense ? (
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-2">
+                <p className="text-sm text-yellow-800 font-medium mb-3">
+                  💸 Esta fatura tem uma despesa associada. O que queres fazer?
+                </p>
+                <div className="flex flex-col gap-2">
+                  <button onClick={() => handleDeleteConfirm(true)} disabled={deleting}
+                    className="w-full py-2.5 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-700 disabled:opacity-50">
+                    {deleting ? 'A apagar...' : '🗑️ Apagar fatura e despesa associada'}
+                  </button>
+                  <button onClick={() => handleDeleteConfirm(false)} disabled={deleting}
+                    className="w-full py-2.5 rounded-lg bg-orange-500 text-white text-sm font-medium hover:bg-orange-600 disabled:opacity-50">
+                    {deleting ? 'A apagar...' : '🧾 Apagar só a fatura (manter despesa)'}
+                  </button>
+                  <button onClick={() => setDeleteConfirm(null)}
+                    className="w-full py-2.5 rounded-lg border border-gray-200 text-gray-600 text-sm font-medium hover:bg-gray-50">
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex justify-end gap-3">
+                <button className="btn-secondary" onClick={() => setDeleteConfirm(null)}>Cancelar</button>
+                <button onClick={() => handleDeleteConfirm(false)} disabled={deleting}
+                  className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-700 disabled:opacity-50">
+                  {deleting ? 'A apagar...' : 'Apagar'}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {showUpload && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
@@ -358,7 +401,6 @@ export default function FaturasPage() {
               <h2 className="font-semibold text-lg text-gray-900">Importar Faturas</h2>
               <button onClick={handleClose}><X className="w-5 h-5 text-gray-400" /></button>
             </div>
-
             {!uploading && !uploadDone && (
               <div className="space-y-4">
                 <div>
@@ -387,40 +429,28 @@ export default function FaturasPage() {
                 {uploadError && <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg">{uploadError}</p>}
               </div>
             )}
-
             {(uploading || uploadDone) && (
               <div className="space-y-2">
                 {!uploadDone && <p className="text-sm text-gray-600 mb-3">A processar faturas com IA...</p>}
                 {uploadDone && <p className="text-sm text-gray-600 mb-3">Processamento concluído!</p>}
                 {uploadResults.map((r, i) => (
-                  <div key={i} className={`flex items-center gap-3 p-3 rounded-lg ${
-                    r.status === 'success' ? 'bg-emerald-50' :
-                    r.status === 'error' ? 'bg-red-50' :
-                    r.status === 'processing' ? 'bg-blue-50' : 'bg-gray-50'
-                  }`}>
+                  <div key={i} className={`flex items-center gap-3 p-3 rounded-lg ${r.status === 'success' ? 'bg-emerald-50' : r.status === 'error' ? 'bg-red-50' : r.status === 'processing' ? 'bg-blue-50' : 'bg-gray-50'}`}>
                     {r.status === 'success' && <CheckCircle className="w-4 h-4 text-emerald-600 flex-shrink-0" />}
                     {r.status === 'error' && <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />}
                     {r.status === 'processing' && <Loader2 className="w-4 h-4 animate-spin text-blue-600 flex-shrink-0" />}
                     {r.status === 'pending' && <div className="w-4 h-4 rounded-full border-2 border-gray-300 flex-shrink-0" />}
                     <div className="min-w-0">
                       <p className="text-xs font-medium text-gray-800 truncate">{r.fileName}</p>
-                      {r.status === 'success' && r.autoExpense && (
-                        <p className="text-xs text-emerald-600">✓ Despesa criada automaticamente</p>
-                      )}
-                      {r.status === 'success' && !r.autoExpense && (
-                        <p className="text-xs text-yellow-600">⚠ Usa "Converter" para criar a despesa</p>
-                      )}
+                      {r.status === 'success' && r.autoExpense && <p className="text-xs text-emerald-600">✓ Despesa criada automaticamente</p>}
+                      {r.status === 'success' && !r.autoExpense && <p className="text-xs text-yellow-600">⚠ Usa "Converter" para criar a despesa</p>}
                       {r.error && <p className="text-xs text-red-600">{r.error}</p>}
                     </div>
                   </div>
                 ))}
               </div>
             )}
-
             <div className="flex justify-end gap-3 mt-6">
-              <button className="btn-secondary" onClick={handleClose}>
-                {uploadDone ? 'Fechar' : 'Cancelar'}
-              </button>
+              <button className="btn-secondary" onClick={handleClose}>{uploadDone ? 'Fechar' : 'Cancelar'}</button>
               {!uploadDone && !uploading && (
                 <button className="btn-primary" onClick={handleUpload}>
                   <FileText className="w-4 h-4" />
