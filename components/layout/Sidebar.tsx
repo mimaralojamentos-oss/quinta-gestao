@@ -16,7 +16,6 @@ const navItems = [
   { href: '/espacos', label: 'Espaços', icon: Building2 },
   { href: '/inquilinos', label: 'Inquilinos', icon: Users },
   { href: '/eletricidade', label: 'Eletricidade', icon: Zap },
-  { href: '/despesas', label: 'Despesas', icon: Receipt },
   { href: '/faturas', label: 'Faturas', icon: FileText },
   { href: '/documentos', label: 'Documentos', icon: FolderOpen },
   { href: '/alertas', label: 'Alertas', icon: Bell },
@@ -24,6 +23,7 @@ const navItems = [
 
 const financeItems = [
   { href: '/pagamentos', label: 'Rendas & Pagamentos', icon: CreditCard },
+  { href: '/despesas', label: 'Despesas', icon: Receipt },
   { href: '/caixa', label: 'Fluxo de Caixa', icon: Wallet },
   { href: '/financeiro/bancos', label: 'Bancos', icon: Landmark },
 ]
@@ -33,6 +33,7 @@ export default function Sidebar() {
   const { profile, isAdmin, signOut } = useAuth()
   const [financeOpen, setFinanceOpen] = useState(
     pathname.startsWith('/pagamentos') ||
+    pathname.startsWith('/despesas') ||
     pathname.startsWith('/caixa') ||
     pathname.startsWith('/financeiro')
   )
