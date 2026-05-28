@@ -6,14 +6,12 @@ export async function POST(request: Request) {
   try {
     const formData = await request.formData()
     const file = formData.get('file') as File
-
     if (!file) return NextResponse.json({ error: 'Ficheiro não encontrado' }, { status: 400 })
 
     const bytes = await file.arrayBuffer()
     const base64 = Buffer.from(bytes).toString('base64')
 
     const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
-
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-5',
       max_tokens: 1000,
@@ -46,6 +44,7 @@ export async function POST(request: Request) {
     const text = response.content[0].type === 'text' ? response.content[0].text : ''
     const clean = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
     const extracted = JSON.parse(clean)
+
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!,
@@ -70,8 +69,8 @@ export async function POST(request: Request) {
       contentType: 'application/pdf'
     })
 
-    // Guardar na base de dados
-    const { data, error } = await supabase.from('invoices').insert({
+    // Guardar fatura na base de dados
+    const { data: invoice, error } = await supabase.from('invoices').insert({
       file_path: fileName,
       invoice_number: extracted.invoice_number,
       supplier_name: extracted.supplier_name,
@@ -88,7 +87,35 @@ export async function POST(request: Request) {
 
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })
 
-    return NextResponse.json({ success: true, invoice: data })
+    // A partir de Junho 2026 — criar despesa automaticamente
+    const invoiceDate = extracted.invoice_date ? new Date(extracted.invoice_date) : null
+    const junhoStart = new Date('2026-06-01')
+    const isJuneOrLater = invoiceDate && invoiceDate >= junhoStart
+
+    if (isJuneOrLater && invoice) {
+      const { data: newExpense } = await supabase.from('expenses').insert({
+        expense_date: extracted.invoice_date,
+        category: extracted.category ?? 'outros',
+        type: 'pontual',
+        description: extracted.items_summary ?? extracted.supplier_name ?? 'Fatura',
+        amount: extracted.amount ?? 0,
+        payment_method: 'banco', // default banco — pode editar depois
+        supplier: extracted.supplier_name ?? null,
+        notes: `Criado automaticamente a partir da fatura ${extracted.invoice_number ?? ''}`.trim(),
+        invoice_id: invoice.id,
+      }).select().single()
+
+      // Atualizar fatura com referência à despesa
+      if (newExpense) {
+        await supabase.from('invoices').update({
+          expense_id: newExpense.id,
+          status: 'categorizada',
+        }).eq('id', invoice.id)
+      }
+    }
+
+    return NextResponse.json({ success: true, invoice, autoExpense: isJuneOrLater })
+
   } catch (e: any) {
     console.error(e)
     return NextResponse.json({ error: e.message }, { status: 500 })
