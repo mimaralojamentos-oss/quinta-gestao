@@ -60,9 +60,16 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
     })
   }
 
-  async function handleDelete(id: string) {
+  async function handleDelete(p: any) {
     if (!confirm('Tens a certeza que queres apagar este pagamento?')) return
-    await supabase.from('rent_payments').delete().eq('id', id)
+
+    // Apagar movimento de caixa associado se existir
+    await supabase
+      .from('cash_fund_movements')
+      .delete()
+      .eq('source_id', p.id)
+
+    await supabase.from('rent_payments').delete().eq('id', p.id)
     onSaved()
   }
 
@@ -79,11 +86,47 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
         tipo: form.tipo,
         notes: form.notes || null,
       }).eq('id', editingPayment.id)
-      setSaving(false)
-      if (err) { setError(err.message); return }
+
+      if (err) { setError(err.message); setSaving(false); return }
+
+      // Atualizar movimento de caixa associado
+      const existingCash = await supabase
+        .from('cash_fund_movements')
+        .select('id')
+        .eq('source_id', editingPayment.id)
+        .single()
+
+      if (form.payment_method === 'dinheiro') {
+        if (existingCash.data) {
+          // Atualizar existente
+          await supabase.from('cash_fund_movements').update({
+            amount: parseFloat(form.amount),
+            movement_date: form.payment_date,
+            description: `${tipoLabels[form.tipo] ?? 'Renda'} — ${lease.space?.ref} (${lease.tenant?.name})`,
+            notes: form.notes || null,
+          }).eq('id', existingCash.data.id)
+        } else {
+          // Criar novo
+          await supabase.from('cash_fund_movements').insert({
+            movement_date: form.payment_date,
+            description: `${tipoLabels[form.tipo] ?? 'Renda'} — ${lease.space?.ref} (${lease.tenant?.name})`,
+            amount: parseFloat(form.amount),
+            type: 'entrada',
+            source: 'renda',
+            source_id: editingPayment.id,
+            notes: form.notes || null,
+          })
+        }
+      } else {
+        // Se mudou para banco, apagar movimento de caixa se existia
+        if (existingCash.data) {
+          await supabase.from('cash_fund_movements').delete().eq('id', existingCash.data.id)
+        }
+      }
+
     } else {
       // Novo pagamento
-      const { error: err } = await supabase.from('rent_payments').insert({
+      const { data: newPayment, error: err } = await supabase.from('rent_payments').insert({
         lease_id: lease.id,
         reference_month: currentMonth,
         payment_date: form.payment_date,
@@ -91,11 +134,25 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
         payment_method: form.payment_method,
         tipo: form.tipo,
         notes: form.notes || null,
-      })
-      setSaving(false)
-      if (err) { setError(err.message); return }
+      }).select().single()
+
+      if (err) { setError(err.message); setSaving(false); return }
+
+      // Se for dinheiro, registar no Fundo de Maneio
+      if (form.payment_method === 'dinheiro' && newPayment) {
+        await supabase.from('cash_fund_movements').insert({
+          movement_date: form.payment_date,
+          description: `${tipoLabels[form.tipo] ?? 'Renda'} — ${lease.space?.ref} (${lease.tenant?.name})`,
+          amount: parseFloat(form.amount),
+          type: 'entrada',
+          source: 'renda',
+          source_id: newPayment.id,
+          notes: form.notes || null,
+        })
+      }
     }
 
+    setSaving(false)
     onSaved()
   }
 
@@ -123,7 +180,10 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
                   <span className="text-xs px-2 py-0.5 rounded-full bg-gray-200 text-gray-600">
                     {tipoLabels[p.tipo] ?? p.tipo}
                   </span>
-                  {p.notes && <span className="text-xs text-gray-400 truncate max-w-[80px]">{p.notes}</span>}
+                  <span className={`text-xs px-1.5 py-0.5 rounded-full ${p.payment_method === 'dinheiro' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
+                    {p.payment_method === 'dinheiro' ? '💵' : '🏦'}
+                  </span>
+                  {p.notes && <span className="text-xs text-gray-400 truncate max-w-[60px]">{p.notes}</span>}
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="font-medium text-emerald-600">{formatCurrency(p.amount)}</span>
@@ -131,7 +191,7 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
                     className="text-gray-400 hover:text-blue-500 transition-colors">
                     <Pencil className="w-3.5 h-3.5" />
                   </button>
-                  <button onClick={() => handleDelete(p.id)} title="Apagar"
+                  <button onClick={() => handleDelete(p)} title="Apagar"
                     className="text-gray-400 hover:text-red-500 transition-colors">
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
@@ -141,7 +201,6 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
           </div>
         )}
 
-        {/* Formulário */}
         {editingPayment && (
           <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 mb-4 flex items-center justify-between">
             <p className="text-xs text-emerald-700 font-medium">✏️ A editar pagamento de {formatCurrency(editingPayment.amount)}</p>
@@ -194,6 +253,9 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
                 </button>
               ))}
             </div>
+            {form.payment_method === 'dinheiro' && (
+              <p className="text-xs text-emerald-600 mt-1.5">✓ Este valor será registado automaticamente no Fundo de Maneio</p>
+            )}
           </div>
 
           <div>
