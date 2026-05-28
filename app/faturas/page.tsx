@@ -4,7 +4,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Plus, Search, FileText, Upload, Loader2, X, Eye, CheckCircle, AlertCircle } from 'lucide-react'
+import { Plus, Search, FileText, Upload, Loader2, X, Eye, CheckCircle, AlertCircle, ArrowRightCircle } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 
 interface Invoice {
@@ -24,6 +24,7 @@ interface Invoice {
   notes: string | null
   status: string
   file_path: string | null
+  expense_id: string | null
   created_at: string
 }
 
@@ -48,6 +49,7 @@ const categoryLabels: Record<string, string> = {
 interface UploadResult {
   fileName: string
   status: 'pending' | 'processing' | 'success' | 'error'
+  autoExpense?: boolean
   error?: string
 }
 
@@ -58,12 +60,14 @@ export default function FaturasPage() {
   const [search, setSearch] = useState('')
   const [filterCategory, setFilterCategory] = useState('all')
   const [filterOwner, setFilterOwner] = useState('all')
+  const [filterStatus, setFilterStatus] = useState<'all' | 'convertida' | 'por_converter'>('all')
   const [showUpload, setShowUpload] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [files, setFiles] = useState<File[]>([])
   const [uploadError, setUploadError] = useState('')
   const [uploadResults, setUploadResults] = useState<UploadResult[]>([])
   const [uploadDone, setUploadDone] = useState(false)
+  const [converting, setConverting] = useState<string | null>(null)
   const supabase = createClient()
 
   useEffect(() => { fetchInvoices() }, [])
@@ -79,72 +83,85 @@ export default function FaturasPage() {
   }
 
   async function handleUpload() {
-    if (files.length === 0) {
-      setUploadError('Selecione pelo menos um ficheiro PDF')
-      return
-    }
+    if (files.length === 0) { setUploadError('Selecione pelo menos um ficheiro PDF'); return }
+    setUploading(true); setUploadError(''); setUploadDone(false)
 
-    setUploading(true)
-    setUploadError('')
-    setUploadDone(false)
-
-    const results: UploadResult[] = files.map(f => ({
-      fileName: f.name,
-      status: 'pending'
-    }))
+    const results: UploadResult[] = files.map(f => ({ fileName: f.name, status: 'pending' }))
     setUploadResults(results)
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i]
-
-      setUploadResults(prev => prev.map((r, idx) =>
-        idx === i ? { ...r, status: 'processing' } : r
-      ))
-
+      setUploadResults(prev => prev.map((r, idx) => idx === i ? { ...r, status: 'processing' } : r))
       try {
         const formData = new FormData()
         formData.append('file', file)
-
-        const res = await fetch('/api/process-invoice', {
-          method: 'POST',
-          body: formData,
-        })
-
+        const res = await fetch('/api/process-invoice', { method: 'POST', body: formData })
         const data = await res.json()
-
         if (data.error) {
-          setUploadResults(prev => prev.map((r, idx) =>
-            idx === i ? { ...r, status: 'error', error: data.error } : r
-          ))
+          setUploadResults(prev => prev.map((r, idx) => idx === i ? { ...r, status: 'error', error: data.error } : r))
         } else {
-          setUploadResults(prev => prev.map((r, idx) =>
-            idx === i ? { ...r, status: 'success' } : r
-          ))
+          setUploadResults(prev => prev.map((r, idx) => idx === i ? {
+            ...r,
+            status: 'success',
+            autoExpense: data.autoExpense
+          } : r))
         }
       } catch (e: any) {
-        setUploadResults(prev => prev.map((r, idx) =>
-          idx === i ? { ...r, status: 'error', error: e.message } : r
-        ))
+        setUploadResults(prev => prev.map((r, idx) => idx === i ? { ...r, status: 'error', error: e.message } : r))
       }
     }
 
-    setUploading(false)
-    setUploadDone(true)
+    setUploading(false); setUploadDone(true)
     fetchInvoices()
   }
 
+  async function handleConvertToExpense(inv: Invoice) {
+    setConverting(inv.id)
+    try {
+      // Criar despesa a partir da fatura
+      const { data: newExpense, error: expErr } = await supabase
+        .from('expenses')
+        .insert({
+          expense_date: inv.invoice_date ?? new Date().toISOString().slice(0, 10),
+          category: inv.category ?? 'outros',
+          type: 'pontual',
+          description: inv.items_summary ?? inv.supplier_name ?? 'Fatura',
+          amount: inv.amount ?? 0,
+          payment_method: 'banco',
+          supplier: inv.supplier_name ?? null,
+          notes: `Convertido da fatura ${inv.invoice_number ?? ''}`.trim(),
+          invoice_id: inv.id,
+        })
+        .select()
+        .single()
+
+      if (expErr) { alert('Erro: ' + expErr.message); setConverting(null); return }
+
+      // Atualizar fatura com referência à despesa
+      await supabase.from('invoices').update({
+        expense_id: newExpense.id,
+        status: 'categorizada',
+      }).eq('id', inv.id)
+
+      // Atualizar localmente
+      setInvoices(prev => prev.map(i =>
+        i.id === inv.id ? { ...i, expense_id: newExpense.id, status: 'categorizada' } : i
+      ))
+    } catch (e: any) {
+      alert('Erro: ' + e.message)
+    }
+    setConverting(null)
+  }
+
   function handleClose() {
-    setShowUpload(false)
-    setFiles([])
-    setUploadResults([])
-    setUploadDone(false)
-    setUploadError('')
+    setShowUpload(false); setFiles([]); setUploadResults([])
+    setUploadDone(false); setUploadError('')
   }
 
   async function viewPDF(filePath: string) {
     const { data } = supabase.storage.from('invoices').getPublicUrl(filePath)
     if (data?.publicUrl) window.open(data.publicUrl, '_blank')
-}
+  }
 
   const filtered = invoices.filter(inv => {
     const matchSearch = !search ||
@@ -154,11 +171,15 @@ export default function FaturasPage() {
       inv.buyer_name?.toLowerCase().includes(search.toLowerCase())
     const matchCat = filterCategory === 'all' || inv.category === filterCategory
     const matchOwner = filterOwner === 'all' || inv.owner === filterOwner
-    return matchSearch && matchCat && matchOwner
+    const matchStatus = filterStatus === 'all' ||
+      (filterStatus === 'convertida' && inv.expense_id) ||
+      (filterStatus === 'por_converter' && !inv.expense_id)
+    return matchSearch && matchCat && matchOwner && matchStatus
   })
 
   const owners = [...new Set(invoices.map(i => i.owner).filter(Boolean))]
   const totalAmount = filtered.reduce((s, i) => s + (i.amount ?? 0), 0)
+  const porConverter = invoices.filter(i => !i.expense_id).length
 
   return (
     <AppLayout>
@@ -185,19 +206,36 @@ export default function FaturasPage() {
             <p className="text-sm text-gray-500 mb-1">Valor Total (filtrado)</p>
             <p className="text-xl font-bold text-red-600">{formatCurrency(totalAmount)}</p>
           </div>
-          <div className="card">
-            <p className="text-sm text-gray-500 mb-1">Por Categorizar</p>
-            <p className="text-xl font-bold text-yellow-600">
-              {invoices.filter(i => i.status === 'por_categorizar').length}
+          <div className="card cursor-pointer hover:border-emerald-300 transition-colors"
+            onClick={() => setFilterStatus(filterStatus === 'convertida' ? 'all' : 'convertida')}>
+            <p className="text-sm text-gray-500 mb-1">Convertidas em Despesa</p>
+            <p className="text-xl font-bold text-emerald-600">
+              {invoices.filter(i => i.expense_id).length}
             </p>
           </div>
-          <div className="card">
-            <p className="text-sm text-gray-500 mb-1">Proprietários</p>
-            <p className="text-xl font-bold text-gray-900">{owners.length}</p>
+          <div className="card cursor-pointer hover:border-yellow-300 transition-colors"
+            onClick={() => setFilterStatus(filterStatus === 'por_converter' ? 'all' : 'por_converter')}>
+            <p className="text-sm text-gray-500 mb-1">Por Converter</p>
+            <p className={`text-xl font-bold ${porConverter > 0 ? 'text-yellow-600' : 'text-gray-400'}`}>
+              {porConverter}
+            </p>
           </div>
         </div>
 
-        <div className="flex gap-3 mb-6">
+        {/* Aviso faturas por converter */}
+        {porConverter > 0 && (
+          <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-4 py-2 mb-4 flex items-center justify-between">
+            <p className="text-sm text-yellow-700">
+              ⚠ <strong>{porConverter}</strong> fatura(s) ainda não convertidas em despesa
+            </p>
+            <button onClick={() => setFilterStatus('por_converter')}
+              className="text-xs text-yellow-700 hover:underline font-medium">
+              Ver só estas
+            </button>
+          </div>
+        )}
+
+        <div className="flex gap-3 mb-6 flex-wrap">
           <div className="relative flex-1 max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input className="input pl-9" placeholder="Pesquisar fornecedor, produtos..."
@@ -212,6 +250,11 @@ export default function FaturasPage() {
           <select className="input w-44" value={filterOwner} onChange={e => setFilterOwner(e.target.value)}>
             <option value="all">Todos os proprietários</option>
             {owners.map(o => <option key={o} value={o!}>{o}</option>)}
+          </select>
+          <select className="input w-44" value={filterStatus} onChange={e => setFilterStatus(e.target.value as any)}>
+            <option value="all">Todas</option>
+            <option value="convertida">✅ Convertidas</option>
+            <option value="por_converter">⚠ Por converter</option>
           </select>
         </div>
 
@@ -229,14 +272,15 @@ export default function FaturasPage() {
                   <th className="table-header">Fornecedor</th>
                   <th className="table-header">Produtos/Serviços</th>
                   <th className="table-header">Categoria</th>
-                  <th className="table-header">Proprietário</th>
                   <th className="table-header">Valor</th>
+                  <th className="table-header">Estado</th>
                   <th className="table-header">PDF</th>
+                  {isAdmin && <th className="table-header"></th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
                 {filtered.map(inv => (
-                  <tr key={inv.id} className="hover:bg-gray-50">
+                  <tr key={inv.id} className={`hover:bg-gray-50 ${!inv.expense_id ? 'bg-yellow-50/20' : ''}`}>
                     <td className="table-cell text-sm">{inv.invoice_date ? formatDate(inv.invoice_date) : '—'}</td>
                     <td className="table-cell text-sm text-gray-600">{inv.invoice_number ?? '—'}</td>
                     <td className="table-cell">
@@ -251,9 +295,19 @@ export default function FaturasPage() {
                         {categoryLabels[inv.category ?? 'outros'] ?? 'Outros'}
                       </span>
                     </td>
-                    <td className="table-cell text-sm">{inv.owner ?? 'N/D'}</td>
                     <td className="table-cell font-semibold text-red-600">
                       {inv.amount ? formatCurrency(inv.amount) : '—'}
+                    </td>
+                    <td className="table-cell">
+                      {inv.expense_id ? (
+                        <span className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-emerald-100 text-emerald-700 font-medium">
+                          <CheckCircle className="w-3 h-3" /> Despesa criada
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-yellow-100 text-yellow-700 font-medium">
+                          ⚠ Por converter
+                        </span>
+                      )}
                     </td>
                     <td className="table-cell">
                       {inv.file_path ? (
@@ -263,11 +317,30 @@ export default function FaturasPage() {
                         </button>
                       ) : '—'}
                     </td>
+                    {isAdmin && (
+                      <td className="table-cell">
+                        {!inv.expense_id ? (
+                          <button
+                            onClick={() => handleConvertToExpense(inv)}
+                            disabled={converting === inv.id}
+                            className="flex items-center gap-1 text-xs text-blue-600 hover:underline font-medium whitespace-nowrap"
+                          >
+                            {converting === inv.id
+                              ? <Loader2 className="w-3 h-3 animate-spin" />
+                              : <ArrowRightCircle className="w-3 h-3" />
+                            }
+                            Converter
+                          </button>
+                        ) : (
+                          <span className="text-xs text-gray-400">—</span>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))}
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="py-12 text-center text-gray-400 text-sm">
+                    <td colSpan={isAdmin ? 9 : 8} className="py-12 text-center text-gray-400 text-sm">
                       Nenhuma fatura encontrada
                     </td>
                   </tr>
@@ -294,9 +367,7 @@ export default function FaturasPage() {
                     <Upload className="w-8 h-8 text-gray-300" />
                     <div className="text-center">
                       <p className="font-medium text-gray-700 text-sm">
-                        {files.length > 0
-                          ? `${files.length} ficheiro(s) selecionado(s)`
-                          : 'Clica para selecionar PDFs'}
+                        {files.length > 0 ? `${files.length} ficheiro(s) selecionado(s)` : 'Clica para selecionar PDFs'}
                       </p>
                       <p className="text-xs text-gray-400 mt-1">O proprietário é identificado automaticamente pelo NIF</p>
                     </div>
@@ -333,6 +404,12 @@ export default function FaturasPage() {
                     {r.status === 'pending' && <div className="w-4 h-4 rounded-full border-2 border-gray-300 flex-shrink-0" />}
                     <div className="min-w-0">
                       <p className="text-xs font-medium text-gray-800 truncate">{r.fileName}</p>
+                      {r.status === 'success' && r.autoExpense && (
+                        <p className="text-xs text-emerald-600">✓ Despesa criada automaticamente</p>
+                      )}
+                      {r.status === 'success' && !r.autoExpense && (
+                        <p className="text-xs text-yellow-600">⚠ Usa "Converter" para criar a despesa</p>
+                      )}
                       {r.error && <p className="text-xs text-red-600">{r.error}</p>}
                     </div>
                   </div>
