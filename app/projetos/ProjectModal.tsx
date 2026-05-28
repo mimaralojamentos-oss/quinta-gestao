@@ -15,8 +15,10 @@ export default function ProjectModal({ project, onClose, onSaved }: Props) {
     name: project?.name ?? '',
     type: project?.type ?? 'construcao',
     status: project?.status ?? 'em_curso',
+    location_type: project?.is_general ? 'geral' : project?.space_id ? 'espaco' : 'livre',
     space_id: project?.space_id ?? '',
     is_general: project?.is_general ?? false,
+    location_label: project?.location_label ?? '',
     budget: project?.budget ? String(project.budget) : '',
     start_date: project?.start_date ?? '',
     end_date_planned: project?.end_date_planned ?? '',
@@ -35,17 +37,27 @@ export default function ProjectModal({ project, onClose, onSaved }: Props) {
     fetchSpaces()
   }, [])
 
+  function setLocationType(type: string) {
+    setForm(f => ({
+      ...f,
+      location_type: type,
+      is_general: type === 'geral',
+      space_id: type !== 'espaco' ? '' : f.space_id,
+      location_label: type !== 'livre' ? '' : f.location_label,
+    }))
+  }
+
   async function handleSave() {
     if (!form.name.trim()) { setError('O nome é obrigatório'); return }
-    if (!form.is_general && !form.space_id) { setError('Seleciona um espaço ou marca como Geral'); return }
     setSaving(true); setError('')
 
     const payload = {
       name: form.name.trim(),
       type: form.type,
       status: form.status,
-      space_id: form.is_general ? null : (form.space_id || null),
-      is_general: form.is_general,
+      space_id: form.location_type === 'espaco' ? (form.space_id || null) : null,
+      is_general: form.location_type === 'geral',
+      location_label: form.location_type === 'livre' ? (form.location_label || null) : null,
       budget: form.budget ? parseFloat(form.budget) : null,
       start_date: form.start_date || null,
       end_date_planned: form.end_date_planned || null,
@@ -78,7 +90,7 @@ export default function ProjectModal({ project, onClose, onSaved }: Props) {
         <div className="space-y-4">
           <div>
             <label className="label">Nome do Projeto *</label>
-            <input className="input" placeholder="ex: Construção Habitação H21-B" value={form.name}
+            <input className="input" placeholder="ex: Construção H21-B" value={form.name}
               onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
           </div>
 
@@ -102,28 +114,45 @@ export default function ProjectModal({ project, onClose, onSaved }: Props) {
             </div>
           </div>
 
-          {/* Espaço ou Geral */}
+          {/* Localização — 3 opções */}
           <div>
             <label className="label">Localização</label>
-            <div className="grid grid-cols-2 gap-2 mb-2">
+            <div className="grid grid-cols-3 gap-2 mb-2">
               <button
-                onClick={() => setForm(f => ({ ...f, is_general: false }))}
-                className={`py-2 rounded-lg border text-sm font-medium transition-colors ${!form.is_general ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-600 border-gray-200'}`}>
-                📍 Espaço específico
+                onClick={() => setLocationType('espaco')}
+                className={`py-2 rounded-lg border text-xs font-medium transition-colors ${form.location_type === 'espaco' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
+                📍 Espaço existente
               </button>
               <button
-                onClick={() => setForm(f => ({ ...f, is_general: true, space_id: '' }))}
-                className={`py-2 rounded-lg border text-sm font-medium transition-colors ${form.is_general ? 'bg-purple-600 text-white border-purple-600' : 'bg-white text-gray-600 border-gray-200'}`}>
+                onClick={() => setLocationType('livre')}
+                className={`py-2 rounded-lg border text-xs font-medium transition-colors ${form.location_type === 'livre' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
+                🏗️ Local em construção
+              </button>
+              <button
+                onClick={() => setLocationType('geral')}
+                className={`py-2 rounded-lg border text-xs font-medium transition-colors ${form.location_type === 'geral' ? 'bg-purple-600 text-white border-purple-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
                 🏡 Geral — Quinta
               </button>
             </div>
-            {!form.is_general && (
-              <select className="input" value={form.space_id} onChange={e => setForm(f => ({ ...f, space_id: e.target.value }))}>
+
+            {form.location_type === 'espaco' && (
+              <select className="input" value={form.space_id}
+                onChange={e => setForm(f => ({ ...f, space_id: e.target.value }))}>
                 <option value="">— Seleciona o espaço —</option>
                 {spaces.map(s => (
                   <option key={s.id} value={s.id}>{s.ref} — {s.type}</option>
                 ))}
               </select>
+            )}
+
+            {form.location_type === 'livre' && (
+              <input className="input" placeholder="ex: H21-B (em construção), Terreno Norte..."
+                value={form.location_label}
+                onChange={e => setForm(f => ({ ...f, location_label: e.target.value }))} />
+            )}
+
+            {form.location_type === 'geral' && (
+              <p className="text-xs text-purple-600 mt-1">Este projeto aplica-se a toda a quinta.</p>
             )}
           </div>
 
