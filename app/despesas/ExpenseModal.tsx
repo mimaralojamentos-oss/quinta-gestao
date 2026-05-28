@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Expense } from '@/lib/types'
 import { X, Upload, FileText } from 'lucide-react'
@@ -21,10 +21,36 @@ export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
     payment_method: expense?.payment_method ?? 'dinheiro',
     supplier: expense?.supplier ?? '',
     notes: expense?.notes ?? '',
+    project_id: (expense as any)?.project_id ?? '',
   })
+  const [projects, setProjects] = useState<any[]>([])
   const [invoiceFile, setInvoiceFile] = useState<File | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+
+  useEffect(() => {
+    async function fetchProjects() {
+      const { data } = await supabase
+        .from('projects')
+        .select('id, name, type, status, location_label, space:spaces(ref)')
+        .neq('status', 'concluido')
+        .order('name')
+      setProjects(data ?? [])
+    }
+    fetchProjects()
+  }, [])
+
+  function projectLabel(p: any) {
+    const typeEmoji: Record<string, string> = {
+      construcao: '🏗️',
+      renovacao: '🔨',
+      arranjo: '🔧',
+      outro: '📦',
+    }
+    const emoji = typeEmoji[p.type] ?? '📦'
+    const loc = p.is_general ? 'Geral' : p.space?.ref ?? p.location_label ?? ''
+    return `${emoji} ${p.name}${loc ? ` (${loc})` : ''}`
+  }
 
   async function handleSave() {
     if (!form.description || !form.amount) { setError('Descrição e valor são obrigatórios'); return }
@@ -49,14 +75,13 @@ export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
       supplier: form.supplier || null,
       invoice_file_path: invoicePath,
       notes: form.notes || null,
+      project_id: form.project_id || null,
     }
 
     if (expense) {
-      // Editar despesa existente
       const { error: err } = await supabase.from('expenses').update(payload).eq('id', expense.id)
       if (err) { setError(err.message); setSaving(false); return }
 
-      // Atualizar movimento de caixa associado
       const { data: existingCash } = await supabase
         .from('cash_fund_movements')
         .select('id')
@@ -65,7 +90,6 @@ export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
 
       if (form.payment_method === 'dinheiro') {
         if (existingCash) {
-          // Atualizar existente
           await supabase.from('cash_fund_movements').update({
             amount: -Math.abs(parseFloat(form.amount)),
             movement_date: form.expense_date,
@@ -73,7 +97,6 @@ export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
             notes: form.notes || null,
           }).eq('id', existingCash.id)
         } else {
-          // Criar novo
           await supabase.from('cash_fund_movements').insert({
             movement_date: form.expense_date,
             description: `💸 ${form.description}${form.supplier ? ` — ${form.supplier}` : ''}`,
@@ -85,14 +108,12 @@ export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
           })
         }
       } else {
-        // Se mudou para banco, apagar movimento de caixa se existia
         if (existingCash) {
           await supabase.from('cash_fund_movements').delete().eq('id', existingCash.id)
         }
       }
 
     } else {
-      // Nova despesa
       const { data: newExpense, error: err } = await supabase
         .from('expenses')
         .insert(payload)
@@ -101,7 +122,6 @@ export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
 
       if (err) { setError(err.message); setSaving(false); return }
 
-      // Se for dinheiro, registar no Fundo de Maneio como saída
       if (form.payment_method === 'dinheiro' && newExpense) {
         await supabase.from('cash_fund_movements').insert({
           movement_date: form.expense_date,
@@ -166,6 +186,18 @@ export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
                 <option value="recorrente">Recorrente</option>
               </select>
             </div>
+          </div>
+
+          {/* Projeto */}
+          <div>
+            <label className="label">Projeto associado</label>
+            <select className="input" value={form.project_id}
+              onChange={e => setForm(f => ({ ...f, project_id: e.target.value }))}>
+              <option value="">— Sem projeto (despesa geral) —</option>
+              {projects.map(p => (
+                <option key={p.id} value={p.id}>{projectLabel(p)}</option>
+              ))}
+            </select>
           </div>
 
           <div>
