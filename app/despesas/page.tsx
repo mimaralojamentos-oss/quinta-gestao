@@ -70,27 +70,42 @@ export default function DespesasPage() {
     setDeleting(true)
     const { expense } = deleteConfirm
 
-    // Apagar movimento de caixa associado
-    await supabase.from('cash_fund_movements').delete().eq('source_id', expense.id)
+    try {
+      // 1. Apagar movimento de caixa associado
+      await supabase.from('cash_fund_movements').delete().eq('source_id', expense.id)
 
-    // Apagar fatura se pedido
-    if (deleteInvoice && expense.invoice_id) {
-      // Apagar ficheiro do storage
-      const { data: inv } = await supabase
-        .from('invoices').select('file_path').eq('id', expense.invoice_id).single()
-      if (inv?.file_path) {
-        await supabase.storage.from('invoices').remove([inv.file_path])
+      // 2. Apagar fatura se pedido
+      if (deleteInvoice) {
+
+        // Caso A: despesa tem invoice_id → fatura está na tabela invoices
+        if (expense.invoice_id) {
+          const { data: inv } = await supabase
+            .from('invoices')
+            .select('file_path')
+            .eq('id', expense.invoice_id)
+            .single()
+
+          // Apagar ficheiro do storage 'invoices'
+          if (inv?.file_path) {
+            await supabase.storage.from('invoices').remove([inv.file_path])
+          }
+
+          // Apagar registo da tabela invoices
+          await supabase.from('invoices').delete().eq('id', expense.invoice_id)
+        }
+
+        // Caso B: despesa tem invoice_file_path → ficheiro no storage 'documents'
+        if (expense.invoice_file_path) {
+          await supabase.storage.from('documents').remove([expense.invoice_file_path])
+        }
       }
-      await supabase.from('invoices').delete().eq('id', expense.invoice_id)
-    }
 
-    // Apagar ficheiro de invoice_file_path (storage documents) se existir e não houver invoice_id
-    if (deleteInvoice && expense.invoice_file_path && !expense.invoice_id) {
-      await supabase.storage.from('documents').remove([expense.invoice_file_path])
-    }
+      // 3. Apagar a despesa
+      await supabase.from('expenses').delete().eq('id', expense.id)
 
-    // Apagar despesa
-    await supabase.from('expenses').delete().eq('id', expense.id)
+    } catch (e: any) {
+      console.error('Erro ao apagar:', e)
+    }
 
     setDeleting(false)
     setDeleteConfirm(null)
@@ -295,7 +310,7 @@ export default function DespesasPage() {
         )}
       </div>
 
-      {/* Modal de confirmação de apagar */}
+      {/* Modal confirmação apagar */}
       {deleteConfirm && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
@@ -304,50 +319,35 @@ export default function DespesasPage() {
               <button onClick={() => setDeleteConfirm(null)}><X className="w-5 h-5 text-gray-400" /></button>
             </div>
 
-            <p className="text-sm text-gray-600 mb-2">
-              Tens a certeza que queres apagar a despesa:
-            </p>
+            <p className="text-sm text-gray-600 mb-2">Tens a certeza que queres apagar:</p>
             <p className="font-medium text-gray-900 mb-1">{deleteConfirm.expense.description}</p>
             <p className="text-sm text-red-600 font-semibold mb-4">{formatCurrency(deleteConfirm.expense.amount)}</p>
 
-            {deleteConfirm.hasInvoice && (
-              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-5">
+            {deleteConfirm.hasInvoice ? (
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-2">
                 <p className="text-sm text-yellow-800 font-medium mb-3">
                   📄 Esta despesa tem uma fatura associada. O que queres fazer?
                 </p>
                 <div className="flex flex-col gap-2">
-                  <button
-                    onClick={() => handleDeleteConfirm(true)}
-                    disabled={deleting}
-                    className="w-full py-2.5 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-700 transition-colors disabled:opacity-50"
-                  >
+                  <button onClick={() => handleDeleteConfirm(true)} disabled={deleting}
+                    className="w-full py-2.5 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-700 disabled:opacity-50">
                     {deleting ? 'A apagar...' : '🗑️ Apagar despesa e fatura'}
                   </button>
-                  <button
-                    onClick={() => handleDeleteConfirm(false)}
-                    disabled={deleting}
-                    className="w-full py-2.5 rounded-lg bg-orange-500 text-white text-sm font-medium hover:bg-orange-600 transition-colors disabled:opacity-50"
-                  >
+                  <button onClick={() => handleDeleteConfirm(false)} disabled={deleting}
+                    className="w-full py-2.5 rounded-lg bg-orange-500 text-white text-sm font-medium hover:bg-orange-600 disabled:opacity-50">
                     {deleting ? 'A apagar...' : '📄 Apagar só a despesa (manter fatura)'}
                   </button>
-                  <button
-                    onClick={() => setDeleteConfirm(null)}
-                    className="w-full py-2.5 rounded-lg border border-gray-200 text-gray-600 text-sm font-medium hover:bg-gray-50 transition-colors"
-                  >
+                  <button onClick={() => setDeleteConfirm(null)}
+                    className="w-full py-2.5 rounded-lg border border-gray-200 text-gray-600 text-sm font-medium hover:bg-gray-50">
                     Cancelar
                   </button>
                 </div>
               </div>
-            )}
-
-            {!deleteConfirm.hasInvoice && (
+            ) : (
               <div className="flex justify-end gap-3">
                 <button className="btn-secondary" onClick={() => setDeleteConfirm(null)}>Cancelar</button>
-                <button
-                  onClick={() => handleDeleteConfirm(false)}
-                  disabled={deleting}
-                  className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-700 disabled:opacity-50"
-                >
+                <button onClick={() => handleDeleteConfirm(false)} disabled={deleting}
+                  className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-700 disabled:opacity-50">
                   {deleting ? 'A apagar...' : 'Apagar'}
                 </button>
               </div>
