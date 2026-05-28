@@ -24,7 +24,7 @@ const navItems = [
 const financeItems = [
   { href: '/pagamentos', label: 'Rendas & Pagamentos', icon: CreditCard },
   { href: '/despesas', label: 'Despesas', icon: Receipt },
-  { href: '/caixa', label: 'Fluxo de Caixa', icon: Wallet },
+  { href: '/caixa', label: 'Fundo de Maneio', icon: Wallet },
   { href: '/financeiro/bancos', label: 'Bancos', icon: Landmark },
 ]
 
