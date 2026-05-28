@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Expense } from '@/lib/types'
-import { X, Upload, FileText } from 'lucide-react'
+import { X, Upload, FileText, Loader2, Sparkles } from 'lucide-react'
 
 interface Props {
   expense: Expense | null
@@ -26,6 +26,8 @@ export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
   const [projects, setProjects] = useState<any[]>([])
   const [invoiceFile, setInvoiceFile] = useState<File | null>(null)
   const [saving, setSaving] = useState(false)
+  const [processingOcr, setProcessingOcr] = useState(false)
+  const [ocrDone, setOcrDone] = useState(false)
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -42,14 +44,43 @@ export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
 
   function projectLabel(p: any) {
     const typeEmoji: Record<string, string> = {
-      construcao: '🏗️',
-      renovacao: '🔨',
-      arranjo: '🔧',
-      outro: '📦',
+      construcao: '🏗️', renovacao: '🔨', arranjo: '🔧', outro: '📦',
     }
     const emoji = typeEmoji[p.type] ?? '📦'
     const loc = p.is_general ? 'Geral' : p.space?.ref ?? p.location_label ?? ''
     return `${emoji} ${p.name}${loc ? ` (${loc})` : ''}`
+  }
+
+  async function handleFileChange(file: File) {
+    setInvoiceFile(file)
+    setOcrDone(false)
+
+    // Só faz OCR em PDFs e apenas para nova despesa
+    if (!expense && file.type === 'application/pdf') {
+      setProcessingOcr(true)
+      try {
+        const formData = new FormData()
+        formData.append('file', file)
+        const res = await fetch('/api/process-invoice', { method: 'POST', body: formData })
+        const data = await res.json()
+
+        if (data.invoice) {
+          const inv = data.invoice
+          setForm(f => ({
+            ...f,
+            description: inv.items_summary ?? inv.supplier_name ?? f.description,
+            amount: inv.amount ? String(inv.amount) : f.amount,
+            expense_date: inv.invoice_date ?? f.expense_date,
+            category: inv.category ?? f.category,
+            supplier: inv.supplier_name ?? f.supplier,
+          }))
+          setOcrDone(true)
+        }
+      } catch (e) {
+        // OCR falhou — continua sem preencher
+      }
+      setProcessingOcr(false)
+    }
   }
 
   async function handleSave() {
@@ -57,10 +88,18 @@ export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
     setSaving(true); setError('')
 
     let invoicePath = expense?.invoice_file_path ?? null
+    let invoiceId = (expense as any)?.invoice_id ?? null
 
+    // Upload do ficheiro
     if (invoiceFile) {
-      const filename = `invoices/${Date.now()}_${invoiceFile.name}`
-      const { error: uploadErr } = await supabase.storage.from('documents').upload(filename, invoiceFile)
+      const cleanName = invoiceFile.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+      const filename = `invoices/${Date.now()}_${cleanName}`
+      const bytes = await invoiceFile.arrayBuffer()
+
+      const { error: uploadErr } = await supabase.storage
+        .from('invoices')
+        .upload(filename, bytes, { contentType: invoiceFile.type })
+
       if (uploadErr) { setError('Erro ao fazer upload: ' + uploadErr.message); setSaving(false); return }
       invoicePath = filename
     }
@@ -79,14 +118,12 @@ export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
     }
 
     if (expense) {
+      // Editar existente
       const { error: err } = await supabase.from('expenses').update(payload).eq('id', expense.id)
       if (err) { setError(err.message); setSaving(false); return }
 
       const { data: existingCash } = await supabase
-        .from('cash_fund_movements')
-        .select('id')
-        .eq('source_id', expense.id)
-        .single()
+        .from('cash_fund_movements').select('id').eq('source_id', expense.id).single()
 
       if (form.payment_method === 'dinheiro') {
         if (existingCash) {
@@ -101,9 +138,7 @@ export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
             movement_date: form.expense_date,
             description: `💸 ${form.description}${form.supplier ? ` — ${form.supplier}` : ''}`,
             amount: -Math.abs(parseFloat(form.amount)),
-            type: 'saida',
-            source: 'despesa',
-            source_id: expense.id,
+            type: 'saida', source: 'despesa', source_id: expense.id,
             notes: form.notes || null,
           })
         }
@@ -114,24 +149,41 @@ export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
       }
 
     } else {
+      // Nova despesa
       const { data: newExpense, error: err } = await supabase
-        .from('expenses')
-        .insert(payload)
-        .select()
-        .single()
-
+        .from('expenses').insert(payload).select().single()
       if (err) { setError(err.message); setSaving(false); return }
 
+      // Fundo de Maneio
       if (form.payment_method === 'dinheiro' && newExpense) {
         await supabase.from('cash_fund_movements').insert({
           movement_date: form.expense_date,
           description: `💸 ${form.description}${form.supplier ? ` — ${form.supplier}` : ''}`,
           amount: -Math.abs(parseFloat(form.amount)),
-          type: 'saida',
-          source: 'despesa',
-          source_id: newExpense.id,
+          type: 'saida', source: 'despesa', source_id: newExpense.id,
           notes: form.notes || null,
         })
+      }
+
+      // Criar fatura se foi feito upload de ficheiro
+      if (invoiceFile && invoicePath && newExpense) {
+        // Procurar proprietário pelo NIF (se tiver dados OCR)
+        const { data: invoice } = await supabase.from('invoices').insert({
+          file_path: invoicePath,
+          supplier_name: form.supplier || null,
+          amount: parseFloat(form.amount),
+          invoice_date: form.expense_date,
+          category: form.category,
+          items_summary: form.description,
+          status: 'categorizada',
+          expense_id: newExpense.id,
+          owner: 'N/D',
+        }).select().single()
+
+        // Ligar fatura à despesa
+        if (invoice) {
+          await supabase.from('expenses').update({ invoice_id: invoice.id }).eq('id', newExpense.id)
+        }
       }
     }
 
@@ -148,6 +200,66 @@ export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
         </div>
 
         <div className="space-y-4">
+
+          {/* Upload no topo — só para nova despesa */}
+          {!expense && (
+            <div>
+              <label className="label">
+                Fatura / Recibo
+                <span className="text-xs text-emerald-600 font-normal ml-2">✨ preenche automaticamente com IA</span>
+              </label>
+              <label className={`flex items-center gap-3 border-2 border-dashed rounded-lg p-4 cursor-pointer transition-colors ${
+                ocrDone ? 'border-emerald-400 bg-emerald-50' :
+                processingOcr ? 'border-blue-300 bg-blue-50' :
+                'border-gray-200 hover:border-emerald-400'
+              }`}>
+                {processingOcr
+                  ? <Loader2 className="w-5 h-5 text-blue-500 animate-spin flex-shrink-0" />
+                  : ocrDone
+                  ? <Sparkles className="w-5 h-5 text-emerald-500 flex-shrink-0" />
+                  : <Upload className="w-5 h-5 text-gray-400 flex-shrink-0" />
+                }
+                <div>
+                  {processingOcr
+                    ? <p className="text-sm text-blue-600 font-medium">A ler fatura com IA...</p>
+                    : ocrDone
+                    ? <p className="text-sm text-emerald-600 font-medium">✓ Campos preenchidos automaticamente!</p>
+                    : <p className="text-sm text-gray-600">{invoiceFile ? invoiceFile.name : 'Clique para fazer upload (PDF, JPG, PNG)'}</p>
+                  }
+                  {!processingOcr && !ocrDone && (
+                    <p className="text-xs text-gray-400">PDF recomendado para melhor leitura automática</p>
+                  )}
+                  {ocrDone && invoiceFile && (
+                    <p className="text-xs text-emerald-500">{invoiceFile.name} — confirma os dados abaixo</p>
+                  )}
+                </div>
+                <input type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden"
+                  onChange={e => { const f = e.target.files?.[0]; if (f) handleFileChange(f) }} />
+              </label>
+            </div>
+          )}
+
+          {/* Fatura existente (edição) */}
+          {expense && (
+            <div>
+              <label className="label">Fatura / Recibo</label>
+              {expense?.invoice_file_path && (
+                <p className="text-xs text-emerald-600 mb-2 flex items-center gap-1">
+                  <FileText className="w-3 h-3" /> Fatura já carregada
+                </p>
+              )}
+              <label className="flex items-center gap-3 border-2 border-dashed border-gray-200 rounded-lg p-4 cursor-pointer hover:border-emerald-400 transition-colors">
+                <Upload className="w-5 h-5 text-gray-400" />
+                <div>
+                  <p className="text-sm text-gray-600">{invoiceFile ? invoiceFile.name : 'Substituir fatura'}</p>
+                  <p className="text-xs text-gray-400">PDF, JPG, PNG — máximo 10MB</p>
+                </div>
+                <input type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden"
+                  onChange={e => setInvoiceFile(e.target.files?.[0] ?? null)} />
+              </label>
+            </div>
+          )}
+
           <div>
             <label className="label">Descrição *</label>
             <input className="input" placeholder="ex: Material de construção - Leroy Merlin" value={form.description}
@@ -188,7 +300,6 @@ export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
             </div>
           </div>
 
-          {/* Projeto */}
           <div>
             <label className="label">Projeto associado</label>
             <select className="input" value={form.project_id}
@@ -227,31 +338,13 @@ export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
               onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
           </div>
 
-          <div>
-            <label className="label">Fatura / Recibo (PDF ou imagem)</label>
-            {expense?.invoice_file_path && (
-              <p className="text-xs text-emerald-600 mb-2 flex items-center gap-1">
-                <FileText className="w-3 h-3" /> Fatura já carregada
-              </p>
-            )}
-            <label className="flex items-center gap-3 border-2 border-dashed border-gray-200 rounded-lg p-4 cursor-pointer hover:border-emerald-400 transition-colors">
-              <Upload className="w-5 h-5 text-gray-400" />
-              <div>
-                <p className="text-sm text-gray-600">{invoiceFile ? invoiceFile.name : 'Clique para fazer upload da fatura'}</p>
-                <p className="text-xs text-gray-400">PDF, JPG, PNG — máximo 10MB</p>
-              </div>
-              <input type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden"
-                onChange={e => setInvoiceFile(e.target.files?.[0] ?? null)} />
-            </label>
-          </div>
-
           {error && <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg">{error}</p>}
         </div>
 
         <div className="flex justify-end gap-3 mt-6">
           <button className="btn-secondary" onClick={onClose}>Cancelar</button>
-          <button className="btn-primary" onClick={handleSave} disabled={saving}>
-            {saving ? 'A guardar...' : 'Guardar'}
+          <button className="btn-primary" onClick={handleSave} disabled={saving || processingOcr}>
+            {saving ? 'A guardar...' : processingOcr ? 'A processar...' : 'Guardar'}
           </button>
         </div>
       </div>
