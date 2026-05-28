@@ -51,15 +51,71 @@ export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
       notes: form.notes || null,
     }
 
-    let err
     if (expense) {
-      ;({ error: err } = await supabase.from('expenses').update(payload).eq('id', expense.id))
+      // Editar despesa existente
+      const { error: err } = await supabase.from('expenses').update(payload).eq('id', expense.id)
+      if (err) { setError(err.message); setSaving(false); return }
+
+      // Atualizar movimento de caixa associado
+      const { data: existingCash } = await supabase
+        .from('cash_fund_movements')
+        .select('id')
+        .eq('source_id', expense.id)
+        .single()
+
+      if (form.payment_method === 'dinheiro') {
+        if (existingCash) {
+          // Atualizar existente
+          await supabase.from('cash_fund_movements').update({
+            amount: -Math.abs(parseFloat(form.amount)),
+            movement_date: form.expense_date,
+            description: `💸 ${form.description}${form.supplier ? ` — ${form.supplier}` : ''}`,
+            notes: form.notes || null,
+          }).eq('id', existingCash.id)
+        } else {
+          // Criar novo
+          await supabase.from('cash_fund_movements').insert({
+            movement_date: form.expense_date,
+            description: `💸 ${form.description}${form.supplier ? ` — ${form.supplier}` : ''}`,
+            amount: -Math.abs(parseFloat(form.amount)),
+            type: 'saida',
+            source: 'despesa',
+            source_id: expense.id,
+            notes: form.notes || null,
+          })
+        }
+      } else {
+        // Se mudou para banco, apagar movimento de caixa se existia
+        if (existingCash) {
+          await supabase.from('cash_fund_movements').delete().eq('id', existingCash.id)
+        }
+      }
+
     } else {
-      ;({ error: err } = await supabase.from('expenses').insert(payload))
+      // Nova despesa
+      const { data: newExpense, error: err } = await supabase
+        .from('expenses')
+        .insert(payload)
+        .select()
+        .single()
+
+      if (err) { setError(err.message); setSaving(false); return }
+
+      // Se for dinheiro, registar no Fundo de Maneio como saída
+      if (form.payment_method === 'dinheiro' && newExpense) {
+        await supabase.from('cash_fund_movements').insert({
+          movement_date: form.expense_date,
+          description: `💸 ${form.description}${form.supplier ? ` — ${form.supplier}` : ''}`,
+          amount: -Math.abs(parseFloat(form.amount)),
+          type: 'saida',
+          source: 'despesa',
+          source_id: newExpense.id,
+          notes: form.notes || null,
+        })
+      }
     }
 
     setSaving(false)
-    if (err) { setError(err.message); return }
     onSaved()
   }
 
@@ -122,6 +178,9 @@ export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
                 </button>
               ))}
             </div>
+            {form.payment_method === 'dinheiro' && (
+              <p className="text-xs text-red-500 mt-1.5">⚠ Este valor será registado automaticamente como saída no Fundo de Maneio</p>
+            )}
           </div>
 
           <div>
@@ -136,7 +195,6 @@ export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
               onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
           </div>
 
-          {/* Invoice upload */}
           <div>
             <label className="label">Fatura / Recibo (PDF ou imagem)</label>
             {expense?.invoice_file_path && (
