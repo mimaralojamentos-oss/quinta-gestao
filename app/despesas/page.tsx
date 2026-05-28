@@ -11,35 +11,68 @@ import { useAuth } from '@/lib/auth-context'
 
 export default function DespesasPage() {
   const { isAdmin } = useAuth()
-  const [expenses, setExpenses] = useState<Expense[]>([])
+  const [expenses, setExpenses] = useState<any[]>([])
+  const [projects, setProjects] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [filterCategory, setFilterCategory] = useState('all')
   const [filterType, setFilterType] = useState('all')
+  const [filterProject, setFilterProject] = useState('all')
   const [showModal, setShowModal] = useState(false)
   const [editExpense, setEditExpense] = useState<Expense | null>(null)
   const [summary, setSummary] = useState({ total: 0, cash: 0, bank: 0 })
 
-  useEffect(() => { fetchExpenses() }, [])
+  useEffect(() => { fetchAll() }, [])
 
-  async function fetchExpenses() {
+  async function fetchAll() {
     setLoading(true)
-    const { data } = await supabase
-      .from('expenses')
-      .select('*')
-      .order('expense_date', { ascending: false })
-    setExpenses(data ?? [])
 
-    const total = (data ?? []).reduce((s, e) => s + e.amount, 0)
-    const cash = (data ?? []).filter(e => e.payment_method === 'dinheiro').reduce((s, e) => s + e.amount, 0)
+    const { data: expensesData } = await supabase
+      .from('expenses')
+      .select('*, project:projects(id, name, type, location_label, space:spaces(ref))')
+      .order('expense_date', { ascending: false })
+
+    const { data: projectsData } = await supabase
+      .from('projects')
+      .select('id, name, type, location_label, space:spaces(ref)')
+      .order('name')
+
+    setExpenses(expensesData ?? [])
+    setProjects(projectsData ?? [])
+
+    const total = (expensesData ?? []).reduce((s, e) => s + e.amount, 0)
+    const cash = (expensesData ?? []).filter(e => e.payment_method === 'dinheiro').reduce((s, e) => s + e.amount, 0)
     setSummary({ total, cash, bank: total - cash })
     setLoading(false)
   }
 
-  async function downloadInvoice(expense: Expense) {
+  async function handleProjectChange(expenseId: string, projectId: string) {
+    await supabase
+      .from('expenses')
+      .update({ project_id: projectId || null })
+      .eq('id', expenseId)
+    // Atualizar localmente sem reload
+    setExpenses(prev => prev.map(e => {
+      if (e.id !== expenseId) return e
+      const project = projects.find(p => p.id === projectId) ?? null
+      return { ...e, project_id: projectId || null, project }
+    }))
+  }
+
+  async function downloadInvoice(expense: any) {
     if (!expense.invoice_file_path) return
     const { data } = await supabase.storage.from('documents').createSignedUrl(expense.invoice_file_path, 60)
     if (data?.signedUrl) window.open(data.signedUrl, '_blank')
+  }
+
+  function projectLabel(p: any) {
+    if (!p) return '—'
+    const typeEmoji: Record<string, string> = {
+      construcao: '🏗️', renovacao: '🔨', arranjo: '🔧', outro: '📦',
+    }
+    const emoji = typeEmoji[p.type] ?? '📦'
+    const loc = p.is_general ? 'Geral' : p.space?.ref ?? p.location_label ?? ''
+    return `${emoji} ${p.name}${loc ? ` (${loc})` : ''}`
   }
 
   const filtered = expenses.filter(e => {
@@ -47,7 +80,10 @@ export default function DespesasPage() {
       e.supplier?.toLowerCase().includes(search.toLowerCase())
     const matchCat = filterCategory === 'all' || e.category === filterCategory
     const matchType = filterType === 'all' || e.type === filterType
-    return matchSearch && matchCat && matchType
+    const matchProject = filterProject === 'all' ||
+      (filterProject === 'none' && !e.project_id) ||
+      e.project_id === filterProject
+    return matchSearch && matchCat && matchType && matchProject
   })
 
   const categoryColors: Record<string, string> = {
@@ -58,6 +94,8 @@ export default function DespesasPage() {
     manutencao: 'bg-cyan-100 text-cyan-700',
     outros: 'bg-gray-100 text-gray-700',
   }
+
+  const semProjeto = expenses.filter(e => !e.project_id).length
 
   return (
     <AppLayout>
@@ -90,8 +128,23 @@ export default function DespesasPage() {
           </div>
         </div>
 
-        <div className="flex gap-3 mb-6">
-          <div className="relative flex-1 max-w-xs">
+        {/* Alerta despesas sem projeto */}
+        {semProjeto > 0 && (
+          <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-4 py-2 mb-4 flex items-center justify-between">
+            <p className="text-sm text-yellow-700">
+              ⚠ <strong>{semProjeto}</strong> despesa(s) sem projeto associado
+            </p>
+            <button
+              onClick={() => setFilterProject('none')}
+              className="text-xs text-yellow-700 hover:underline font-medium"
+            >
+              Ver só estas
+            </button>
+          </div>
+        )}
+
+        <div className="flex gap-3 mb-6 flex-wrap">
+          <div className="relative flex-1 min-w-[200px] max-w-xs">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input className="input pl-9" placeholder="Pesquisar..." value={search}
               onChange={e => setSearch(e.target.value)} />
@@ -110,6 +163,13 @@ export default function DespesasPage() {
             <option value="recorrente">Recorrente</option>
             <option value="pontual">Pontual</option>
           </select>
+          <select className="input w-52" value={filterProject} onChange={e => setFilterProject(e.target.value)}>
+            <option value="all">Todos os projetos</option>
+            <option value="none">⚠ Sem projeto</option>
+            {projects.map(p => (
+              <option key={p.id} value={p.id}>{projectLabel(p)}</option>
+            ))}
+          </select>
         </div>
 
         {loading ? (
@@ -124,17 +184,17 @@ export default function DespesasPage() {
                   <th className="table-header">Data</th>
                   <th className="table-header">Descrição</th>
                   <th className="table-header">Categoria</th>
-                  <th className="table-header">Tipo</th>
                   <th className="table-header">Fornecedor</th>
                   <th className="table-header">Valor</th>
                   <th className="table-header">Pagamento</th>
+                  <th className="table-header">Projeto</th>
                   <th className="table-header">Fatura</th>
                   {isAdmin && <th className="table-header"></th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
                 {filtered.map(expense => (
-                  <tr key={expense.id} className="hover:bg-gray-50">
+                  <tr key={expense.id} className={`hover:bg-gray-50 ${!expense.project_id ? 'bg-yellow-50/30' : ''}`}>
                     <td className="table-cell text-sm">{formatDate(expense.expense_date)}</td>
                     <td className="table-cell">
                       <p className="font-medium text-gray-800">{expense.description}</p>
@@ -145,17 +205,34 @@ export default function DespesasPage() {
                         {categoryLabel(expense.category)}
                       </span>
                     </td>
-                    <td className="table-cell">
-                      <span className={expense.type === 'recorrente' ? 'badge-verde' : 'badge-cinza'}>
-                        {expense.type === 'recorrente' ? 'Recorrente' : 'Pontual'}
-                      </span>
-                    </td>
                     <td className="table-cell text-sm">{expense.supplier ?? '—'}</td>
                     <td className="table-cell font-semibold text-red-600">{formatCurrency(expense.amount)}</td>
                     <td className="table-cell">
                       <span className={`text-xs px-2 py-1 rounded-full ${expense.payment_method === 'dinheiro' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
-                        {expense.payment_method === 'dinheiro' ? '💵 Dinheiro' : '🏦 Banco'}
+                        {expense.payment_method === 'dinheiro' ? '💵' : '🏦'}
                       </span>
+                    </td>
+                    <td className="table-cell">
+                      {isAdmin ? (
+                        <select
+                          value={expense.project_id ?? ''}
+                          onChange={e => handleProjectChange(expense.id, e.target.value)}
+                          className={`text-xs border rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-emerald-500 max-w-[180px] ${
+                            expense.project_id
+                              ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                              : 'border-yellow-200 bg-yellow-50 text-yellow-700'
+                          }`}
+                        >
+                          <option value="">— Sem projeto —</option>
+                          {projects.map(p => (
+                            <option key={p.id} value={p.id}>{projectLabel(p)}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span className="text-xs text-gray-600">
+                          {expense.project ? projectLabel(expense.project) : '—'}
+                        </span>
+                      )}
                     </td>
                     <td className="table-cell">
                       {expense.invoice_file_path ? (
@@ -186,7 +263,7 @@ export default function DespesasPage() {
         <ExpenseModal
           expense={editExpense}
           onClose={() => setShowModal(false)}
-          onSaved={() => { setShowModal(false); fetchExpenses() }}
+          onSaved={() => { setShowModal(false); fetchAll() }}
         />
       )}
     </AppLayout>
