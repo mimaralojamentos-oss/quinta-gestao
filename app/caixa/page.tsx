@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { CashFundMovement } from '@/lib/types'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Plus, TrendingUp, TrendingDown, Wallet } from 'lucide-react'
+import { Plus, TrendingUp, TrendingDown, Wallet, Trash2 } from 'lucide-react'
 import CashModal from './CashModal'
 import { useAuth } from '@/lib/auth-context'
 
@@ -29,16 +29,32 @@ export default function CaixaPage() {
     setLoading(false)
   }
 
+  async function handleDelete(id: string, source: string) {
+    if (source !== 'manual') {
+      alert('Este movimento foi gerado automaticamente e não pode ser apagado aqui. Apaga o pagamento/despesa original.')
+      return
+    }
+    if (!confirm('Tens a certeza que queres apagar este movimento?')) return
+    await supabase.from('cash_fund_movements').delete().eq('id', id)
+    fetchData()
+  }
+
   const entries = movements.filter(m => m.amount > 0).reduce((s, m) => s + m.amount, 0)
   const exits = movements.filter(m => m.amount < 0).reduce((s, m) => s + m.amount, 0)
+
+  const sourceLabel = (source: string) => {
+    if (source === 'renda') return '🏠 Renda'
+    if (source === 'despesa') return '💸 Despesa'
+    return '✋ Manual'
+  }
 
   return (
     <AppLayout>
       <div className="p-8">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Fundo de Caixa</h1>
-            <p className="text-sm text-gray-500 mt-1">Controlo de saldo em caixa</p>
+            <h1 className="text-2xl font-bold text-gray-900">Fundo de Maneio</h1>
+            <p className="text-sm text-gray-500 mt-1">Controlo de saldo em dinheiro</p>
           </div>
           {isAdmin && (
             <button className="btn-primary" onClick={() => setShowModal(true)}>
@@ -88,8 +104,10 @@ export default function CaixaPage() {
                   <th className="table-header">Data</th>
                   <th className="table-header">Descrição</th>
                   <th className="table-header">Tipo</th>
+                  <th className="table-header">Origem</th>
                   <th className="table-header">Valor</th>
                   <th className="table-header">Notas</th>
+                  {isAdmin && <th className="table-header"></th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
@@ -107,15 +125,31 @@ export default function CaixaPage() {
                       </span>
                     </td>
                     <td className="table-cell">
+                      <span className="text-xs text-gray-500">
+                        {sourceLabel((m as any).source ?? 'manual')}
+                      </span>
+                    </td>
+                    <td className="table-cell">
                       <span className={`font-semibold text-sm ${m.amount >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                         {m.amount >= 0 ? '+' : ''}{formatCurrency(m.amount)}
                       </span>
                     </td>
                     <td className="table-cell text-xs text-gray-500">{m.notes ?? '—'}</td>
+                    {isAdmin && (
+                      <td className="table-cell">
+                        <button
+                          onClick={() => handleDelete(m.id, (m as any).source ?? 'manual')}
+                          className="text-gray-300 hover:text-red-500 transition-colors"
+                          title="Apagar"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
                 {movements.length === 0 && (
-                  <tr><td colSpan={5} className="py-12 text-center text-gray-400 text-sm">Sem movimentos registados</td></tr>
+                  <tr><td colSpan={isAdmin ? 7 : 6} className="py-12 text-center text-gray-400 text-sm">Sem movimentos registados</td></tr>
                 )}
               </tbody>
             </table>
