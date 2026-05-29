@@ -73,6 +73,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const { data: { subscription } } = supabaseClient.auth.onAuthStateChange(async (event, session) => {
       if (!mounted) return
+      if (event === 'SIGNED_IN' && session?.user) {
+        setUser(session.user)
+        const { data } = await supabaseClient
+          .from('profiles')
+          .select('*')
+          .eq('id', session.user.id)
+          .single()
+        if (mounted) setProfile(data)
+        resetInactivityTimer()
+        setLoading(false)
+      }
       if (event === 'SIGNED_OUT') {
         setUser(null)
         setProfile(null)
@@ -80,13 +91,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         clearInactivityTimer()
       }
     })
-
-    // Logout ao fechar a janela/tab
-    const handleBeforeUnload = () => {
-      supabaseClient.auth.signOut()
-      sessionStorage.clear()
-    }
-    window.addEventListener('beforeunload', handleBeforeUnload)
 
     // Resetar timer com qualquer atividade
     const activityEvents = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart', 'click']
@@ -99,7 +103,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       mounted = false
       subscription.unsubscribe()
       clearInactivityTimer()
-      window.removeEventListener('beforeunload', handleBeforeUnload)
       activityEvents.forEach(event => window.removeEventListener(event, handleActivity))
     }
   }, [])
