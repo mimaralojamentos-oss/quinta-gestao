@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Expense } from '@/lib/types'
 import { formatCurrency, formatDate, categoryLabel } from '@/lib/utils'
-import { Plus, Search, FileText, Trash2, X, SlidersHorizontal } from 'lucide-react'
+import { Plus, Search, FileText, Trash2, X, SlidersHorizontal, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react'
 import ExpenseModal from './ExpenseModal'
 import { useAuth } from '@/lib/auth-context'
 
@@ -13,6 +13,9 @@ interface DeleteConfirm {
   expense: any
   hasInvoice: boolean
 }
+
+type SortField = 'expense_date' | 'description' | 'category' | 'supplier' | 'amount'
+type SortDir = 'asc' | 'desc'
 
 export default function DespesasPage() {
   const { isAdmin } = useAuth()
@@ -25,6 +28,8 @@ export default function DespesasPage() {
   const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirm | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [showFilters, setShowFilters] = useState(false)
+  const [sortField, setSortField] = useState<SortField>('expense_date')
+  const [sortDir, setSortDir] = useState<SortDir>('desc')
 
   // Filtros
   const [search, setSearch] = useState('')
@@ -54,6 +59,22 @@ export default function DespesasPage() {
     const cash = (expensesData ?? []).filter(e => e.payment_method === 'dinheiro').reduce((s, e) => s + e.amount, 0)
     setSummary({ total, cash, bank: total - cash })
     setLoading(false)
+  }
+
+  function handleSort(field: SortField) {
+    if (sortField === field) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortField(field)
+      setSortDir('asc')
+    }
+  }
+
+  function SortIcon({ field }: { field: SortField }) {
+    if (sortField !== field) return <ChevronsUpDown className="w-3 h-3 ml-1 text-gray-400 inline" />
+    return sortDir === 'asc'
+      ? <ChevronUp className="w-3 h-3 ml-1 text-emerald-600 inline" />
+      : <ChevronDown className="w-3 h-3 ml-1 text-emerald-600 inline" />
   }
 
   async function handleProjectChange(expenseId: string, projectId: string) {
@@ -131,8 +152,7 @@ export default function DespesasPage() {
   const allSuppliers = [...new Set(expenses.map(e => e.supplier).filter(Boolean))].sort()
 
   const filtered = expenses.filter(e => {
-    const matchSearch = !search ||
-      e.description.toLowerCase().includes(search.toLowerCase())
+    const matchSearch = !search || e.description.toLowerCase().includes(search.toLowerCase())
     const matchCat = filterCategory === 'all' || e.category === filterCategory
     const matchSupplier = !filterSupplier || e.supplier === filterSupplier
     const matchProject = filterProject === 'all' ||
@@ -143,6 +163,19 @@ export default function DespesasPage() {
     const matchAmountMin = !filterAmountMin || e.amount >= parseFloat(filterAmountMin)
     const matchAmountMax = !filterAmountMax || e.amount <= parseFloat(filterAmountMax)
     return matchSearch && matchCat && matchSupplier && matchProject && matchDateFrom && matchDateTo && matchAmountMin && matchAmountMax
+  }).sort((a, b) => {
+    let valA = a[sortField] ?? ''
+    let valB = b[sortField] ?? ''
+    if (sortField === 'amount') {
+      valA = Number(valA)
+      valB = Number(valB)
+    } else {
+      valA = String(valA).toLowerCase()
+      valB = String(valB).toLowerCase()
+    }
+    if (valA < valB) return sortDir === 'asc' ? -1 : 1
+    if (valA > valB) return sortDir === 'asc' ? 1 : -1
+    return 0
   })
 
   const categoryColors: Record<string, string> = {
@@ -155,6 +188,8 @@ export default function DespesasPage() {
   }
 
   const semProjeto = expenses.filter(e => !e.project_id).length
+
+  const thClass = "table-header cursor-pointer hover:bg-gray-100 select-none"
 
   return (
     <AppLayout>
@@ -195,19 +230,15 @@ export default function DespesasPage() {
           </div>
         )}
 
-        {/* Barra de pesquisa + botão filtros */}
         <div className="flex gap-3 mb-3">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input className="input pl-9" placeholder="Pesquisar na descrição..." value={search}
               onChange={e => setSearch(e.target.value)} />
           </div>
-          <button
-            onClick={() => setShowFilters(v => !v)}
+          <button onClick={() => setShowFilters(v => !v)}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-colors ${
-              hasActiveFilters
-                ? 'bg-emerald-600 text-white border-emerald-600'
-                : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+              hasActiveFilters ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
             }`}>
             <SlidersHorizontal className="w-4 h-4" />
             Filtros
@@ -224,7 +255,6 @@ export default function DespesasPage() {
           )}
         </div>
 
-        {/* Painel de filtros avançados */}
         {showFilters && (
           <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-4 space-y-3">
             <div className="grid grid-cols-3 gap-3">
@@ -244,9 +274,7 @@ export default function DespesasPage() {
                 <label className="text-xs font-medium text-gray-500 mb-1 block">Fornecedor</label>
                 <select className="input text-sm" value={filterSupplier} onChange={e => setFilterSupplier(e.target.value)}>
                   <option value="">Todos</option>
-                  {allSuppliers.map(s => (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
+                  {allSuppliers.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
               </div>
               <div>
@@ -254,9 +282,7 @@ export default function DespesasPage() {
                 <select className="input text-sm" value={filterProject} onChange={e => setFilterProject(e.target.value)}>
                   <option value="all">Todos</option>
                   <option value="none">⚠ Sem projeto</option>
-                  {projects.map(p => (
-                    <option key={p.id} value={p.id}>{projectLabel(p)}</option>
-                  ))}
+                  {projects.map(p => <option key={p.id} value={p.id}>{projectLabel(p)}</option>)}
                 </select>
               </div>
             </div>
@@ -287,7 +313,6 @@ export default function DespesasPage() {
           </div>
         )}
 
-        {/* Contador de resultados */}
         {hasActiveFilters && (
           <p className="text-sm text-gray-500 mb-3">
             A mostrar <strong>{filtered.length}</strong> de {expenses.length} despesas
@@ -303,11 +328,21 @@ export default function DespesasPage() {
             <table className="w-full">
               <thead className="bg-gray-50 border-b border-gray-100">
                 <tr>
-                  <th className="table-header">Data</th>
-                  <th className="table-header">Descrição</th>
-                  <th className="table-header">Categoria</th>
-                  <th className="table-header">Fornecedor</th>
-                  <th className="table-header">Valor</th>
+                  <th className={thClass} onClick={() => handleSort('expense_date')}>
+                    Data <SortIcon field="expense_date" />
+                  </th>
+                  <th className={thClass} onClick={() => handleSort('description')}>
+                    Descrição <SortIcon field="description" />
+                  </th>
+                  <th className={thClass} onClick={() => handleSort('category')}>
+                    Categoria <SortIcon field="category" />
+                  </th>
+                  <th className={thClass} onClick={() => handleSort('supplier')}>
+                    Fornecedor <SortIcon field="supplier" />
+                  </th>
+                  <th className={thClass} onClick={() => handleSort('amount')}>
+                    Valor <SortIcon field="amount" />
+                  </th>
                   <th className="table-header">Pagamento</th>
                   <th className="table-header">Projeto</th>
                   <th className="table-header">Fatura</th>
@@ -340,9 +375,7 @@ export default function DespesasPage() {
                           onChange={e => handleProjectChange(expense.id, e.target.value)}
                           className={`text-xs border rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-emerald-500 max-w-[180px] ${expense.project_id ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-yellow-200 bg-yellow-50 text-yellow-700'}`}>
                           <option value="">— Sem projeto —</option>
-                          {projects.map(p => (
-                            <option key={p.id} value={p.id}>{projectLabel(p)}</option>
-                          ))}
+                          {projects.map(p => <option key={p.id} value={p.id}>{projectLabel(p)}</option>)}
                         </select>
                       ) : (
                         <span className="text-xs text-gray-600">{expense.project ? projectLabel(expense.project) : '—'}</span>
@@ -381,7 +414,6 @@ export default function DespesasPage() {
         )}
       </div>
 
-      {/* Modal confirmação apagar */}
       {deleteConfirm && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
@@ -392,12 +424,9 @@ export default function DespesasPage() {
             <p className="text-sm text-gray-600 mb-2">Tens a certeza que queres apagar a despesa:</p>
             <p className="font-medium text-gray-900 mb-1">{deleteConfirm.expense.description}</p>
             <p className="text-sm text-red-600 font-semibold mb-4">{formatCurrency(deleteConfirm.expense.amount)}</p>
-
             {deleteConfirm.hasInvoice ? (
               <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-2">
-                <p className="text-sm text-yellow-800 font-medium mb-3">
-                  📄 Esta despesa tem uma fatura associada. O que queres fazer?
-                </p>
+                <p className="text-sm text-yellow-800 font-medium mb-3">📄 Esta despesa tem uma fatura associada. O que queres fazer?</p>
                 <div className="flex flex-col gap-2">
                   <button onClick={() => handleDeleteConfirm(true)} disabled={deleting}
                     className="w-full py-2.5 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-700 disabled:opacity-50">
