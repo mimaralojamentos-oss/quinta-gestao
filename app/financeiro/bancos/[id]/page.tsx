@@ -6,7 +6,7 @@ import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import {
   Upload, CheckCircle, Clock, XCircle, ArrowUpRight,
-  ArrowDownRight, ChevronLeft, Loader2, X, ArrowRight, Link2, Edit2
+  ArrowDownRight, ChevronLeft, Loader2, X, ArrowRight, Link2, Edit2, Search, SlidersHorizontal
 } from 'lucide-react'
 import Link from 'next/link'
 import * as XLSX from 'xlsx'
@@ -73,6 +73,16 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
   const [expenses, setExpenses] = useState<any[]>([])
   const [leases, setLeases] = useState<any[]>([])
   const [txMatches, setTxMatches] = useState<Record<string, any>>({})
+  const [showFilters, setShowFilters] = useState(false)
+
+  // Filtros avançados
+  const [search, setSearch] = useState('')
+  const [filterDateFrom, setFilterDateFrom] = useState('')
+  const [filterDateTo, setFilterDateTo] = useState('')
+  const [filterAmountMin, setFilterAmountMin] = useState('')
+  const [filterAmountMax, setFilterAmountMax] = useState('')
+  const [filterDirection, setFilterDirection] = useState<'all' | 'entrada' | 'saida'>('all')
+
   const supabase = createClient()
 
   useEffect(() => { params.then(p => setBankId(p.id)) }, [])
@@ -83,25 +93,18 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     try {
       const { data: bankData } = await supabase.from('banks').select('*').eq('id', bankId).single()
       setBank(bankData)
-
       const { data: txData } = await supabase
         .from('bank_transactions').select('*').eq('bank_id', bankId)
         .order('transaction_date', { ascending: false }).order('balance', { ascending: true })
       setTransactions(txData ?? [])
-
-      const { data: tenantsData } = await supabase
-        .from('tenants').select('id, name, bank_reference').order('name')
+      const { data: tenantsData } = await supabase.from('tenants').select('id, name, bank_reference').order('name')
       setTenants(tenantsData ?? [])
-
       const { data: leasesData } = await supabase
         .from('leases').select('id, monthly_rent, tenant:tenants(id, name), space:spaces(ref)').eq('status', 'ativo')
       setLeases(leasesData ?? [])
-
       const { data: expensesData } = await supabase
         .from('expenses').select('id, expense_date, description, amount, supplier').order('expense_date', { ascending: false })
       setExpenses(expensesData ?? [])
-
-      // Calcular matches automáticos
       if (txData && leasesData && expensesData && tenantsData) {
         const matches: Record<string, any> = {}
         for (const tx of txData) {
@@ -115,45 +118,32 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
   }
 
   function findAutoMatch(tx: Transaction, leasesData: any[], expensesData: any[], tenantsData: any[]) {
-    // Se já tem match confirmado não procura
     if (tx.confirmed_type) return null
-
     const txDate = new Date(tx.transaction_date)
-
-    // Entradas — tentar match com rendas
     if (tx.amount > 0) {
-      // Por referência bancária do inquilino
       for (const tenant of tenantsData) {
         if (tenant.bank_reference && tx.description.toLowerCase().includes(tenant.bank_reference.toLowerCase())) {
           const lease = leasesData.find(l => (l.tenant as any)?.id === tenant.id)
           return { type: 'renda', tenant, lease, confidence: 'high' }
         }
       }
-      // Por valor da renda (±5€)
       const leaseMatch = leasesData.find(l => Math.abs(l.monthly_rent - tx.amount) <= 5)
-      if (leaseMatch) {
-        return { type: 'renda', tenant: leaseMatch.tenant, lease: leaseMatch, confidence: 'medium' }
-      }
+      if (leaseMatch) return { type: 'renda', tenant: leaseMatch.tenant, lease: leaseMatch, confidence: 'medium' }
     }
-
-    // Saídas — tentar match com despesas
     if (tx.amount < 0) {
       const amt = Math.abs(tx.amount)
       const dateFrom = new Date(txDate); dateFrom.setDate(dateFrom.getDate() - 3)
       const dateTo = new Date(txDate); dateTo.setDate(dateTo.getDate() + 3)
-
       const expMatch = expensesData.find(e => {
         const eDate = new Date(e.expense_date)
         return Math.abs(e.amount - amt) <= 0.02 && eDate >= dateFrom && eDate <= dateTo
       })
       if (expMatch) return { type: 'despesa', expense: expMatch, confidence: 'high' }
     }
-
     return null
   }
 
   function getMatchLabel(tx: Transaction) {
-    // Match confirmado manualmente
     if (tx.confirmed_type === 'renda' && tx.confirmed_tenant_id) {
       const tenant = tenants.find(t => t.id === tx.confirmed_tenant_id)
       const lease = leases.find(l => (l.tenant as any)?.id === tx.confirmed_tenant_id)
@@ -166,8 +156,6 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     if (tx.confirmed_type === 'outro') {
       return { label: `📝 ${tx.notes ?? 'Outro'}`, color: 'text-gray-600', confirmed: true }
     }
-
-    // Match automático
     const auto = txMatches[tx.id]
     if (auto) {
       if (auto.type === 'renda') {
@@ -178,7 +166,6 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
         return { label: `~ 💸 ${auto.expense?.description ?? '—'}`, color: 'text-red-400', confirmed: false }
       }
     }
-
     return null
   }
 
@@ -187,16 +174,12 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     if (!auto) return
     if (auto.type === 'renda') {
       await supabase.from('bank_transactions').update({
-        confirmed_type: 'renda',
-        confirmed_tenant_id: auto.tenant?.id ?? null,
-        confirmed_lease_id: auto.lease?.id ?? null,
-        status: 'validado',
+        confirmed_type: 'renda', confirmed_tenant_id: auto.tenant?.id ?? null,
+        confirmed_lease_id: auto.lease?.id ?? null, status: 'validado',
       }).eq('id', tx.id)
     } else if (auto.type === 'despesa') {
       await supabase.from('bank_transactions').update({
-        confirmed_type: 'despesa',
-        confirmed_expense_id: auto.expense?.id ?? null,
-        status: 'validado',
+        confirmed_type: 'despesa', confirmed_expense_id: auto.expense?.id ?? null, status: 'validado',
       }).eq('id', tx.id)
     }
     fetchData()
@@ -208,8 +191,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
       confirmed_tenant_id: tenantId || null,
       confirmed_lease_id: tenantId ? (leases.find(l => (l.tenant as any)?.id === tenantId)?.id ?? null) : null,
       confirmed_expense_id: expenseId || null,
-      notes: notes || null,
-      status: 'validado',
+      notes: notes || null, status: 'validado',
     }).eq('id', tx.id)
     setMatchModal(null)
     fetchData()
@@ -219,8 +201,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     const pending = transactions.filter(t => t.status === 'por_validar')
     if (pending.length === 0) return
     setValidatingAll(true)
-    await supabase.from('bank_transactions').update({ status: 'validado' })
-      .eq('bank_id', bankId).eq('status', 'por_validar')
+    await supabase.from('bank_transactions').update({ status: 'validado' }).eq('bank_id', bankId).eq('status', 'por_validar')
     await fetchData()
     setValidatingAll(false)
   }
@@ -320,13 +301,30 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     setImporting(false)
   }
 
-  const filtered = transactions.filter(t => filterStatus === 'all' || t.status === filterStatus)
+  function resetFilters() {
+    setSearch(''); setFilterDateFrom(''); setFilterDateTo('')
+    setFilterAmountMin(''); setFilterAmountMax(''); setFilterDirection('all')
+  }
+
+  const hasActiveFilters = search || filterDateFrom || filterDateTo || filterAmountMin || filterAmountMax || filterDirection !== 'all'
+
+  const filtered = transactions.filter(t => {
+    const matchStatus = filterStatus === 'all' || t.status === filterStatus
+    const matchSearch = !search || t.description.toLowerCase().includes(search.toLowerCase())
+    const matchDateFrom = !filterDateFrom || t.transaction_date >= filterDateFrom
+    const matchDateTo = !filterDateTo || t.transaction_date <= filterDateTo
+    const matchAmountMin = !filterAmountMin || Math.abs(t.amount) >= parseFloat(filterAmountMin)
+    const matchAmountMax = !filterAmountMax || Math.abs(t.amount) <= parseFloat(filterAmountMax)
+    const matchDirection = filterDirection === 'all' || (filterDirection === 'entrada' && t.amount > 0) || (filterDirection === 'saida' && t.amount < 0)
+    return matchStatus && matchSearch && matchDateFrom && matchDateTo && matchAmountMin && matchAmountMax && matchDirection
+  })
+
   const totalIn = transactions.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0)
   const totalOut = transactions.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0)
   const pending = transactions.filter(t => t.status === 'por_validar').length
+  const identified = transactions.filter(t => t.confirmed_type || txMatches[t.id]).length
   const headers = parsedRows[headerRowIndex]?.map((h: any) => String(h ?? '').trim()) ?? []
   const previewRows = parsedRows.slice(headerRowIndex + 1).slice(0, 5).filter(r => r && r.length > 0)
-  const identified = transactions.filter(t => t.confirmed_type || txMatches[t.id]).length
 
   return (
     <AppLayout>
@@ -370,6 +368,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
           </div>
         </div>
 
+        {/* Filtros de estado */}
         <div className="flex gap-2 mb-4">
           {(['all', 'por_validar', 'validado', 'ignorado'] as const).map(s => (
             <button key={s} onClick={() => setFilterStatus(s)}
@@ -379,6 +378,76 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
             </button>
           ))}
         </div>
+
+        {/* Barra de pesquisa + filtros avançados */}
+        <div className="flex gap-3 mb-3">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <input className="input pl-9" placeholder="Pesquisar na descrição..."
+              value={search} onChange={e => setSearch(e.target.value)} />
+          </div>
+          <button onClick={() => setShowFilters(v => !v)}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-colors ${
+              hasActiveFilters ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+            }`}>
+            <SlidersHorizontal className="w-4 h-4" />
+            Filtros
+            {hasActiveFilters && (
+              <span className="bg-white text-emerald-600 text-xs font-bold px-1.5 py-0.5 rounded-full">
+                {[filterDateFrom, filterDateTo, filterAmountMin, filterAmountMax, filterDirection !== 'all' ? '1' : ''].filter(Boolean).length}
+              </span>
+            )}
+          </button>
+          {hasActiveFilters && (
+            <button onClick={resetFilters}
+              className="flex items-center gap-1 px-3 py-2 rounded-lg border border-red-200 text-red-600 text-sm hover:bg-red-50 transition-colors">
+              <X className="w-3.5 h-3.5" /> Limpar
+            </button>
+          )}
+        </div>
+
+        {/* Painel de filtros avançados */}
+        {showFilters && (
+          <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-4 space-y-3">
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="text-xs font-medium text-gray-500 mb-1 block">Direção</label>
+                <select className="input text-sm" value={filterDirection} onChange={e => setFilterDirection(e.target.value as any)}>
+                  <option value="all">Todas</option>
+                  <option value="entrada">⬆ Entradas</option>
+                  <option value="saida">⬇ Saídas</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 mb-1 block">Data — de</label>
+                <input type="date" className="input text-sm" value={filterDateFrom} onChange={e => setFilterDateFrom(e.target.value)} />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 mb-1 block">Data — até</label>
+                <input type="date" className="input text-sm" value={filterDateTo} onChange={e => setFilterDateTo(e.target.value)} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-medium text-gray-500 mb-1 block">Valor mínimo (€)</label>
+                <input type="number" step="0.01" min="0" className="input text-sm" placeholder="0.00"
+                  value={filterAmountMin} onChange={e => setFilterAmountMin(e.target.value)} />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 mb-1 block">Valor máximo (€)</label>
+                <input type="number" step="0.01" min="0" className="input text-sm" placeholder="9999.00"
+                  value={filterAmountMax} onChange={e => setFilterAmountMax(e.target.value)} />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Contador de resultados */}
+        {(hasActiveFilters || filterStatus !== 'all') && (
+          <p className="text-sm text-gray-500 mb-3">
+            A mostrar <strong>{filtered.length}</strong> de {transactions.length} transações
+          </p>
+        )}
 
         {loading ? (
           <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600" /></div>
@@ -417,12 +486,9 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
                       <td className="table-cell min-w-[200px]">
                         {matchInfo ? (
                           <div className="flex items-center gap-2">
-                            <span className={`text-xs font-medium ${matchInfo.color} truncate max-w-[160px]`}>
-                              {matchInfo.label}
-                            </span>
+                            <span className={`text-xs font-medium ${matchInfo.color} truncate max-w-[160px]`}>{matchInfo.label}</span>
                             {!matchInfo.confirmed && autoMatch && (
-                              <button onClick={() => confirmAutoMatch(tx)}
-                                className="text-xs text-emerald-600 hover:underline whitespace-nowrap">✓ Confirmar</button>
+                              <button onClick={() => confirmAutoMatch(tx)} className="text-xs text-emerald-600 hover:underline whitespace-nowrap">✓ Confirmar</button>
                             )}
                           </div>
                         ) : (
@@ -432,8 +498,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
                           </button>
                         )}
                         {matchInfo && (
-                          <button onClick={() => setMatchModal({ tx })}
-                            className="text-xs text-gray-400 hover:text-blue-500 transition-colors ml-1">
+                          <button onClick={() => setMatchModal({ tx })} className="text-xs text-gray-400 hover:text-blue-500 transition-colors ml-1">
                             <Edit2 className="w-3 h-3 inline" />
                           </button>
                         )}
@@ -468,19 +533,11 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
         )}
       </div>
 
-      {/* Modal de identificação manual */}
       {matchModal && (
-        <MatchModalComponent
-          tx={matchModal.tx}
-          tenants={tenants}
-          leases={leases}
-          expenses={expenses}
-          onSave={saveManualMatch}
-          onClose={() => setMatchModal(null)}
-        />
+        <MatchModalComponent tx={matchModal.tx} tenants={tenants} leases={leases} expenses={expenses}
+          onSave={saveManualMatch} onClose={() => setMatchModal(null)} />
       )}
 
-      {/* Modal importação */}
       {showImport && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6 max-h-[90vh] overflow-y-auto">
@@ -615,8 +672,6 @@ function MatchModalComponent({ tx, tenants, leases, expenses, onSave, onClose }:
   const [expenseId, setExpenseId] = useState(tx.confirmed_expense_id ?? '')
   const [notes, setNotes] = useState(tx.notes ?? '')
 
-  const isEntrada = tx.amount > 0
-
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
@@ -624,7 +679,6 @@ function MatchModalComponent({ tx, tenants, leases, expenses, onSave, onClose }:
           <h2 className="font-semibold text-lg text-gray-900">Identificar Transação</h2>
           <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
         </div>
-
         <div className="bg-gray-50 rounded-lg p-3 mb-4">
           <p className="text-xs text-gray-500">{formatDate(tx.transaction_date)}</p>
           <p className="text-sm text-gray-800 font-medium truncate">{tx.description}</p>
@@ -632,16 +686,11 @@ function MatchModalComponent({ tx, tenants, leases, expenses, onSave, onClose }:
             {tx.amount >= 0 ? '+' : ''}{formatCurrency(tx.amount)}
           </p>
         </div>
-
         <div className="space-y-4">
           <div>
             <label className="label">Tipo</label>
             <div className="grid grid-cols-3 gap-2">
-              {[
-                { value: 'renda', label: '🏠 Renda' },
-                { value: 'despesa', label: '💸 Despesa' },
-                { value: 'outro', label: '📝 Outro' },
-              ].map(opt => (
+              {[{ value: 'renda', label: '🏠 Renda' }, { value: 'despesa', label: '💸 Despesa' }, { value: 'outro', label: '📝 Outro' }].map(opt => (
                 <button key={opt.value} onClick={() => setType(opt.value)}
                   className={`py-2 rounded-lg border text-sm font-medium transition-colors ${type === opt.value ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-600 border-gray-200'}`}>
                   {opt.label}
@@ -649,7 +698,6 @@ function MatchModalComponent({ tx, tenants, leases, expenses, onSave, onClose }:
               ))}
             </div>
           </div>
-
           {type === 'renda' && (
             <div>
               <label className="label">Inquilino</label>
@@ -657,30 +705,22 @@ function MatchModalComponent({ tx, tenants, leases, expenses, onSave, onClose }:
                 <option value="">— Seleciona o inquilino —</option>
                 {tenants.map(t => {
                   const lease = leases.find(l => (l.tenant as any)?.id === t.id)
-                  return (
-                    <option key={t.id} value={t.id}>
-                      {t.name}{lease?.space ? ` · ${(lease.space as any).ref}` : ''}
-                    </option>
-                  )
+                  return <option key={t.id} value={t.id}>{t.name}{lease?.space ? ` · ${(lease.space as any).ref}` : ''}</option>
                 })}
               </select>
             </div>
           )}
-
           {type === 'despesa' && (
             <div>
               <label className="label">Despesa associada</label>
               <select className="input" value={expenseId} onChange={e => setExpenseId(e.target.value)}>
                 <option value="">— Seleciona a despesa —</option>
                 {expenses.slice(0, 100).map(e => (
-                  <option key={e.id} value={e.id}>
-                    {formatDate(e.expense_date)} · {e.description} · {formatCurrency(e.amount)}
-                  </option>
+                  <option key={e.id} value={e.id}>{formatDate(e.expense_date)} · {e.description} · {formatCurrency(e.amount)}</option>
                 ))}
               </select>
             </div>
           )}
-
           {type === 'outro' && (
             <div>
               <label className="label">Descrição</label>
@@ -689,12 +729,9 @@ function MatchModalComponent({ tx, tenants, leases, expenses, onSave, onClose }:
             </div>
           )}
         </div>
-
         <div className="flex justify-end gap-3 mt-6">
           <button className="btn-secondary" onClick={onClose}>Cancelar</button>
-          <button className="btn-primary" onClick={() => onSave(tx, type, tenantId, expenseId, notes)}>
-            Guardar
-          </button>
+          <button className="btn-primary" onClick={() => onSave(tx, type, tenantId, expenseId, notes)}>Guardar</button>
         </div>
       </div>
     </div>
