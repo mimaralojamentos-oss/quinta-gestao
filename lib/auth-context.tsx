@@ -18,11 +18,7 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType>({
-  user: null,
-  profile: null,
-  isAdmin: false,
-  loading: true,
-  signOut: async () => {},
+  user: null, profile: null, isAdmin: false, loading: true, signOut: async () => {},
 })
 
 const supabaseClient = createClient()
@@ -43,11 +39,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (inactivityTimer.current) clearTimeout(inactivityTimer.current)
     if (warningTimer.current) clearTimeout(warningTimer.current)
     setShowWarning(false)
-
-    warningTimer.current = setTimeout(() => {
-      setShowWarning(true)
-    }, INACTIVITY_TIMEOUT - WARNING_BEFORE)
-
+    warningTimer.current = setTimeout(() => setShowWarning(true), INACTIVITY_TIMEOUT - WARNING_BEFORE)
     inactivityTimer.current = setTimeout(async () => {
       setShowWarning(false)
       await supabaseClient.auth.signOut()
@@ -65,31 +57,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let mounted = true
 
-    async function getUser() {
-      const { data: { user } } = await supabaseClient.auth.getUser()
+    supabaseClient.auth.getSession().then(async ({ data: { session } }) => {
       if (!mounted) return
-      userRef.current = user
-      setUser(user)
-      if (user) {
-        const { data } = await supabaseClient.from('profiles').select('*').eq('id', user.id).single()
+      const u = session?.user ?? null
+      userRef.current = u
+      setUser(u)
+      if (u) {
+        const { data } = await supabaseClient.from('profiles').select('*').eq('id', u.id).single()
         if (mounted) setProfile(data)
         resetInactivityTimer()
       }
       if (mounted) setLoading(false)
-    }
+    })
 
-    getUser()
-
-    const { data: { subscription } } = supabaseClient.auth.onAuthStateChange(async (event, session) => {
+    const { data: { subscription } } = supabaseClient.auth.onAuthStateChange((event, session) => {
       if (!mounted) return
-      if (event === 'SIGNED_IN' && session?.user) {
-        userRef.current = session.user
-        setUser(session.user)
-        const { data } = await supabaseClient.from('profiles').select('*').eq('id', session.user.id).single()
-        if (mounted) setProfile(data)
-        resetInactivityTimer()
-        setLoading(false)
-      }
       if (event === 'SIGNED_OUT') {
         userRef.current = null
         setUser(null)
@@ -99,15 +81,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     })
 
-    const activityEvents = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart', 'click']
-    const handleActivity = () => { resetInactivityTimer() }
-    activityEvents.forEach(event => window.addEventListener(event, handleActivity))
+    const activityEvents = ['mousedown', 'keydown', 'scroll', 'touchstart', 'click']
+    const handleActivity = () => resetInactivityTimer()
+    activityEvents.forEach(e => window.addEventListener(e, handleActivity))
 
     return () => {
       mounted = false
       subscription.unsubscribe()
       clearInactivityTimer()
-      activityEvents.forEach(event => window.removeEventListener(event, handleActivity))
+      activityEvents.forEach(e => window.removeEventListener(e, handleActivity))
     }
   }, [])
 
@@ -120,19 +102,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{
-      user, profile,
-      isAdmin: profile?.role === 'admin',
-      loading, signOut
-    }}>
+    <AuthContext.Provider value={{ user, profile, isAdmin: profile?.role === 'admin', loading, signOut }}>
       {children}
-
       {showWarning && (
         <div className="fixed bottom-6 right-6 z-50 bg-white border border-yellow-300 rounded-xl shadow-lg p-4 max-w-sm">
           <p className="text-sm font-semibold text-yellow-700 mb-1">⚠ Sessão a expirar</p>
           <p className="text-xs text-gray-600 mb-3">A tua sessão expira em 2 minutos por inatividade.</p>
-          <button
-            onClick={() => resetInactivityTimer()}
+          <button onClick={() => resetInactivityTimer()}
             className="w-full py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 transition-colors">
             Continuar sessão
           </button>
