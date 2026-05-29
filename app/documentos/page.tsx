@@ -30,8 +30,8 @@ interface Contrato {
   id: string
   contract_file_path: string
   start_date: string | null
-  tenant: { name: string } | null
-  space: { ref: string } | null
+  tenant: any
+  space: any
 }
 
 interface DeleteConfirm {
@@ -54,6 +54,7 @@ const tipoLabels: Record<string, string> = {
   registo_predial: '🏠 Registo Predial',
   carta: '✉️ Carta',
   outro: '📦 Outro',
+  contrato: '📄 Contrato',
 }
 
 const tipoColors: Record<string, string> = {
@@ -101,8 +102,20 @@ export default function DocumentosPage() {
       .not('contract_file_path', 'is', null)
 
     setDocuments(docs ?? [])
-    setContracts(leases ?? [])
+    setContracts((leases ?? []) as Contrato[])
     setLoading(false)
+  }
+
+  function getTenantName(tenant: any): string {
+    if (!tenant) return '—'
+    if (Array.isArray(tenant)) return tenant[0]?.name ?? '—'
+    return tenant.name ?? '—'
+  }
+
+  function getSpaceRef(space: any): string {
+    if (!space) return '—'
+    if (Array.isArray(space)) return space[0]?.ref ?? '—'
+    return space.ref ?? '—'
   }
 
   async function processFile(file: File, index: number, force = false) {
@@ -147,19 +160,15 @@ export default function DocumentosPage() {
   async function handleForceDuplicate() {
     if (!forceDuplicate) return
     setForceDuplicate(null)
+    setUploading(true)
     await processFile(forceDuplicate.file, forceDuplicate.index, true)
     setUploading(false); setUploadDone(true)
     fetchAll()
   }
 
   async function openDoc(path: string) {
-    if (path.startsWith('contracts/')) {
-      const { data } = await supabase.storage.from('documents').createSignedUrl(path, 60)
-      if (data?.signedUrl) window.open(data.signedUrl, '_blank')
-    } else {
-      const { data } = await supabase.storage.from('documents').createSignedUrl(path, 60)
-      if (data?.signedUrl) window.open(data.signedUrl, '_blank')
-    }
+    const { data } = await supabase.storage.from('documents').createSignedUrl(path, 60)
+    if (data?.signedUrl) window.open(data.signedUrl, '_blank')
   }
 
   async function handleDeleteConfirm(deleteExpense: boolean) {
@@ -186,7 +195,7 @@ export default function DocumentosPage() {
   }
 
   async function deleteContract(lease: Contrato) {
-    if (!confirm(`Apagar o contrato de ${lease.tenant?.name}?`)) return
+    if (!confirm(`Apagar o contrato de ${getTenantName(lease.tenant)}?`)) return
     if (lease.contract_file_path) {
       await supabase.storage.from('documents').remove([lease.contract_file_path])
     }
@@ -199,13 +208,12 @@ export default function DocumentosPage() {
     setUploadDone(false); setForceDuplicate(null)
   }
 
-  // Combinar documentos da tabela + contratos
   const allDocs = [
     ...contracts.map(c => ({
       _tipo: 'contrato',
       _id: c.id,
       _nome: c.contract_file_path?.split('/').pop() ?? '—',
-      _associado: `${c.tenant?.name ?? '—'} · ${c.space?.ref ?? '—'}`,
+      _associado: `${getTenantName(c.tenant)} · ${getSpaceRef(c.space)}`,
       _data: c.start_date,
       _path: c.contract_file_path ?? '',
       _amount: null as number | null,
@@ -258,7 +266,7 @@ export default function DocumentosPage() {
         </div>
 
         {/* Resumo por tipo */}
-        <div className="grid grid-cols-4 gap-3 mb-6">
+        <div className="grid grid-cols-4 gap-3 mb-4">
           {[
             { tipo: 'contrato', emoji: '📄', label: 'Contratos', color: 'text-blue-600' },
             { tipo: 'fatura', emoji: '🧾', label: 'Faturas', color: 'text-orange-600' },
@@ -290,7 +298,6 @@ export default function DocumentosPage() {
           ))}
         </div>
 
-        {/* Filtros */}
         <div className="flex gap-3 mb-6">
           <div className="relative flex-1 max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -454,12 +461,8 @@ export default function DocumentosPage() {
             {/* Deteção de duplicado */}
             {forceDuplicate && !uploading && (
               <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 space-y-3">
-                <p className="text-sm text-yellow-800 font-medium">
-                  ⚠ Este ficheiro já foi carregado anteriormente!
-                </p>
-                <p className="text-xs text-yellow-700">
-                  Ficheiro: <strong>{forceDuplicate.file.name}</strong>
-                </p>
+                <p className="text-sm text-yellow-800 font-medium">⚠ Este ficheiro já foi carregado anteriormente!</p>
+                <p className="text-xs text-yellow-700">Ficheiro: <strong>{forceDuplicate.file.name}</strong></p>
                 <p className="text-sm text-yellow-700">Queres carregar mesmo assim?</p>
                 <div className="flex gap-2">
                   <button onClick={handleForceDuplicate}
