@@ -55,24 +55,27 @@ export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
     setInvoiceFile(file)
     setOcrDone(false)
 
-    // Só faz OCR em PDFs e apenas para nova despesa
-    if (!expense && file.type === 'application/pdf') {
+    // OCR automático para nova despesa
+    if (!expense && (file.type === 'application/pdf' || file.type.startsWith('image/'))) {
       setProcessingOcr(true)
       try {
         const formData = new FormData()
         formData.append('file', file)
-        const res = await fetch('/api/process-invoice', { method: 'POST', body: formData })
+        formData.append('tipo', 'fatura')
+        // Não guarda ainda — só faz OCR para preencher o formulário
+        const res = await fetch('/api/process-document', { method: 'POST', body: formData })
         const data = await res.json()
 
-        if (data.invoice) {
-          const inv = data.invoice
+        // Se for duplicado ou sucesso, usa os dados extraídos
+        const doc = data.document ?? data.existing
+        if (doc) {
           setForm(f => ({
             ...f,
-            description: inv.items_summary ?? inv.supplier_name ?? f.description,
-            amount: inv.amount ? String(inv.amount) : f.amount,
-            expense_date: inv.invoice_date ?? f.expense_date,
-            category: inv.category ?? f.category,
-            supplier: inv.supplier_name ?? f.supplier,
+            description: doc.items_summary ?? doc.supplier_name ?? f.description,
+            amount: doc.amount ? String(doc.amount) : f.amount,
+            expense_date: doc.doc_date ?? f.expense_date,
+            category: doc.category ?? f.category,
+            supplier: doc.supplier_name ?? f.supplier,
           }))
           setOcrDone(true)
         }
@@ -87,23 +90,6 @@ export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
     if (!form.description || !form.amount) { setError('Descrição e valor são obrigatórios'); return }
     setSaving(true); setError('')
 
-    let invoicePath = expense?.invoice_file_path ?? null
-    let invoiceId = (expense as any)?.invoice_id ?? null
-
-    // Upload do ficheiro
-    if (invoiceFile) {
-      const cleanName = invoiceFile.name.replace(/[^a-zA-Z0-9._-]/g, '_')
-      const filename = `invoices/${Date.now()}_${cleanName}`
-      const bytes = await invoiceFile.arrayBuffer()
-
-      const { error: uploadErr } = await supabase.storage
-        .from('invoices')
-        .upload(filename, bytes, { contentType: invoiceFile.type })
-
-      if (uploadErr) { setError('Erro ao fazer upload: ' + uploadErr.message); setSaving(false); return }
-      invoicePath = filename
-    }
-
     const payload = {
       expense_date: form.expense_date,
       category: form.category,
@@ -112,7 +98,6 @@ export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
       amount: parseFloat(form.amount),
       payment_method: form.payment_method,
       supplier: form.supplier || null,
-      invoice_file_path: invoicePath,
       notes: form.notes || null,
       project_id: form.project_id || null,
     }
@@ -165,24 +150,19 @@ export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
         })
       }
 
-      // Criar fatura se foi feito upload de ficheiro
-      if (invoiceFile && invoicePath && newExpense) {
-        // Procurar proprietário pelo NIF (se tiver dados OCR)
-        const { data: invoice } = await supabase.from('invoices').insert({
-          file_path: invoicePath,
-          supplier_name: form.supplier || null,
-          amount: parseFloat(form.amount),
-          invoice_date: form.expense_date,
-          category: form.category,
-          items_summary: form.description,
-          status: 'categorizada',
-          expense_id: newExpense.id,
-          owner: 'N/D',
-        }).select().single()
+      // Se foi feito upload, guardar documento e ligar à despesa
+      if (invoiceFile && newExpense) {
+        const formData = new FormData()
+        formData.append('file', invoiceFile)
+        formData.append('tipo', 'fatura')
 
-        // Ligar fatura à despesa
-        if (invoice) {
-          await supabase.from('expenses').update({ invoice_id: invoice.id }).eq('id', newExpense.id)
+        const res = await fetch('/api/process-document', { method: 'POST', body: formData })
+        const data = await res.json()
+
+        const docId = data.document?.id ?? data.existing?.id
+        if (docId) {
+          // Ligar documento à despesa
+          await supabase.from('documents').update({ expense_id: newExpense.id }).eq('id', docId)
         }
       }
     }
@@ -243,11 +223,6 @@ export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
           {expense && (
             <div>
               <label className="label">Fatura / Recibo</label>
-              {expense?.invoice_file_path && (
-                <p className="text-xs text-emerald-600 mb-2 flex items-center gap-1">
-                  <FileText className="w-3 h-3" /> Fatura já carregada
-                </p>
-              )}
               <label className="flex items-center gap-3 border-2 border-dashed border-gray-200 rounded-lg p-4 cursor-pointer hover:border-emerald-400 transition-colors">
                 <Upload className="w-5 h-5 text-gray-400" />
                 <div>
