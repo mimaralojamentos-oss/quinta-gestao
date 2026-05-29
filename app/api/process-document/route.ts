@@ -9,6 +9,7 @@ export async function POST(request: Request) {
     const file = formData.get('file') as File
     const tipo = formData.get('tipo') as string ?? 'fatura'
     const tipoCustom = formData.get('tipo_custom') as string ?? null
+    const force = formData.get('force') === 'true'
 
     if (!file) return NextResponse.json({ error: 'Ficheiro não encontrado' }, { status: 400 })
 
@@ -24,22 +25,24 @@ export async function POST(request: Request) {
       { auth: { autoRefreshToken: false, persistSession: false } }
     )
 
-    // Verificar duplicado
-    const { data: existing } = await supabase
-      .from('documents')
-      .select('id, file_path, supplier_name, doc_date, amount, tipo')
-      .eq('file_hash', fileHash)
-      .single()
+    // Verificar duplicado de ficheiro
+    if (!force) {
+      const { data: existing } = await supabase
+        .from('documents')
+        .select('id, file_path, supplier_name, doc_date, amount, tipo')
+        .eq('file_hash', fileHash)
+        .single()
 
-    if (existing) {
-      return NextResponse.json({
-        duplicate: true,
-        existing,
-        message: 'Este ficheiro já foi carregado anteriormente'
-      })
+      if (existing) {
+        return NextResponse.json({
+          duplicate: true,
+          existing,
+          message: 'Este ficheiro já foi carregado anteriormente'
+        })
+      }
     }
 
-    // OCR com Claude AI (apenas PDFs e imagens)
+    // OCR com Claude AI
     let extracted: any = {}
     const isPdf = file.type === 'application/pdf'
     const isImage = file.type.startsWith('image/')
@@ -48,9 +51,6 @@ export async function POST(request: Request) {
       try {
         const base64 = buffer.toString('base64')
         const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
-
-        const mediaType = isPdf ? 'application/pdf' : file.type as any
-        const contentType = isPdf ? 'document' : 'image'
 
         const response = await anthropic.messages.create({
           model: 'claude-sonnet-4-5',
@@ -63,7 +63,7 @@ export async function POST(request: Request) {
                 source: { type: 'base64', media_type: 'application/pdf', data: base64 }
               } : {
                 type: 'image',
-                source: { type: 'base64', media_type: mediaType, data: base64 }
+                source: { type: 'base64', media_type: file.type as any, data: base64 }
               },
               {
                 type: 'text',
@@ -139,28 +139,53 @@ export async function POST(request: Request) {
     // Criar despesa automaticamente para faturas
     const isFatura = ['fatura', 'fatura_luz', 'fatura_agua'].includes(tipo)
     let autoExpense = false
+    let expenseId = null
 
-    if (isFatura && doc && extracted.amount) {
-      const { data: newExpense } = await supabase.from('expenses').insert({
-        expense_date: extracted.doc_date ?? new Date().toISOString().slice(0, 10),
-        category: extracted.category ?? 'outros',
-        type: 'pontual',
-        description: extracted.items_summary ?? extracted.supplier_name ?? 'Fatura',
-        amount: extracted.amount,
-        payment_method: 'banco',
-        supplier: extracted.supplier_name ?? null,
-        notes: `Criado automaticamente a partir do documento ${extracted.doc_number ?? ''}`.trim(),
-      }).select().single()
+    if (isFatura && doc && extracted.amount && extracted.doc_date) {
 
-      if (newExpense) {
-        await supabase.from('documents').update({
-          expense_id: newExpense.id
-        }).eq('id', doc.id)
-        autoExpense = true
+      // Verificar se já existe despesa com mesmo valor e data (±1 dia)
+      const dateFrom = new Date(extracted.doc_date)
+      dateFrom.setDate(dateFrom.getDate() - 1)
+      const dateTo = new Date(extracted.doc_date)
+      dateTo.setDate(dateTo.getDate() + 1)
+
+      const { data: existingExpense } = await supabase
+        .from('expenses')
+        .select('id')
+        .eq('amount', extracted.amount)
+        .gte('expense_date', dateFrom.toISOString().slice(0, 10))
+        .lte('expense_date', dateTo.toISOString().slice(0, 10))
+        .is('invoice_id', null)
+        .limit(1)
+        .single()
+
+      if (existingExpense) {
+        // Ligar documento à despesa existente — não criar nova!
+        await supabase.from('documents').update({ expense_id: existingExpense.id }).eq('id', doc.id)
+        expenseId = existingExpense.id
+        autoExpense = false
+      } else {
+        // Criar despesa nova apenas se não existir
+        const { data: newExpense } = await supabase.from('expenses').insert({
+          expense_date: extracted.doc_date,
+          category: extracted.category ?? 'outros',
+          type: 'pontual',
+          description: extracted.items_summary ?? extracted.supplier_name ?? 'Fatura',
+          amount: extracted.amount,
+          payment_method: 'banco',
+          supplier: extracted.supplier_name ?? null,
+          notes: `Criado automaticamente a partir do documento ${extracted.doc_number ?? ''}`.trim(),
+        }).select().single()
+
+        if (newExpense) {
+          await supabase.from('documents').update({ expense_id: newExpense.id }).eq('id', doc.id)
+          expenseId = newExpense.id
+          autoExpense = true
+        }
       }
     }
 
-    return NextResponse.json({ success: true, document: doc, autoExpense, duplicate: false })
+    return NextResponse.json({ success: true, document: doc, autoExpense, duplicate: false, expenseId })
 
   } catch (e: any) {
     console.error(e)
