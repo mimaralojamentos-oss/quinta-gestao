@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Expense } from '@/lib/types'
 import { formatCurrency, formatDate, categoryLabel } from '@/lib/utils'
-import { Plus, Search, FileText, Trash2, X } from 'lucide-react'
+import { Plus, Search, FileText, Trash2, X, SlidersHorizontal } from 'lucide-react'
 import ExpenseModal from './ExpenseModal'
 import { useAuth } from '@/lib/auth-context'
 
@@ -19,15 +19,22 @@ export default function DespesasPage() {
   const [expenses, setExpenses] = useState<any[]>([])
   const [projects, setProjects] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [search, setSearch] = useState('')
-  const [filterCategory, setFilterCategory] = useState('all')
-  const [filterType, setFilterType] = useState('all')
-  const [filterProject, setFilterProject] = useState('all')
   const [showModal, setShowModal] = useState(false)
   const [editExpense, setEditExpense] = useState<Expense | null>(null)
   const [summary, setSummary] = useState({ total: 0, cash: 0, bank: 0 })
   const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirm | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [showFilters, setShowFilters] = useState(false)
+
+  // Filtros
+  const [search, setSearch] = useState('')
+  const [filterCategory, setFilterCategory] = useState('all')
+  const [filterSupplier, setFilterSupplier] = useState('')
+  const [filterProject, setFilterProject] = useState('all')
+  const [filterDateFrom, setFilterDateFrom] = useState('')
+  const [filterDateTo, setFilterDateTo] = useState('')
+  const [filterAmountMin, setFilterAmountMin] = useState('')
+  const [filterAmountMax, setFilterAmountMax] = useState('')
 
   useEffect(() => { fetchAll() }, [])
 
@@ -69,44 +76,18 @@ export default function DespesasPage() {
     if (!deleteConfirm) return
     setDeleting(true)
     const { expense } = deleteConfirm
-
     try {
-      // 1. Apagar movimento de caixa associado
       await supabase.from('cash_fund_movements').delete().eq('source_id', expense.id)
-
-      // 2. Apagar fatura se pedido
-      if (deleteInvoice) {
-
-        // Caso A: despesa tem invoice_id → fatura está na tabela invoices
-        if (expense.invoice_id) {
-          const { data: inv } = await supabase
-            .from('invoices')
-            .select('file_path')
-            .eq('id', expense.invoice_id)
-            .single()
-
-          // Apagar ficheiro do storage 'invoices'
-          if (inv?.file_path) {
-            await supabase.storage.from('invoices').remove([inv.file_path])
-          }
-
-          // Apagar registo da tabela invoices
-          await supabase.from('invoices').delete().eq('id', expense.invoice_id)
-        }
-
-        // Caso B: despesa tem invoice_file_path → ficheiro no storage 'documents'
-        if (expense.invoice_file_path) {
-          await supabase.storage.from('documents').remove([expense.invoice_file_path])
-        }
+      if (deleteInvoice && expense.invoice_id) {
+        const { data: inv } = await supabase.from('invoices').select('file_path').eq('id', expense.invoice_id).single()
+        if (inv?.file_path) await supabase.storage.from('invoices').remove([inv.file_path])
+        await supabase.from('invoices').delete().eq('id', expense.invoice_id)
       }
-
-      // 3. Apagar a despesa
+      if (deleteInvoice && expense.invoice_file_path && !expense.invoice_id) {
+        await supabase.storage.from('documents').remove([expense.invoice_file_path])
+      }
       await supabase.from('expenses').delete().eq('id', expense.id)
-
-    } catch (e: any) {
-      console.error('Erro ao apagar:', e)
-    }
-
+    } catch (e: any) { console.error('Erro ao apagar:', e) }
     setDeleting(false)
     setDeleteConfirm(null)
     fetchAll()
@@ -114,8 +95,7 @@ export default function DespesasPage() {
 
   async function viewInvoice(expense: any) {
     if (expense.invoice_id) {
-      const { data: inv } = await supabase
-        .from('invoices').select('file_path').eq('id', expense.invoice_id).single()
+      const { data: inv } = await supabase.from('invoices').select('file_path').eq('id', expense.invoice_id).single()
       if (inv?.file_path) {
         const { data } = supabase.storage.from('invoices').getPublicUrl(inv.file_path)
         if (data?.publicUrl) window.open(data.publicUrl, '_blank')
@@ -128,23 +108,41 @@ export default function DespesasPage() {
 
   function projectLabel(p: any) {
     if (!p) return '—'
-    const typeEmoji: Record<string, string> = {
-      construcao: '🏗️', renovacao: '🔨', arranjo: '🔧', outro: '📦',
-    }
+    const typeEmoji: Record<string, string> = { construcao: '🏗️', renovacao: '🔨', arranjo: '🔧', outro: '📦' }
     const emoji = typeEmoji[p.type] ?? '📦'
     const loc = p.is_general ? 'Geral' : p.space?.ref ?? p.location_label ?? ''
     return `${emoji} ${p.name}${loc ? ` (${loc})` : ''}`
   }
 
+  function resetFilters() {
+    setSearch('')
+    setFilterCategory('all')
+    setFilterSupplier('')
+    setFilterProject('all')
+    setFilterDateFrom('')
+    setFilterDateTo('')
+    setFilterAmountMin('')
+    setFilterAmountMax('')
+  }
+
+  const hasActiveFilters = search || filterCategory !== 'all' || filterSupplier ||
+    filterProject !== 'all' || filterDateFrom || filterDateTo || filterAmountMin || filterAmountMax
+
+  const allSuppliers = [...new Set(expenses.map(e => e.supplier).filter(Boolean))].sort()
+
   const filtered = expenses.filter(e => {
-    const matchSearch = e.description.toLowerCase().includes(search.toLowerCase()) ||
-      e.supplier?.toLowerCase().includes(search.toLowerCase())
+    const matchSearch = !search ||
+      e.description.toLowerCase().includes(search.toLowerCase())
     const matchCat = filterCategory === 'all' || e.category === filterCategory
-    const matchType = filterType === 'all' || e.type === filterType
+    const matchSupplier = !filterSupplier || e.supplier === filterSupplier
     const matchProject = filterProject === 'all' ||
       (filterProject === 'none' && !e.project_id) ||
       e.project_id === filterProject
-    return matchSearch && matchCat && matchType && matchProject
+    const matchDateFrom = !filterDateFrom || e.expense_date >= filterDateFrom
+    const matchDateTo = !filterDateTo || e.expense_date <= filterDateTo
+    const matchAmountMin = !filterAmountMin || e.amount >= parseFloat(filterAmountMin)
+    const matchAmountMax = !filterAmountMax || e.amount <= parseFloat(filterAmountMax)
+    return matchSearch && matchCat && matchSupplier && matchProject && matchDateFrom && matchDateTo && matchAmountMin && matchAmountMax
   })
 
   const categoryColors: Record<string, string> = {
@@ -192,38 +190,109 @@ export default function DespesasPage() {
         {semProjeto > 0 && (
           <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-4 py-2 mb-4 flex items-center justify-between">
             <p className="text-sm text-yellow-700">⚠ <strong>{semProjeto}</strong> despesa(s) sem projeto associado</p>
-            <button onClick={() => setFilterProject('none')} className="text-xs text-yellow-700 hover:underline font-medium">Ver só estas</button>
+            <button onClick={() => { setFilterProject('none'); setShowFilters(true) }}
+              className="text-xs text-yellow-700 hover:underline font-medium">Ver só estas</button>
           </div>
         )}
 
-        <div className="flex gap-3 mb-6 flex-wrap">
-          <div className="relative flex-1 min-w-[200px] max-w-xs">
+        {/* Barra de pesquisa + botão filtros */}
+        <div className="flex gap-3 mb-3">
+          <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <input className="input pl-9" placeholder="Pesquisar..." value={search}
+            <input className="input pl-9" placeholder="Pesquisar na descrição..." value={search}
               onChange={e => setSearch(e.target.value)} />
           </div>
-          <select className="input w-44" value={filterCategory} onChange={e => setFilterCategory(e.target.value)}>
-            <option value="all">Todas as categorias</option>
-            <option value="obras">Obras</option>
-            <option value="edp">Eletricidade (EDP)</option>
-            <option value="pessoal">Pessoal</option>
-            <option value="contabilidade">Contabilidade</option>
-            <option value="manutencao">Manutenção</option>
-            <option value="outros">Outros</option>
-          </select>
-          <select className="input w-36" value={filterType} onChange={e => setFilterType(e.target.value)}>
-            <option value="all">Todos os tipos</option>
-            <option value="recorrente">Recorrente</option>
-            <option value="pontual">Pontual</option>
-          </select>
-          <select className="input w-52" value={filterProject} onChange={e => setFilterProject(e.target.value)}>
-            <option value="all">Todos os projetos</option>
-            <option value="none">⚠ Sem projeto</option>
-            {projects.map(p => (
-              <option key={p.id} value={p.id}>{projectLabel(p)}</option>
-            ))}
-          </select>
+          <button
+            onClick={() => setShowFilters(v => !v)}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-colors ${
+              hasActiveFilters
+                ? 'bg-emerald-600 text-white border-emerald-600'
+                : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+            }`}>
+            <SlidersHorizontal className="w-4 h-4" />
+            Filtros
+            {hasActiveFilters && <span className="bg-white text-emerald-600 text-xs font-bold px-1.5 py-0.5 rounded-full">
+              {[filterCategory !== 'all', filterSupplier, filterProject !== 'all', filterDateFrom, filterDateTo, filterAmountMin, filterAmountMax].filter(Boolean).length}
+            </span>}
+          </button>
+          {hasActiveFilters && (
+            <button onClick={resetFilters}
+              className="flex items-center gap-1 px-3 py-2 rounded-lg border border-red-200 text-red-600 text-sm hover:bg-red-50 transition-colors">
+              <X className="w-3.5 h-3.5" />
+              Limpar filtros
+            </button>
+          )}
         </div>
+
+        {/* Painel de filtros avançados */}
+        {showFilters && (
+          <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-4 space-y-3">
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="text-xs font-medium text-gray-500 mb-1 block">Categoria</label>
+                <select className="input text-sm" value={filterCategory} onChange={e => setFilterCategory(e.target.value)}>
+                  <option value="all">Todas</option>
+                  <option value="obras">Obras</option>
+                  <option value="edp">Eletricidade (EDP)</option>
+                  <option value="pessoal">Pessoal</option>
+                  <option value="contabilidade">Contabilidade</option>
+                  <option value="manutencao">Manutenção</option>
+                  <option value="outros">Outros</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 mb-1 block">Fornecedor</label>
+                <select className="input text-sm" value={filterSupplier} onChange={e => setFilterSupplier(e.target.value)}>
+                  <option value="">Todos</option>
+                  {allSuppliers.map(s => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 mb-1 block">Projeto</label>
+                <select className="input text-sm" value={filterProject} onChange={e => setFilterProject(e.target.value)}>
+                  <option value="all">Todos</option>
+                  <option value="none">⚠ Sem projeto</option>
+                  {projects.map(p => (
+                    <option key={p.id} value={p.id}>{projectLabel(p)}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-medium text-gray-500 mb-1 block">Data — de</label>
+                <input type="date" className="input text-sm" value={filterDateFrom}
+                  onChange={e => setFilterDateFrom(e.target.value)} />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 mb-1 block">Data — até</label>
+                <input type="date" className="input text-sm" value={filterDateTo}
+                  onChange={e => setFilterDateTo(e.target.value)} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-medium text-gray-500 mb-1 block">Valor mínimo (€)</label>
+                <input type="number" step="0.01" min="0" className="input text-sm" placeholder="0.00"
+                  value={filterAmountMin} onChange={e => setFilterAmountMin(e.target.value)} />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 mb-1 block">Valor máximo (€)</label>
+                <input type="number" step="0.01" min="0" className="input text-sm" placeholder="9999.00"
+                  value={filterAmountMax} onChange={e => setFilterAmountMax(e.target.value)} />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Contador de resultados */}
+        {hasActiveFilters && (
+          <p className="text-sm text-gray-500 mb-3">
+            A mostrar <strong>{filtered.length}</strong> de {expenses.length} despesas
+          </p>
+        )}
 
         {loading ? (
           <div className="flex justify-center py-12">
@@ -302,7 +371,9 @@ export default function DespesasPage() {
                   </tr>
                 ))}
                 {filtered.length === 0 && (
-                  <tr><td colSpan={isAdmin ? 9 : 8} className="py-12 text-center text-gray-400 text-sm">Nenhuma despesa encontrada</td></tr>
+                  <tr><td colSpan={isAdmin ? 9 : 8} className="py-12 text-center text-gray-400 text-sm">
+                    {hasActiveFilters ? 'Nenhuma despesa encontrada com estes filtros' : 'Nenhuma despesa encontrada'}
+                  </td></tr>
                 )}
               </tbody>
             </table>
@@ -318,8 +389,7 @@ export default function DespesasPage() {
               <h2 className="font-semibold text-lg text-gray-900">Apagar Despesa</h2>
               <button onClick={() => setDeleteConfirm(null)}><X className="w-5 h-5 text-gray-400" /></button>
             </div>
-
-            <p className="text-sm text-gray-600 mb-2">Tens a certeza que queres apagar:</p>
+            <p className="text-sm text-gray-600 mb-2">Tens a certeza que queres apagar a despesa:</p>
             <p className="font-medium text-gray-900 mb-1">{deleteConfirm.expense.description}</p>
             <p className="text-sm text-red-600 font-semibold mb-4">{formatCurrency(deleteConfirm.expense.amount)}</p>
 
