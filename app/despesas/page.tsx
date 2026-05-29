@@ -30,6 +30,7 @@ export default function DespesasPage() {
   const [showFilters, setShowFilters] = useState(false)
   const [sortField, setSortField] = useState<SortField>('expense_date')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
+  const [togglingPayment, setTogglingPayment] = useState<string | null>(null)
 
   // Filtros
   const [search, setSearch] = useState('')
@@ -75,6 +76,58 @@ export default function DespesasPage() {
     return sortDir === 'asc'
       ? <ChevronUp className="w-3 h-3 ml-1 text-emerald-600 inline" />
       : <ChevronDown className="w-3 h-3 ml-1 text-emerald-600 inline" />
+  }
+
+  async function handlePaymentMethodToggle(expense: any) {
+    if (!isAdmin) return
+    setTogglingPayment(expense.id)
+
+    const newMethod = expense.payment_method === 'dinheiro' ? 'banco' : 'dinheiro'
+
+    await supabase.from('expenses').update({ payment_method: newMethod }).eq('id', expense.id)
+
+    // Atualizar Fundo de Maneio
+    const { data: existingCash } = await supabase
+      .from('cash_fund_movements').select('id').eq('source_id', expense.id).single()
+
+    if (newMethod === 'dinheiro') {
+      // Passou para dinheiro → criar movimento no Fundo de Maneio
+      if (existingCash) {
+        await supabase.from('cash_fund_movements').update({
+          amount: -Math.abs(expense.amount),
+          movement_date: expense.expense_date,
+          description: `💸 ${expense.description}${expense.supplier ? ` — ${expense.supplier}` : ''}`,
+        }).eq('id', existingCash.id)
+      } else {
+        await supabase.from('cash_fund_movements').insert({
+          movement_date: expense.expense_date,
+          description: `💸 ${expense.description}${expense.supplier ? ` — ${expense.supplier}` : ''}`,
+          amount: -Math.abs(expense.amount),
+          type: 'saida',
+          source: 'despesa',
+          source_id: expense.id,
+        })
+      }
+    } else {
+      // Passou para banco → remover do Fundo de Maneio
+      if (existingCash) {
+        await supabase.from('cash_fund_movements').delete().eq('id', existingCash.id)
+      }
+    }
+
+    // Atualizar localmente
+    setExpenses(prev => prev.map(e =>
+      e.id === expense.id ? { ...e, payment_method: newMethod } : e
+    ))
+    // Recalcular summary
+    setExpenses(prev => {
+      const total = prev.reduce((s, e) => s + e.amount, 0)
+      const cash = prev.filter(e => e.payment_method === 'dinheiro').reduce((s, e) => s + e.amount, 0)
+      setSummary({ total, cash, bank: total - cash })
+      return prev
+    })
+
+    setTogglingPayment(null)
   }
 
   async function handleProjectChange(expenseId: string, projectId: string) {
@@ -167,11 +220,9 @@ export default function DespesasPage() {
     let valA = a[sortField] ?? ''
     let valB = b[sortField] ?? ''
     if (sortField === 'amount') {
-      valA = Number(valA)
-      valB = Number(valB)
+      valA = Number(valA); valB = Number(valB)
     } else {
-      valA = String(valA).toLowerCase()
-      valB = String(valB).toLowerCase()
+      valA = String(valA).toLowerCase(); valB = String(valB).toLowerCase()
     }
     if (valA < valB) return sortDir === 'asc' ? -1 : 1
     if (valA > valB) return sortDir === 'asc' ? 1 : -1
@@ -188,7 +239,6 @@ export default function DespesasPage() {
   }
 
   const semProjeto = expenses.filter(e => !e.project_id).length
-
   const thClass = "table-header cursor-pointer hover:bg-gray-100 select-none"
 
   return (
@@ -365,9 +415,23 @@ export default function DespesasPage() {
                     <td className="table-cell text-sm">{expense.supplier ?? '—'}</td>
                     <td className="table-cell font-semibold text-red-600">{formatCurrency(expense.amount)}</td>
                     <td className="table-cell">
-                      <span className={`text-xs px-2 py-1 rounded-full ${expense.payment_method === 'dinheiro' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
-                        {expense.payment_method === 'dinheiro' ? '💵' : '🏦'}
-                      </span>
+                      {isAdmin ? (
+                        <button
+                          onClick={() => handlePaymentMethodToggle(expense)}
+                          disabled={togglingPayment === expense.id}
+                          title={expense.payment_method === 'dinheiro' ? 'Clica para mudar para Banco' : 'Clica para mudar para Dinheiro'}
+                          className={`text-xs px-2 py-1 rounded-full font-medium transition-all hover:opacity-70 cursor-pointer ${
+                            expense.payment_method === 'dinheiro'
+                              ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                              : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+                          } ${togglingPayment === expense.id ? 'opacity-50' : ''}`}>
+                          {togglingPayment === expense.id ? '...' : expense.payment_method === 'dinheiro' ? '💵 Dinheiro' : '🏦 Banco'}
+                        </button>
+                      ) : (
+                        <span className={`text-xs px-2 py-1 rounded-full ${expense.payment_method === 'dinheiro' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
+                          {expense.payment_method === 'dinheiro' ? '💵' : '🏦'}
+                        </span>
+                      )}
                     </td>
                     <td className="table-cell">
                       {isAdmin ? (
