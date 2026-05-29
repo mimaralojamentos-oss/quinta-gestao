@@ -38,6 +38,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (inactivityTimer.current) clearTimeout(inactivityTimer.current)
     inactivityTimer.current = setTimeout(async () => {
       await supabaseClient.auth.signOut()
+      sessionStorage.clear()
       window.location.href = '/login'
     }, INACTIVITY_TIMEOUT)
   }
@@ -80,6 +81,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     })
 
+    // Logout ao fechar a janela/tab
+    const handleBeforeUnload = () => {
+      supabaseClient.auth.signOut()
+      sessionStorage.clear()
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+
     // Resetar timer com qualquer atividade
     const activityEvents = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart', 'click']
     const handleActivity = () => {
@@ -91,6 +99,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       mounted = false
       subscription.unsubscribe()
       clearInactivityTimer()
+      window.removeEventListener('beforeunload', handleBeforeUnload)
       activityEvents.forEach(event => window.removeEventListener(event, handleActivity))
     }
   }, [])
@@ -106,6 +115,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   async function signOut() {
     clearInactivityTimer()
     await supabaseClient.auth.signOut()
+    sessionStorage.clear()
     window.location.href = '/login'
   }
 
