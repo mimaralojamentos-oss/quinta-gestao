@@ -4,7 +4,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Search, FileText, Eye, FolderOpen, Trash2, X, Plus, Upload, Loader2, CheckCircle, AlertCircle } from 'lucide-react'
+import { Search, FileText, Eye, FolderOpen, Trash2, X, Plus, Upload, Loader2, CheckCircle, AlertCircle, Edit2 } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 
 interface Document {
@@ -84,23 +84,16 @@ export default function DocumentosPage() {
   const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirm | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [forceDuplicate, setForceDuplicate] = useState<{ file: File; index: number } | null>(null)
+  const [editDoc, setEditDoc] = useState<Document | null>(null)
+  const [editForm, setEditForm] = useState<any>({})
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => { fetchAll() }, [])
 
   async function fetchAll() {
     setLoading(true)
-
-    const { data: docs } = await supabase
-      .from('documents')
-      .select('*')
-      .eq('status', 'ativo')
-      .order('doc_date', { ascending: false })
-
-    const { data: leases } = await supabase
-      .from('leases')
-      .select('id, contract_file_path, start_date, tenant:tenants(name), space:spaces(ref)')
-      .not('contract_file_path', 'is', null)
-
+    const { data: docs } = await supabase.from('documents').select('*').eq('status', 'ativo').order('doc_date', { ascending: false })
+    const { data: leases } = await supabase.from('leases').select('id, contract_file_path, start_date, tenant:tenants(name), space:spaces(ref)').not('contract_file_path', 'is', null)
     setDocuments(docs ?? [])
     setContracts((leases ?? []) as Contrato[])
     setLoading(false)
@@ -118,24 +111,52 @@ export default function DocumentosPage() {
     return space.ref ?? '—'
   }
 
+  function openEditModal(doc: Document) {
+    setEditDoc(doc)
+    setEditForm({
+      tipo: doc.tipo,
+      tipo_custom: doc.tipo_custom ?? '',
+      supplier_name: doc.supplier_name ?? '',
+      amount: doc.amount != null ? String(doc.amount) : '',
+      doc_date: doc.doc_date ?? '',
+      doc_number: doc.doc_number ?? '',
+      items_summary: doc.items_summary ?? '',
+      category: doc.category ?? 'outros',
+    })
+  }
+
+  async function handleSaveEdit() {
+    if (!editDoc) return
+    setSaving(true)
+    await supabase.from('documents').update({
+      tipo: editForm.tipo,
+      tipo_custom: editForm.tipo_custom || null,
+      supplier_name: editForm.supplier_name || null,
+      amount: editForm.amount ? parseFloat(editForm.amount) : null,
+      doc_date: editForm.doc_date || null,
+      doc_number: editForm.doc_number || null,
+      items_summary: editForm.items_summary || null,
+      category: editForm.category || null,
+    }).eq('id', editDoc.id)
+    setSaving(false)
+    setEditDoc(null)
+    fetchAll()
+  }
+
   async function processFile(file: File, index: number, force = false) {
     setUploadResults(prev => prev.map((r, i) => i === index ? { ...r, status: 'processing' } : r))
-
     const formData = new FormData()
     formData.append('file', file)
     formData.append('tipo', uploadTipo)
     if (uploadTipoCustom) formData.append('tipo_custom', uploadTipoCustom)
     if (force) formData.append('force', 'true')
-
     const res = await fetch('/api/process-document', { method: 'POST', body: formData })
     const data = await res.json()
-
     if (data.duplicate && !force) {
       setUploadResults(prev => prev.map((r, i) => i === index ? { ...r, status: 'duplicate', duplicate: data.existing } : r))
       setForceDuplicate({ file, index })
       return
     }
-
     if (data.error) {
       setUploadResults(prev => prev.map((r, i) => i === index ? { ...r, status: 'error', error: data.error } : r))
     } else {
@@ -148,19 +169,14 @@ export default function DocumentosPage() {
     setUploading(true); setUploadDone(false)
     const results: UploadResult[] = files.map(f => ({ fileName: f.name, status: 'pending' }))
     setUploadResults(results)
-
-    for (let i = 0; i < files.length; i++) {
-      await processFile(files[i], i)
-    }
-
+    for (let i = 0; i < files.length; i++) await processFile(files[i], i)
     setUploading(false); setUploadDone(true)
     fetchAll()
   }
 
   async function handleForceDuplicate() {
     if (!forceDuplicate) return
-    setForceDuplicate(null)
-    setUploading(true)
+    setForceDuplicate(null); setUploading(true)
     await processFile(forceDuplicate.file, forceDuplicate.index, true)
     setUploading(false); setUploadDone(true)
     fetchAll()
@@ -175,7 +191,6 @@ export default function DocumentosPage() {
     if (!deleteConfirm) return
     setDeleting(true)
     const { doc } = deleteConfirm
-
     try {
       if (deleteExpense && doc.expense_id) {
         await supabase.from('cash_fund_movements').delete().eq('source_id', doc.expense_id)
@@ -185,20 +200,13 @@ export default function DocumentosPage() {
       }
       if (doc.file_path) await supabase.storage.from('documents').remove([doc.file_path])
       await supabase.from('documents').delete().eq('id', doc.id)
-    } catch (e: any) {
-      console.error('Erro ao apagar:', e)
-    }
-
-    setDeleting(false)
-    setDeleteConfirm(null)
-    fetchAll()
+    } catch (e: any) { console.error('Erro ao apagar:', e) }
+    setDeleting(false); setDeleteConfirm(null); fetchAll()
   }
 
   async function deleteContract(lease: Contrato) {
     if (!confirm(`Apagar o contrato de ${getTenantName(lease.tenant)}?`)) return
-    if (lease.contract_file_path) {
-      await supabase.storage.from('documents').remove([lease.contract_file_path])
-    }
+    if (lease.contract_file_path) await supabase.storage.from('documents').remove([lease.contract_file_path])
     await supabase.from('leases').update({ contract_file_path: null }).eq('id', lease.id)
     fetchAll()
   }
@@ -210,35 +218,25 @@ export default function DocumentosPage() {
 
   const allDocs = [
     ...contracts.map(c => ({
-      _tipo: 'contrato',
-      _id: c.id,
+      _tipo: 'contrato', _id: c.id,
       _nome: c.contract_file_path?.split('/').pop() ?? '—',
       _associado: `${getTenantName(c.tenant)} · ${getSpaceRef(c.space)}`,
-      _data: c.start_date,
-      _path: c.contract_file_path ?? '',
-      _amount: null as number | null,
-      _expense_id: null,
-      _doc: null as Document | null,
-      _contrato: c,
+      _data: c.start_date, _path: c.contract_file_path ?? '',
+      _amount: null as number | null, _expense_id: null,
+      _doc: null as Document | null, _contrato: c,
     })),
     ...documents.map(d => ({
-      _tipo: d.tipo,
-      _id: d.id,
+      _tipo: d.tipo, _id: d.id,
       _nome: d.original_name ?? d.file_path.split('/').pop() ?? '—',
       _associado: d.supplier_name ?? d.items_summary ?? '—',
-      _data: d.doc_date,
-      _path: d.file_path,
-      _amount: d.amount,
-      _expense_id: d.expense_id,
-      _doc: d,
-      _contrato: null,
+      _data: d.doc_date, _path: d.file_path,
+      _amount: d.amount, _expense_id: d.expense_id,
+      _doc: d, _contrato: null,
     })),
   ]
 
   const filtered = allDocs.filter(d => {
-    const matchSearch = !search ||
-      d._nome.toLowerCase().includes(search.toLowerCase()) ||
-      d._associado.toLowerCase().includes(search.toLowerCase())
+    const matchSearch = !search || d._nome.toLowerCase().includes(search.toLowerCase()) || d._associado.toLowerCase().includes(search.toLowerCase())
     const matchTipo = filterTipo === 'all' || d._tipo === filterTipo
     return matchSearch && matchTipo
   }).sort((a, b) => {
@@ -259,13 +257,11 @@ export default function DocumentosPage() {
           </div>
           {isAdmin && (
             <button className="btn-primary" onClick={() => setShowUpload(true)}>
-              <Plus className="w-4 h-4" />
-              Carregar Documento
+              <Plus className="w-4 h-4" /> Carregar Documento
             </button>
           )}
         </div>
 
-        {/* Resumo por tipo */}
         <div className="grid grid-cols-4 gap-3 mb-4">
           {[
             { tipo: 'contrato', emoji: '📄', label: 'Contratos', color: 'text-blue-600' },
@@ -315,16 +311,12 @@ export default function DocumentosPage() {
             <option value="outro">📦 Outros</option>
           </select>
           {filterTipo !== 'all' && (
-            <button onClick={() => setFilterTipo('all')} className="text-xs text-gray-500 hover:underline">
-              Limpar filtro
-            </button>
+            <button onClick={() => setFilterTipo('all')} className="text-xs text-gray-500 hover:underline">Limpar filtro</button>
           )}
         </div>
 
         {loading ? (
-          <div className="flex justify-center py-12">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600" />
-          </div>
+          <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600" /></div>
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center py-16 text-gray-400">
             <FolderOpen className="w-12 h-12 mb-3" />
@@ -359,12 +351,8 @@ export default function DocumentosPage() {
                       </div>
                     </td>
                     <td className="table-cell text-sm text-gray-600">{doc._associado}</td>
-                    <td className="table-cell text-sm text-gray-500">
-                      {doc._data ? formatDate(doc._data) : '—'}
-                    </td>
-                    <td className="table-cell text-sm font-medium text-red-600">
-                      {doc._amount ? formatCurrency(doc._amount) : '—'}
-                    </td>
+                    <td className="table-cell text-sm text-gray-500">{doc._data ? formatDate(doc._data) : '—'}</td>
+                    <td className="table-cell text-sm font-medium text-red-600">{doc._amount ? formatCurrency(doc._amount) : '—'}</td>
                     <td className="table-cell">
                       {doc._expense_id ? (
                         <span className="text-xs text-emerald-600 font-medium">✅ Sim</span>
@@ -380,6 +368,12 @@ export default function DocumentosPage() {
                           className="flex items-center gap-1 text-xs text-emerald-600 hover:underline font-medium">
                           <Eye className="w-3.5 h-3.5" /> Abrir
                         </button>
+                        {isAdmin && doc._doc && (
+                          <button onClick={() => openEditModal(doc._doc!)}
+                            className="text-gray-400 hover:text-blue-500 transition-colors">
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                         {isAdmin && (
                           <button
                             onClick={() => doc._contrato
@@ -400,6 +394,84 @@ export default function DocumentosPage() {
         )}
       </div>
 
+      {/* Modal Editar Documento */}
+      {editDoc && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="font-semibold text-lg text-gray-900">Editar Documento</h2>
+              <button onClick={() => setEditDoc(null)}><X className="w-5 h-5 text-gray-400" /></button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="label">Tipo de Documento</label>
+                <select className="input" value={editForm.tipo} onChange={e => setEditForm((f: any) => ({ ...f, tipo: e.target.value }))}>
+                  <option value="fatura">🧾 Fatura</option>
+                  <option value="fatura_luz">⚡ Fatura da Luz</option>
+                  <option value="fatura_agua">💧 Fatura da Água</option>
+                  <option value="registo_predial">🏠 Registo Predial</option>
+                  <option value="carta">✉️ Carta</option>
+                  <option value="outro">📦 Outro</option>
+                </select>
+              </div>
+              {editForm.tipo === 'outro' && (
+                <div>
+                  <label className="label">Descrição do tipo</label>
+                  <input className="input" placeholder="ex: Seguro, Licença..." value={editForm.tipo_custom}
+                    onChange={e => setEditForm((f: any) => ({ ...f, tipo_custom: e.target.value }))} />
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="label">Data</label>
+                  <input type="date" className="input" value={editForm.doc_date}
+                    onChange={e => setEditForm((f: any) => ({ ...f, doc_date: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="label">Valor (€)</label>
+                  <input type="number" step="0.01" className="input" value={editForm.amount}
+                    onChange={e => setEditForm((f: any) => ({ ...f, amount: e.target.value }))} />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="label">Fornecedor</label>
+                  <input className="input" value={editForm.supplier_name}
+                    onChange={e => setEditForm((f: any) => ({ ...f, supplier_name: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="label">Nº Documento</label>
+                  <input className="input" value={editForm.doc_number}
+                    onChange={e => setEditForm((f: any) => ({ ...f, doc_number: e.target.value }))} />
+                </div>
+              </div>
+              <div>
+                <label className="label">Categoria</label>
+                <select className="input" value={editForm.category} onChange={e => setEditForm((f: any) => ({ ...f, category: e.target.value }))}>
+                  <option value="obras">Obras</option>
+                  <option value="edp">Eletricidade (EDP)</option>
+                  <option value="pessoal">Pessoal</option>
+                  <option value="contabilidade">Contabilidade</option>
+                  <option value="manutencao">Manutenção</option>
+                  <option value="outros">Outros</option>
+                </select>
+              </div>
+              <div>
+                <label className="label">Resumo / Descrição</label>
+                <textarea className="input" rows={3} value={editForm.items_summary}
+                  onChange={e => setEditForm((f: any) => ({ ...f, items_summary: e.target.value }))} />
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <button className="btn-secondary" onClick={() => setEditDoc(null)}>Cancelar</button>
+              <button className="btn-primary" onClick={handleSaveEdit} disabled={saving}>
+                {saving ? 'A guardar...' : 'Guardar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Modal Upload */}
       {showUpload && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
@@ -408,7 +480,6 @@ export default function DocumentosPage() {
               <h2 className="font-semibold text-lg text-gray-900">Carregar Documento</h2>
               <button onClick={handleClose}><X className="w-5 h-5 text-gray-400" /></button>
             </div>
-
             {!uploading && !uploadDone && !forceDuplicate && (
               <div className="space-y-4">
                 <div>
@@ -457,37 +528,23 @@ export default function DocumentosPage() {
                 </div>
               </div>
             )}
-
-            {/* Deteção de duplicado */}
             {forceDuplicate && !uploading && (
               <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 space-y-3">
                 <p className="text-sm text-yellow-800 font-medium">⚠ Este ficheiro já foi carregado anteriormente!</p>
                 <p className="text-xs text-yellow-700">Ficheiro: <strong>{forceDuplicate.file.name}</strong></p>
                 <p className="text-sm text-yellow-700">Queres carregar mesmo assim?</p>
                 <div className="flex gap-2">
-                  <button onClick={handleForceDuplicate}
-                    className="flex-1 py-2 rounded-lg bg-yellow-500 text-white text-sm font-medium hover:bg-yellow-600">
-                    Sim, carregar na mesma
-                  </button>
-                  <button onClick={handleClose}
-                    className="flex-1 py-2 rounded-lg border border-gray-200 text-gray-600 text-sm font-medium hover:bg-gray-50">
-                    Cancelar
-                  </button>
+                  <button onClick={handleForceDuplicate} className="flex-1 py-2 rounded-lg bg-yellow-500 text-white text-sm font-medium hover:bg-yellow-600">Sim, carregar na mesma</button>
+                  <button onClick={handleClose} className="flex-1 py-2 rounded-lg border border-gray-200 text-gray-600 text-sm font-medium hover:bg-gray-50">Cancelar</button>
                 </div>
               </div>
             )}
-
             {(uploading || uploadDone) && !forceDuplicate && (
               <div className="space-y-2">
                 {!uploadDone && <p className="text-sm text-gray-600 mb-3">A processar com IA...</p>}
                 {uploadDone && <p className="text-sm font-medium text-gray-700 mb-3">Processamento concluído!</p>}
                 {uploadResults.map((r, i) => (
-                  <div key={i} className={`flex items-center gap-3 p-3 rounded-lg ${
-                    r.status === 'success' ? 'bg-emerald-50' :
-                    r.status === 'error' ? 'bg-red-50' :
-                    r.status === 'duplicate' ? 'bg-yellow-50' :
-                    r.status === 'processing' ? 'bg-blue-50' : 'bg-gray-50'
-                  }`}>
+                  <div key={i} className={`flex items-center gap-3 p-3 rounded-lg ${r.status === 'success' ? 'bg-emerald-50' : r.status === 'error' ? 'bg-red-50' : r.status === 'duplicate' ? 'bg-yellow-50' : r.status === 'processing' ? 'bg-blue-50' : 'bg-gray-50'}`}>
                     {r.status === 'success' && <CheckCircle className="w-4 h-4 text-emerald-600 flex-shrink-0" />}
                     {r.status === 'error' && <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />}
                     {r.status === 'duplicate' && <AlertCircle className="w-4 h-4 text-yellow-600 flex-shrink-0" />}
@@ -504,11 +561,8 @@ export default function DocumentosPage() {
                 ))}
               </div>
             )}
-
             <div className="flex justify-end gap-3 mt-6">
-              <button className="btn-secondary" onClick={handleClose}>
-                {uploadDone ? 'Fechar' : 'Cancelar'}
-              </button>
+              <button className="btn-secondary" onClick={handleClose}>{uploadDone ? 'Fechar' : 'Cancelar'}</button>
               {!uploadDone && !uploading && !forceDuplicate && (
                 <button className="btn-primary" onClick={handleUpload} disabled={files.length === 0}>
                   <FileText className="w-4 h-4" />
@@ -530,12 +584,9 @@ export default function DocumentosPage() {
             </div>
             <p className="text-sm text-gray-600 mb-2">Tens a certeza que queres apagar:</p>
             <p className="font-medium text-gray-900 mb-4">{deleteConfirm.doc.original_name ?? deleteConfirm.doc.file_path}</p>
-
             {deleteConfirm.hasExpense ? (
               <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                <p className="text-sm text-yellow-800 font-medium mb-3">
-                  💸 Este documento tem uma despesa associada. O que queres fazer?
-                </p>
+                <p className="text-sm text-yellow-800 font-medium mb-3">💸 Este documento tem uma despesa associada. O que queres fazer?</p>
                 <div className="flex flex-col gap-2">
                   <button onClick={() => handleDeleteConfirm(true)} disabled={deleting}
                     className="w-full py-2.5 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-700 disabled:opacity-50">
@@ -545,10 +596,7 @@ export default function DocumentosPage() {
                     className="w-full py-2.5 rounded-lg bg-orange-500 text-white text-sm font-medium hover:bg-orange-600 disabled:opacity-50">
                     {deleting ? 'A apagar...' : '📄 Apagar só o documento'}
                   </button>
-                  <button onClick={() => setDeleteConfirm(null)}
-                    className="w-full py-2.5 rounded-lg border border-gray-200 text-gray-600 text-sm">
-                    Cancelar
-                  </button>
+                  <button onClick={() => setDeleteConfirm(null)} className="w-full py-2.5 rounded-lg border border-gray-200 text-gray-600 text-sm">Cancelar</button>
                 </div>
               </div>
             ) : (
