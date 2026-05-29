@@ -26,17 +26,30 @@ const AuthContext = createContext<AuthContextType>({
 })
 
 const supabaseClient = createClient()
-const INACTIVITY_TIMEOUT = 60 * 60 * 1000 // 1 hora
+const INACTIVITY_TIMEOUT = 15 * 60 * 1000 // 15 minutos
+const WARNING_BEFORE = 2 * 60 * 1000 // aviso 2 minutos antes
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
   const [loading, setLoading] = useState(true)
+  const [showWarning, setShowWarning] = useState(false)
   const inactivityTimer = useRef<NodeJS.Timeout | null>(null)
+  const warningTimer = useRef<NodeJS.Timeout | null>(null)
 
   function resetInactivityTimer() {
     if (inactivityTimer.current) clearTimeout(inactivityTimer.current)
+    if (warningTimer.current) clearTimeout(warningTimer.current)
+    setShowWarning(false)
+
+    // Aviso 2 minutos antes
+    warningTimer.current = setTimeout(() => {
+      setShowWarning(true)
+    }, INACTIVITY_TIMEOUT - WARNING_BEFORE)
+
+    // Logout após 15 minutos
     inactivityTimer.current = setTimeout(async () => {
+      setShowWarning(false)
       await supabaseClient.auth.signOut()
       sessionStorage.clear()
       window.location.href = '/login'
@@ -44,10 +57,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   function clearInactivityTimer() {
-    if (inactivityTimer.current) {
-      clearTimeout(inactivityTimer.current)
-      inactivityTimer.current = null
-    }
+    if (inactivityTimer.current) { clearTimeout(inactivityTimer.current); inactivityTimer.current = null }
+    if (warningTimer.current) { clearTimeout(warningTimer.current); warningTimer.current = null }
+    setShowWarning(false)
   }
 
   useEffect(() => {
@@ -58,11 +70,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!mounted) return
       setUser(user)
       if (user) {
-        const { data } = await supabaseClient
-          .from('profiles')
-          .select('*')
-          .eq('id', user.id)
-          .single()
+        const { data } = await supabaseClient.from('profiles').select('*').eq('id', user.id).single()
         if (mounted) setProfile(data)
         resetInactivityTimer()
       }
@@ -75,11 +83,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!mounted) return
       if (event === 'SIGNED_IN' && session?.user) {
         setUser(session.user)
-        const { data } = await supabaseClient
-          .from('profiles')
-          .select('*')
-          .eq('id', session.user.id)
-          .single()
+        const { data } = await supabaseClient.from('profiles').select('*').eq('id', session.user.id).single()
         if (mounted) setProfile(data)
         resetInactivityTimer()
         setLoading(false)
@@ -92,7 +96,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     })
 
-    // Resetar timer com qualquer atividade
     const activityEvents = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart', 'click']
     const handleActivity = () => {
       if (inactivityTimer.current) resetInactivityTimer()
@@ -108,11 +111,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   useEffect(() => {
-    if (user) {
-      resetInactivityTimer()
-    } else {
-      clearInactivityTimer()
-    }
+    if (user) { resetInactivityTimer() } else { clearInactivityTimer() }
   }, [user])
 
   async function signOut() {
@@ -124,13 +123,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthContext.Provider value={{
-      user,
-      profile,
+      user, profile,
       isAdmin: profile?.role === 'admin',
-      loading,
-      signOut
+      loading, signOut
     }}>
       {children}
+
+      {/* Aviso de sessão a expirar */}
+      {showWarning && (
+        <div className="fixed bottom-6 right-6 z-50 bg-white border border-yellow-300 rounded-xl shadow-lg p-4 max-w-sm">
+          <p className="text-sm font-semibold text-yellow-700 mb-1">⚠ Sessão a expirar</p>
+          <p className="text-xs text-gray-600 mb-3">A tua sessão expira em 2 minutos por inatividade.</p>
+          <button
+            onClick={() => resetInactivityTimer()}
+            className="w-full py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 transition-colors">
+            Continuar sessão
+          </button>
+        </div>
+      )}
     </AuthContext.Provider>
   )
 }
