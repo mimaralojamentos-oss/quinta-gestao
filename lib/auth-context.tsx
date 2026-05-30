@@ -6,19 +6,20 @@ import type { User } from '@supabase/supabase-js'
 interface Profile {
   id: string
   name: string
-  role: 'admin' | 'viewer'
+  role: 'admin' | 'viewer' | 'electrician'
 }
 
 interface AuthContextType {
   user: User | null
   profile: Profile | null
   isAdmin: boolean
+  isElectrician: boolean
   loading: boolean
   signOut: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextType>({
-  user: null, profile: null, isAdmin: false, loading: true, signOut: async () => {},
+  user: null, profile: null, isAdmin: false, isElectrician: false, loading: true, signOut: async () => {},
 })
 
 const supabaseClient = createClient()
@@ -102,7 +103,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, profile, isAdmin: profile?.role === 'admin', loading, signOut }}>
+    <AuthContext.Provider value={{
+      user,
+      profile,
+      isAdmin: profile?.role === 'admin',
+      isElectrician: profile?.role === 'electrician',
+      loading,
+      signOut
+    }}>
       {children}
       {showWarning && (
         <div className="fixed bottom-6 right-6 z-50 bg-white border border-yellow-300 rounded-xl shadow-lg p-4 max-w-sm">
