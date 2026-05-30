@@ -73,7 +73,6 @@ export default function DocumentosPage() {
   const [contracts, setContracts] = useState<Contrato[]>([])
   const [loading, setLoading] = useState(true)
 
-  // Filtros
   const [search, setSearch] = useState('')
   const [filterTipo, setFilterTipo] = useState('all')
   const [filterDateStart, setFilterDateStart] = useState('')
@@ -268,7 +267,7 @@ export default function DocumentosPage() {
     setFilterDespesa('all')
   }
 
-  const hasActiveFilters = search || filterTipo !== 'all' || filterDateStart || filterDateEnd || filterValueMin || filterValueMax || filterDespesa !== 'all'
+  const hasActiveFilters = !!(search || filterTipo !== 'all' || filterDateStart || filterDateEnd || filterValueMin || filterValueMax || filterDespesa !== 'all')
 
   const allDocs = [
     ...contracts.map(c => ({
@@ -363,12 +362,14 @@ export default function DocumentosPage() {
         {/* Barra de filtros */}
         <div className="bg-white border border-gray-100 rounded-xl shadow-sm p-4 mb-6">
           <div className="flex gap-3 items-center">
-            <div className="relative flex-1">
+            {/* Campo de pesquisa — ocupa o espaço disponível */}
+            <div className="relative flex-1 min-w-0">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input className="input pl-9 w-full" placeholder="Pesquisar por nome, fornecedor ou descrição..."
                 value={search} onChange={e => setSearch(e.target.value)} />
             </div>
-            <select className="input w-40 flex-shrink-0" value={filterTipo} onChange={e => setFilterTipo(e.target.value)}>
+            {/* Tipo — tamanho fixo compacto */}
+            <select className="input w-36 flex-shrink-0" value={filterTipo} onChange={e => setFilterTipo(e.target.value)}>
               <option value="all">Todos os tipos</option>
               <option value="contrato">📄 Contratos</option>
               <option value="fatura">🧾 Faturas</option>
@@ -378,9 +379,10 @@ export default function DocumentosPage() {
               <option value="carta">✉️ Cartas</option>
               <option value="outro">📦 Outros</option>
             </select>
+            {/* Botão mais filtros */}
             <button
               onClick={() => setShowFilters(!showFilters)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-colors flex-shrink-0 ${showFilters || (filterDateStart || filterDateEnd || filterValueMin || filterValueMax || filterDespesa !== 'all') ? 'bg-blue-50 border-blue-200 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+              className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-colors flex-shrink-0 ${showFilters || filterDateStart || filterDateEnd || filterValueMin || filterValueMax || filterDespesa !== 'all' ? 'bg-blue-50 border-blue-200 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
               <Filter className="w-4 h-4" />
               Filtros
               {showFilters ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
