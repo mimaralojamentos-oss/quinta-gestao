@@ -1,11 +1,11 @@
 'use client'
 
 import AppLayout from '@/components/layout/AppLayout'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Tenant, Lease } from '@/lib/types'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Plus, Search, FileText, Phone, Mail, X, AlertTriangle } from 'lucide-react'
+import { Plus, Search, FileText, Phone, Mail, X, AlertTriangle, ArrowUpDown, ArrowUp, ArrowDown, ChevronDown } from 'lucide-react'
 import TenantModal from './TenantModal'
 import LeaseModal from './LeaseModal'
 import { useAuth } from '@/lib/auth-context'
@@ -36,15 +36,22 @@ interface DebtPayment {
   notes: string | null
 }
 
+type SortField = 'name' | 'spaces' | 'rent' | 'debt' | 'contract' | null
+type SortDir = 'asc' | 'desc'
+
 export default function InquilinosPage() {
   const { isAdmin } = useAuth()
   const [tenants, setTenants] = useState<TenantWithLease[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
-  const [filterSpace, setFilterSpace] = useState('')
+  const [filterSpaces, setFilterSpaces] = useState<string[]>([])
+  const [showSpaceDropdown, setShowSpaceDropdown] = useState(false)
+  const spaceDropdownRef = useRef<HTMLDivElement>(null)
   const [filterSpaceType, setFilterSpaceType] = useState<'all' | 'pavilhao' | 'habitacao' | 'loja'>('all')
   const [filterDebt, setFilterDebt] = useState<'all' | 'com_divida' | 'sem_divida'>('all')
   const [filterContract, setFilterContract] = useState<'all' | '30dias' | '60dias' | '90dias' | '180dias' | 'expirado'>('all')
+  const [sortField, setSortField] = useState<SortField>(null)
+  const [sortDir, setSortDir] = useState<SortDir>('asc')
   const [showTenantModal, setShowTenantModal] = useState(false)
   const [showLeaseModal, setShowLeaseModal] = useState(false)
   const [editTenant, setEditTenant] = useState<Tenant | null>(null)
@@ -60,6 +67,17 @@ export default function InquilinosPage() {
   const [savingDebt, setSavingDebt] = useState(false)
   const [newDebt, setNewDebt] = useState({ description: '', original_amount: '', reference_date: new Date().toISOString().slice(0, 10) })
   const [newPayment, setNewPayment] = useState({ payment_date: new Date().toISOString().slice(0, 10), amount: '', payment_method: 'dinheiro', notes: '' })
+
+  // Fechar dropdown ao clicar fora
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (spaceDropdownRef.current && !spaceDropdownRef.current.contains(e.target as Node)) {
+        setShowSpaceDropdown(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   useEffect(() => { fetchTenants() }, [])
 
@@ -185,11 +203,35 @@ export default function InquilinosPage() {
     return debts.reduce((s, d) => s + getRemainingDebt(d), 0)
   }
 
+  function handleSort(field: SortField) {
+    if (sortField === field) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortField(field)
+      setSortDir('asc')
+    }
+  }
+
+  function SortIcon({ field }: { field: SortField }) {
+    if (sortField !== field) return <ArrowUpDown className="w-3 h-3 text-gray-300 ml-1 inline" />
+    return sortDir === 'asc'
+      ? <ArrowUp className="w-3 h-3 text-emerald-600 ml-1 inline" />
+      : <ArrowDown className="w-3 h-3 text-emerald-600 ml-1 inline" />
+  }
+
+  function toggleSpace(ref: string) {
+    setFilterSpaces(prev =>
+      prev.includes(ref) ? prev.filter(r => r !== ref) : [...prev, ref]
+    )
+  }
+
   const today = new Date()
 
   const filtered = tenants.filter(t => {
     const matchSearch = !search || t.name.toLowerCase().includes(search.toLowerCase()) || t.phone?.includes(search) || t.email?.toLowerCase().includes(search.toLowerCase())
-    const matchSpace = !filterSpace || t.spaces?.some(s => s.ref === filterSpace) || t.leases?.some(l => l.status === 'ativo' && l.space?.ref === filterSpace)
+    const matchSpace = filterSpaces.length === 0 ||
+      t.spaces?.some(s => filterSpaces.includes(s.ref)) ||
+      t.leases?.some(l => l.status === 'ativo' && filterSpaces.includes(l.space?.ref))
     const matchSpaceType = filterSpaceType === 'all' || t.spaces?.some(s => s.type === filterSpaceType) || t.leases?.some(l => l.status === 'ativo' && l.space?.type === filterSpaceType)
     const debt = t.debt ?? 0
     let matchDebt = true
@@ -209,9 +251,30 @@ export default function InquilinosPage() {
       matchContract = false
     }
     return matchSearch && matchSpace && matchSpaceType && matchDebt && matchContract
+  }).sort((a, b) => {
+    if (!sortField) return 0
+    const dir = sortDir === 'asc' ? 1 : -1
+    if (sortField === 'name') return dir * a.name.localeCompare(b.name)
+    if (sortField === 'spaces') {
+      const aRef = a.spaces?.[0]?.ref ?? ''
+      const bRef = b.spaces?.[0]?.ref ?? ''
+      return dir * aRef.localeCompare(bRef)
+    }
+    if (sortField === 'rent') {
+      const aRent = a.leases?.find(l => l.status === 'ativo')?.monthly_rent ?? 0
+      const bRent = b.leases?.find(l => l.status === 'ativo')?.monthly_rent ?? 0
+      return dir * (aRent - bRent)
+    }
+    if (sortField === 'debt') return dir * ((a.debt ?? 0) - (b.debt ?? 0))
+    if (sortField === 'contract') {
+      const aEnd = a.leases?.find(l => l.status === 'ativo')?.end_date ?? ''
+      const bEnd = b.leases?.find(l => l.status === 'ativo')?.end_date ?? ''
+      return dir * aEnd.localeCompare(bEnd)
+    }
+    return 0
   })
 
-  const hasFilters = search || filterSpace || filterSpaceType !== 'all' || filterDebt !== 'all' || filterContract !== 'all'
+  const hasFilters = search || filterSpaces.length > 0 || filterSpaceType !== 'all' || filterDebt !== 'all' || filterContract !== 'all'
 
   return (
     <AppLayout>
@@ -233,10 +296,42 @@ export default function InquilinosPage() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input className="input pl-9 w-full" placeholder="Nome, telefone, email..." value={search} onChange={e => setSearch(e.target.value)} />
           </div>
-          <select className="input" value={filterSpace} onChange={e => setFilterSpace(e.target.value)}>
-            <option value="">Todos os espaços</option>
-            {allSpaceRefs.map(ref => <option key={ref} value={ref}>{ref}</option>)}
-          </select>
+
+          {/* Dropdown espaços múltiplos */}
+          <div className="relative" ref={spaceDropdownRef}>
+            <button
+              onClick={() => setShowSpaceDropdown(!showSpaceDropdown)}
+              className={`input w-full flex items-center justify-between text-left ${filterSpaces.length > 0 ? 'border-emerald-400 text-emerald-700' : 'text-gray-600'}`}>
+              <span className="truncate">
+                {filterSpaces.length === 0 ? 'Todos os espaços' : filterSpaces.length === 1 ? filterSpaces[0] : `${filterSpaces.length} espaços selecionados`}
+              </span>
+              <ChevronDown className="w-4 h-4 flex-shrink-0 ml-2" />
+            </button>
+            {showSpaceDropdown && (
+              <div className="absolute z-20 top-full mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-64 overflow-y-auto">
+                <div className="p-2 border-b border-gray-100">
+                  <button onClick={() => setFilterSpaces([])}
+                    className="text-xs text-gray-500 hover:text-emerald-600 hover:underline">
+                    Limpar seleção
+                  </button>
+                </div>
+                <div className="p-2 grid grid-cols-3 gap-1">
+                  {allSpaceRefs.map(ref => (
+                    <label key={ref} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-50 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={filterSpaces.includes(ref)}
+                        onChange={() => toggleSpace(ref)}
+                        className="accent-emerald-600 w-3.5 h-3.5"
+                      />
+                      <span className="text-sm text-gray-700">{ref}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
           <select className="input" value={filterSpaceType} onChange={e => setFilterSpaceType(e.target.value as any)}>
             <option value="all">Todos os tipos</option>
             <option value="pavilhao">🏭 Pavilhões</option>
@@ -263,7 +358,7 @@ export default function InquilinosPage() {
         {hasFilters && (
           <p className="text-sm text-gray-500 mb-3">
             {filtered.length} resultado(s)
-            <button onClick={() => { setSearch(''); setFilterSpace(''); setFilterSpaceType('all'); setFilterDebt('all'); setFilterContract('all') }}
+            <button onClick={() => { setSearch(''); setFilterSpaces([]); setFilterSpaceType('all'); setFilterDebt('all'); setFilterContract('all') }}
               className="ml-2 text-xs text-emerald-600 hover:underline">Limpar filtros</button>
           </p>
         )}
@@ -277,13 +372,23 @@ export default function InquilinosPage() {
             <table className="w-full">
               <thead className="bg-gray-50 border-b border-gray-100">
                 <tr>
-                  <th className="table-header">Inquilino</th>
+                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('name')}>
+                    Inquilino <SortIcon field="name" />
+                  </th>
                   <th className="table-header">Contacto</th>
                   <th className="table-header">NIF</th>
-                  <th className="table-header">Espaço(s)</th>
-                  <th className="table-header">Renda</th>
-                  <th className="table-header">Dívida</th>
-                  <th className="table-header">Contrato</th>
+                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('spaces')}>
+                    Espaço(s) <SortIcon field="spaces" />
+                  </th>
+                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('rent')}>
+                    Renda <SortIcon field="rent" />
+                  </th>
+                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('debt')}>
+                    Dívida <SortIcon field="debt" />
+                  </th>
+                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('contract')}>
+                    Contrato <SortIcon field="contract" />
+                  </th>
                   <th className="table-header">Notas</th>
                   {isAdmin && <th className="table-header"></th>}
                 </tr>
