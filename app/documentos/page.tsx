@@ -80,7 +80,7 @@ export default function DocumentosPage() {
   const [filterDateEnd, setFilterDateEnd] = useState('')
   const [filterValueMin, setFilterValueMin] = useState('')
   const [filterValueMax, setFilterValueMax] = useState('')
-  const [filterDespesa, setFilterDespesa] = useState('all') // all | sim | nao
+  const [filterDespesa, setFilterDespesa] = useState('all')
   const [showFilters, setShowFilters] = useState(false)
 
   const [showUpload, setShowUpload] = useState(false)
@@ -292,25 +292,15 @@ export default function DocumentosPage() {
   ]
 
   const filtered = allDocs.filter(d => {
-    // Pesquisa texto (nome, fornecedor, descrição)
     if (search) {
       const s = search.toLowerCase()
-      const matchNome = d._nome.toLowerCase().includes(s)
-      const matchAssociado = d._associado.toLowerCase().includes(s)
-      const matchDescricao = d._descricao.toLowerCase().includes(s)
-      if (!matchNome && !matchAssociado && !matchDescricao) return false
+      if (!d._nome.toLowerCase().includes(s) && !d._associado.toLowerCase().includes(s) && !d._descricao.toLowerCase().includes(s)) return false
     }
-    // Tipo
     if (filterTipo !== 'all' && d._tipo !== filterTipo) return false
-    // Data início
     if (filterDateStart && d._data && d._data < filterDateStart) return false
-    // Data fim
     if (filterDateEnd && d._data && d._data > filterDateEnd) return false
-    // Valor mínimo
     if (filterValueMin && (d._amount == null || d._amount < parseFloat(filterValueMin))) return false
-    // Valor máximo
     if (filterValueMax && (d._amount == null || d._amount > parseFloat(filterValueMax))) return false
-    // Despesa
     if (filterDespesa === 'sim' && !d._expense_id) return false
     if (filterDespesa === 'nao' && d._expense_id) return false
     return true
@@ -372,32 +362,31 @@ export default function DocumentosPage() {
 
         {/* Barra de filtros */}
         <div className="bg-white border border-gray-100 rounded-xl shadow-sm p-4 mb-6">
-          {/* Linha principal */}
           <div className="flex gap-3 items-center">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input className="input pl-9 w-full" placeholder="Pesquisar por nome, fornecedor ou descrição..."
                 value={search} onChange={e => setSearch(e.target.value)} />
             </div>
-            <select className="input w-48" value={filterTipo} onChange={e => setFilterTipo(e.target.value)}>
+            <select className="input w-40 flex-shrink-0" value={filterTipo} onChange={e => setFilterTipo(e.target.value)}>
               <option value="all">Todos os tipos</option>
               <option value="contrato">📄 Contratos</option>
               <option value="fatura">🧾 Faturas</option>
-              <option value="fatura_luz">⚡ Faturas Luz</option>
-              <option value="fatura_agua">💧 Faturas Água</option>
-              <option value="registo_predial">🏠 Registos Prediais</option>
+              <option value="fatura_luz">⚡ Luz</option>
+              <option value="fatura_agua">💧 Água</option>
+              <option value="registo_predial">🏠 Prediais</option>
               <option value="carta">✉️ Cartas</option>
               <option value="outro">📦 Outros</option>
             </select>
             <button
               onClick={() => setShowFilters(!showFilters)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-colors ${showFilters || (filterDateStart || filterDateEnd || filterValueMin || filterValueMax || filterDespesa !== 'all') ? 'bg-blue-50 border-blue-200 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-colors flex-shrink-0 ${showFilters || (filterDateStart || filterDateEnd || filterValueMin || filterValueMax || filterDespesa !== 'all') ? 'bg-blue-50 border-blue-200 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
               <Filter className="w-4 h-4" />
-              Mais filtros
+              Filtros
               {showFilters ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
             </button>
             {hasActiveFilters && (
-              <button onClick={clearFilters} className="text-xs text-red-500 hover:underline whitespace-nowrap">
+              <button onClick={clearFilters} className="text-xs text-red-500 hover:underline whitespace-nowrap flex-shrink-0">
                 Limpar tudo
               </button>
             )}
@@ -406,7 +395,6 @@ export default function DocumentosPage() {
           {/* Filtros avançados */}
           {showFilters && (
             <div className="mt-4 pt-4 border-t border-gray-100 grid grid-cols-3 gap-4">
-              {/* Data */}
               <div>
                 <label className="text-xs font-medium text-gray-500 block mb-1.5">Data — de</label>
                 <input type="date" className="input text-sm w-full"
@@ -417,7 +405,6 @@ export default function DocumentosPage() {
                 <input type="date" className="input text-sm w-full"
                   value={filterDateEnd} onChange={e => setFilterDateEnd(e.target.value)} />
               </div>
-              {/* Despesa */}
               <div>
                 <label className="text-xs font-medium text-gray-500 block mb-1.5">Despesa associada</label>
                 <select className="input text-sm w-full" value={filterDespesa} onChange={e => setFilterDespesa(e.target.value)}>
@@ -426,7 +413,6 @@ export default function DocumentosPage() {
                   <option value="nao">⚠ Sem despesa</option>
                 </select>
               </div>
-              {/* Valor */}
               <div>
                 <label className="text-xs font-medium text-gray-500 block mb-1.5">Valor mínimo (€)</label>
                 <input type="number" step="0.01" placeholder="ex: 10" className="input text-sm w-full"
@@ -440,17 +426,17 @@ export default function DocumentosPage() {
             </div>
           )}
 
-          {/* Resumo dos filtros ativos */}
+          {/* Resumo filtros ativos */}
           {hasActiveFilters && (
             <div className="mt-3 flex items-center gap-2 flex-wrap">
               <span className="text-xs text-gray-500">{filtered.length} resultado(s)</span>
               {search && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">Texto: "{search}"</span>}
-              {filterTipo !== 'all' && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">Tipo: {tipoLabels[filterTipo] ?? filterTipo}</span>}
+              {filterTipo !== 'all' && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">{tipoLabels[filterTipo] ?? filterTipo}</span>}
               {filterDateStart && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">De: {filterDateStart}</span>}
               {filterDateEnd && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">Até: {filterDateEnd}</span>}
               {filterValueMin && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">Min: {filterValueMin}€</span>}
               {filterValueMax && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">Max: {filterValueMax}€</span>}
-              {filterDespesa !== 'all' && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">Despesa: {filterDespesa === 'sim' ? 'Com despesa' : 'Sem despesa'}</span>}
+              {filterDespesa !== 'all' && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">{filterDespesa === 'sim' ? 'Com despesa' : 'Sem despesa'}</span>}
             </div>
           )}
         </div>
