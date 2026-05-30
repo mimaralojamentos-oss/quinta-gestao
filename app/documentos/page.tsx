@@ -4,7 +4,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Search, FileText, Eye, FolderOpen, Trash2, X, Plus, Upload, Loader2, CheckCircle, AlertCircle, Edit2 } from 'lucide-react'
+import { Search, FileText, Eye, FolderOpen, Trash2, X, Plus, Upload, Loader2, CheckCircle, AlertCircle, Edit2, Filter, ChevronDown, ChevronUp } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 
 interface Document {
@@ -72,8 +72,17 @@ export default function DocumentosPage() {
   const [documents, setDocuments] = useState<Document[]>([])
   const [contracts, setContracts] = useState<Contrato[]>([])
   const [loading, setLoading] = useState(true)
+
+  // Filtros
   const [search, setSearch] = useState('')
   const [filterTipo, setFilterTipo] = useState('all')
+  const [filterDateStart, setFilterDateStart] = useState('')
+  const [filterDateEnd, setFilterDateEnd] = useState('')
+  const [filterValueMin, setFilterValueMin] = useState('')
+  const [filterValueMax, setFilterValueMax] = useState('')
+  const [filterDespesa, setFilterDespesa] = useState('all') // all | sim | nao
+  const [showFilters, setShowFilters] = useState(false)
+
   const [showUpload, setShowUpload] = useState(false)
   const [uploadTipo, setUploadTipo] = useState('fatura')
   const [uploadTipoCustom, setUploadTipoCustom] = useState('')
@@ -88,7 +97,6 @@ export default function DocumentosPage() {
   const [editForm, setEditForm] = useState<any>({})
   const [saving, setSaving] = useState(false)
 
-  // Ref para controlar o ciclo de upload quando há duplicados
   const remainingFiles = useRef<{ file: File; index: number }[]>([])
 
   useEffect(() => { fetchAll() }, [])
@@ -156,7 +164,6 @@ export default function DocumentosPage() {
     const res = await fetch('/api/process-document', { method: 'POST', body: formData })
     const data = await res.json()
     if (data.duplicate && !force) {
-      // Marcar como duplicado e pausar para perguntar
       setUploadResults(prev => prev.map((r, i) => i === index ? { ...r, status: 'duplicate', duplicate: data.existing } : r))
       return 'duplicate'
     }
@@ -173,18 +180,15 @@ export default function DocumentosPage() {
     setUploading(true); setUploadDone(false)
     const results: UploadResult[] = files.map(f => ({ fileName: f.name, status: 'pending' }))
     setUploadResults(results)
-
     for (let i = 0; i < files.length; i++) {
       const result = await processFile(files[i], i)
       if (result === 'duplicate') {
-        // Guardar os ficheiros restantes e pausar
         remainingFiles.current = files.slice(i + 1).map((f, j) => ({ file: f, index: i + 1 + j }))
         setForceDuplicate({ file: files[i], index: i })
         setUploading(false)
         return
       }
     }
-
     setUploading(false); setUploadDone(true)
     fetchAll()
   }
@@ -192,27 +196,21 @@ export default function DocumentosPage() {
   async function handleForceDuplicate() {
     if (!forceDuplicate) return
     setForceDuplicate(null); setUploading(true)
-    // Carregar o duplicado com force=true
     await processFile(forceDuplicate.file, forceDuplicate.index, true)
-    // Continuar com os restantes
     await continueUpload()
   }
 
   async function handleSkipDuplicate() {
     if (!forceDuplicate) return
-    // Marcar como saltado
     setUploadResults(prev => prev.map((r, i) => i === forceDuplicate.index ? { ...r, status: 'skipped' } : r))
     setForceDuplicate(null); setUploading(true)
-    // Continuar com os restantes
     await continueUpload()
   }
 
   async function continueUpload() {
-    // Processar os ficheiros que ficaram por fazer
     for (const { file, index } of remainingFiles.current) {
       const result = await processFile(file, index)
       if (result === 'duplicate') {
-        // Outro duplicado — pausar de novo
         const remaining = remainingFiles.current.filter(r => r.index > index)
         remainingFiles.current = remaining
         setForceDuplicate({ file, index })
@@ -260,6 +258,18 @@ export default function DocumentosPage() {
     remainingFiles.current = []
   }
 
+  function clearFilters() {
+    setSearch('')
+    setFilterTipo('all')
+    setFilterDateStart('')
+    setFilterDateEnd('')
+    setFilterValueMin('')
+    setFilterValueMax('')
+    setFilterDespesa('all')
+  }
+
+  const hasActiveFilters = search || filterTipo !== 'all' || filterDateStart || filterDateEnd || filterValueMin || filterValueMax || filterDespesa !== 'all'
+
   const allDocs = [
     ...contracts.map(c => ({
       _tipo: 'contrato', _id: c.id,
@@ -268,6 +278,7 @@ export default function DocumentosPage() {
       _data: c.start_date, _path: c.contract_file_path ?? '',
       _amount: null as number | null, _expense_id: null,
       _doc: null as Document | null, _contrato: c,
+      _descricao: '',
     })),
     ...documents.map(d => ({
       _tipo: d.tipo, _id: d.id,
@@ -276,13 +287,33 @@ export default function DocumentosPage() {
       _data: d.doc_date, _path: d.file_path,
       _amount: d.amount, _expense_id: d.expense_id,
       _doc: d, _contrato: null,
+      _descricao: d.items_summary ?? '',
     })),
   ]
 
   const filtered = allDocs.filter(d => {
-    const matchSearch = !search || d._nome.toLowerCase().includes(search.toLowerCase()) || d._associado.toLowerCase().includes(search.toLowerCase())
-    const matchTipo = filterTipo === 'all' || d._tipo === filterTipo
-    return matchSearch && matchTipo
+    // Pesquisa texto (nome, fornecedor, descrição)
+    if (search) {
+      const s = search.toLowerCase()
+      const matchNome = d._nome.toLowerCase().includes(s)
+      const matchAssociado = d._associado.toLowerCase().includes(s)
+      const matchDescricao = d._descricao.toLowerCase().includes(s)
+      if (!matchNome && !matchAssociado && !matchDescricao) return false
+    }
+    // Tipo
+    if (filterTipo !== 'all' && d._tipo !== filterTipo) return false
+    // Data início
+    if (filterDateStart && d._data && d._data < filterDateStart) return false
+    // Data fim
+    if (filterDateEnd && d._data && d._data > filterDateEnd) return false
+    // Valor mínimo
+    if (filterValueMin && (d._amount == null || d._amount < parseFloat(filterValueMin))) return false
+    // Valor máximo
+    if (filterValueMax && (d._amount == null || d._amount > parseFloat(filterValueMax))) return false
+    // Despesa
+    if (filterDespesa === 'sim' && !d._expense_id) return false
+    if (filterDespesa === 'nao' && d._expense_id) return false
+    return true
   }).sort((a, b) => {
     if (!a._data) return 1
     if (!b._data) return -1
@@ -306,6 +337,7 @@ export default function DocumentosPage() {
           )}
         </div>
 
+        {/* Cards de tipo */}
         <div className="grid grid-cols-4 gap-3 mb-4">
           {[
             { tipo: 'contrato', emoji: '📄', label: 'Contratos', color: 'text-blue-600' },
@@ -338,24 +370,88 @@ export default function DocumentosPage() {
           ))}
         </div>
 
-        <div className="flex gap-3 mb-6">
-          <div className="relative flex-1 max-w-sm">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <input className="input pl-9" placeholder="Pesquisar por nome, fornecedor..."
-              value={search} onChange={e => setSearch(e.target.value)} />
+        {/* Barra de filtros */}
+        <div className="bg-white border border-gray-100 rounded-xl shadow-sm p-4 mb-6">
+          {/* Linha principal */}
+          <div className="flex gap-3 items-center">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input className="input pl-9 w-full" placeholder="Pesquisar por nome, fornecedor ou descrição..."
+                value={search} onChange={e => setSearch(e.target.value)} />
+            </div>
+            <select className="input w-48" value={filterTipo} onChange={e => setFilterTipo(e.target.value)}>
+              <option value="all">Todos os tipos</option>
+              <option value="contrato">📄 Contratos</option>
+              <option value="fatura">🧾 Faturas</option>
+              <option value="fatura_luz">⚡ Faturas Luz</option>
+              <option value="fatura_agua">💧 Faturas Água</option>
+              <option value="registo_predial">🏠 Registos Prediais</option>
+              <option value="carta">✉️ Cartas</option>
+              <option value="outro">📦 Outros</option>
+            </select>
+            <button
+              onClick={() => setShowFilters(!showFilters)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-colors ${showFilters || (filterDateStart || filterDateEnd || filterValueMin || filterValueMax || filterDespesa !== 'all') ? 'bg-blue-50 border-blue-200 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+              <Filter className="w-4 h-4" />
+              Mais filtros
+              {showFilters ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            </button>
+            {hasActiveFilters && (
+              <button onClick={clearFilters} className="text-xs text-red-500 hover:underline whitespace-nowrap">
+                Limpar tudo
+              </button>
+            )}
           </div>
-          <select className="input w-52" value={filterTipo} onChange={e => setFilterTipo(e.target.value)}>
-            <option value="all">Todos os tipos</option>
-            <option value="contrato">📄 Contratos</option>
-            <option value="fatura">🧾 Faturas</option>
-            <option value="fatura_luz">⚡ Faturas Luz</option>
-            <option value="fatura_agua">💧 Faturas Água</option>
-            <option value="registo_predial">🏠 Registos Prediais</option>
-            <option value="carta">✉️ Cartas</option>
-            <option value="outro">📦 Outros</option>
-          </select>
-          {filterTipo !== 'all' && (
-            <button onClick={() => setFilterTipo('all')} className="text-xs text-gray-500 hover:underline">Limpar filtro</button>
+
+          {/* Filtros avançados */}
+          {showFilters && (
+            <div className="mt-4 pt-4 border-t border-gray-100 grid grid-cols-3 gap-4">
+              {/* Data */}
+              <div>
+                <label className="text-xs font-medium text-gray-500 block mb-1.5">Data — de</label>
+                <input type="date" className="input text-sm w-full"
+                  value={filterDateStart} onChange={e => setFilterDateStart(e.target.value)} />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 block mb-1.5">Data — até</label>
+                <input type="date" className="input text-sm w-full"
+                  value={filterDateEnd} onChange={e => setFilterDateEnd(e.target.value)} />
+              </div>
+              {/* Despesa */}
+              <div>
+                <label className="text-xs font-medium text-gray-500 block mb-1.5">Despesa associada</label>
+                <select className="input text-sm w-full" value={filterDespesa} onChange={e => setFilterDespesa(e.target.value)}>
+                  <option value="all">Todas</option>
+                  <option value="sim">✅ Com despesa</option>
+                  <option value="nao">⚠ Sem despesa</option>
+                </select>
+              </div>
+              {/* Valor */}
+              <div>
+                <label className="text-xs font-medium text-gray-500 block mb-1.5">Valor mínimo (€)</label>
+                <input type="number" step="0.01" placeholder="ex: 10" className="input text-sm w-full"
+                  value={filterValueMin} onChange={e => setFilterValueMin(e.target.value)} />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 block mb-1.5">Valor máximo (€)</label>
+                <input type="number" step="0.01" placeholder="ex: 1000" className="input text-sm w-full"
+                  value={filterValueMax} onChange={e => setFilterValueMax(e.target.value)} />
+              </div>
+            </div>
+          )}
+
+          {/* Resumo dos filtros ativos */}
+          {hasActiveFilters && (
+            <div className="mt-3 flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-gray-500">{filtered.length} resultado(s)</span>
+              {search && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">Texto: "{search}"</span>}
+              {filterTipo !== 'all' && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">Tipo: {tipoLabels[filterTipo] ?? filterTipo}</span>}
+              {filterDateStart && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">De: {filterDateStart}</span>}
+              {filterDateEnd && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">Até: {filterDateEnd}</span>}
+              {filterValueMin && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">Min: {filterValueMin}€</span>}
+              {filterValueMax && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">Max: {filterValueMax}€</span>}
+              {filterDespesa !== 'all' && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">Despesa: {filterDespesa === 'sim' ? 'Com despesa' : 'Sem despesa'}</span>}
+            </div>
           )}
         </div>
 
@@ -365,6 +461,7 @@ export default function DocumentosPage() {
           <div className="flex flex-col items-center py-16 text-gray-400">
             <FolderOpen className="w-12 h-12 mb-3" />
             <p className="text-sm">Nenhum documento encontrado</p>
+            {hasActiveFilters && <button onClick={clearFilters} className="mt-2 text-xs text-blue-500 hover:underline">Limpar filtros</button>}
           </div>
         ) : (
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
@@ -391,7 +488,12 @@ export default function DocumentosPage() {
                     <td className="table-cell">
                       <div className="flex items-center gap-2">
                         <FileText className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                        <span className="text-sm text-gray-700 truncate max-w-xs">{doc._nome}</span>
+                        <div>
+                          <span className="text-sm text-gray-700 truncate max-w-xs block">{doc._nome}</span>
+                          {doc._descricao && (
+                            <span className="text-xs text-gray-400 truncate max-w-xs block">{doc._descricao}</span>
+                          )}
+                        </div>
                       </div>
                     </td>
                     <td className="table-cell text-sm text-gray-600">{doc._associado}</td>
@@ -524,7 +626,6 @@ export default function DocumentosPage() {
               <h2 className="font-semibold text-lg text-gray-900">Carregar Documento</h2>
               <button onClick={handleClose}><X className="w-5 h-5 text-gray-400" /></button>
             </div>
-
             {!uploading && !uploadDone && !forceDuplicate && uploadResults.length === 0 && (
               <div className="space-y-4">
                 <div>
@@ -573,11 +674,8 @@ export default function DocumentosPage() {
                 </div>
               </div>
             )}
-
-            {/* Pergunta sobre duplicado */}
             {forceDuplicate && !uploading && (
               <div className="space-y-4">
-                {/* Mostrar progresso até agora */}
                 {uploadResults.filter(r => r.status !== 'pending').length > 0 && (
                   <div className="space-y-1 max-h-40 overflow-y-auto mb-2">
                     {uploadResults.map((r, i) => (
@@ -613,8 +711,6 @@ export default function DocumentosPage() {
                 </p>
               </div>
             )}
-
-            {/* Progresso geral */}
             {(uploading || uploadDone) && !forceDuplicate && (
               <div className="space-y-2">
                 {!uploadDone && <p className="text-sm text-gray-600 mb-3">A processar com IA...</p>}
@@ -639,7 +735,6 @@ export default function DocumentosPage() {
                 ))}
               </div>
             )}
-
             <div className="flex justify-end gap-3 mt-6">
               <button className="btn-secondary" onClick={handleClose}>{uploadDone ? 'Fechar' : 'Cancelar'}</button>
               {!uploadDone && !uploading && !forceDuplicate && uploadResults.length === 0 && (
