@@ -4,13 +4,13 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Plus, Zap, Trash2, X, ChevronDown, ChevronRight, AlertCircle } from 'lucide-react'
+import { Zap, Trash2, X, ChevronDown, ChevronRight } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 
 const PRICE_PER_KWH = 0.18
 const VAT = 0.23
-const PRICE_WITH_VAT = PRICE_PER_KWH * (1 + VAT) // 0.2214€/kWh
-const MIN_CHARGE = 5 // mínimo para cobrar
+const PRICE_WITH_VAT = PRICE_PER_KWH * (1 + VAT)
+const MIN_CHARGE = 5
 
 interface Space {
   id: string
@@ -18,7 +18,7 @@ interface Space {
   type: string
   has_own_meter: boolean
   tenant_id: string | null
-  tenant?: { name: string } | null
+  tenant: any
 }
 
 interface Reading {
@@ -65,7 +65,7 @@ export default function QuadrosEspacosPage() {
       .eq('has_own_meter', false)
       .order('ref')
 
-    setSpaces((spacesData ?? []) as Space[])
+    setSpaces((spacesData ?? []) as any[])
 
     const allReadings: Record<string, Reading[]> = {}
     for (const s of spacesData ?? []) {
@@ -80,8 +80,23 @@ export default function QuadrosEspacosPage() {
     setLoading(false)
   }
 
-  function calcAmount(kwh: number, prevAccumulated = 0): number {
-    return kwh * PRICE_WITH_VAT + prevAccumulated
+  function getTenantName(tenant: any): string {
+    if (!tenant) return ''
+    if (Array.isArray(tenant)) return tenant[0]?.name ?? ''
+    return tenant.name ?? ''
+  }
+
+  function getAccumulatedAmount(spaceId: string): number {
+    const spaceReadings = readings[spaceId] ?? []
+    let total = 0
+    for (const r of [...spaceReadings].reverse()) {
+      if (r.accumulated && !r.charged) {
+        total += r.amount_calculated ?? 0
+      } else if (r.charged) {
+        total = 0
+      }
+    }
+    return total
   }
 
   function openReadingModal(space: Space) {
@@ -95,19 +110,6 @@ export default function QuadrosEspacosPage() {
     })
   }
 
-  function getAccumulatedAmount(spaceId: string): number {
-    const spaceReadings = readings[spaceId] ?? []
-    let total = 0
-    for (const r of spaceReadings) {
-      if (r.accumulated && !r.charged) {
-        total += r.amount_calculated ?? 0
-      } else if (r.charged) {
-        break
-      }
-    }
-    return total
-  }
-
   async function saveReading(charge: boolean) {
     if (!readingModal || !readingForm.reading_value) return
     setSaving(true)
@@ -117,7 +119,7 @@ export default function QuadrosEspacosPage() {
     const prevValue = lastReading?.reading_value ?? null
     const kwhConsumed = prevValue != null ? newValue - prevValue : null
     const accumulated = getAccumulatedAmount(space.id)
-    const amountCalc = kwhConsumed != null ? calcAmount(kwhConsumed, accumulated) : null
+    const amountCalc = kwhConsumed != null ? parseFloat((kwhConsumed * PRICE_WITH_VAT + accumulated).toFixed(2)) : null
     const shouldCharge = charge && amountCalc != null && amountCalc >= MIN_CHARGE
 
     await supabase.from('electricity_readings').insert({
@@ -132,7 +134,6 @@ export default function QuadrosEspacosPage() {
       notes: readingForm.notes || null,
     })
 
-    // Se cobrado, criar cobrança ao inquilino
     if (shouldCharge && space.tenant_id && amountCalc) {
       const { data: lease } = await supabase
         .from('leases')
@@ -147,7 +148,7 @@ export default function QuadrosEspacosPage() {
           charge_date: readingForm.reading_date,
           reference_month: readingForm.reading_date.slice(0, 7) + '-01',
           units: kwhConsumed,
-          amount: parseFloat(amountCalc.toFixed(2)),
+          amount: amountCalc,
           paid: false,
         })
       }
@@ -168,11 +169,11 @@ export default function QuadrosEspacosPage() {
     fetchAll()
   }
 
-  // Espaços sem inquilino
   const semInquilino = spaces.filter(s => !s.tenant_id).length
   const totalCobrado = Object.values(readings).flat()
     .filter(r => r.charged)
     .reduce((s, r) => s + (r.amount_calculated ?? 0), 0)
+  const totalAcumulado = spaces.reduce((s, sp) => s + getAccumulatedAmount(sp.id), 0)
 
   return (
     <AppLayout>
@@ -196,9 +197,7 @@ export default function QuadrosEspacosPage() {
           </div>
           <div className="card">
             <p className="text-sm text-gray-500 mb-1">Por acumular</p>
-            <p className="text-xl font-bold text-yellow-600">
-              {formatCurrency(spaces.reduce((s, sp) => s + getAccumulatedAmount(sp.id), 0))}
-            </p>
+            <p className="text-xl font-bold text-yellow-600">{formatCurrency(totalAcumulado)}</p>
           </div>
         </div>
 
@@ -219,7 +218,7 @@ export default function QuadrosEspacosPage() {
               const lastReading = spaceReadings[0]
               const isOpen = expanded[space.id]
               const accumulated = getAccumulatedAmount(space.id)
-              const tenantName = Array.isArray(space.tenant) ? space.tenant[0]?.name : (space.tenant as any)?.name
+              const tenantName = getTenantName(space.tenant)
 
               return (
                 <div key={space.id} className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
@@ -244,7 +243,7 @@ export default function QuadrosEspacosPage() {
                     <div className="flex items-center gap-6">
                       {accumulated > 0 && (
                         <div className="text-right">
-                          <p className="text-xs text-yellow-600 font-medium">⏳ Acumulado</p>
+                          <p className="text-xs text-yellow-600 font-medium">Acumulado</p>
                           <p className="text-sm font-semibold text-yellow-700">{formatCurrency(accumulated)}</p>
                         </div>
                       )}
@@ -330,7 +329,6 @@ export default function QuadrosEspacosPage() {
               <button onClick={() => setReadingModal(null)}><X className="w-5 h-5 text-gray-400" /></button>
             </div>
 
-            {/* Info última leitura */}
             {readingModal.lastReading && (
               <div className="bg-gray-50 rounded-lg p-3 mb-4 text-sm">
                 <p className="text-gray-500 text-xs mb-1">Última leitura</p>
@@ -338,11 +336,10 @@ export default function QuadrosEspacosPage() {
               </div>
             )}
 
-            {/* Acumulado */}
             {getAccumulatedAmount(readingModal.space.id) > 0 && (
               <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
                 <p className="text-xs text-yellow-700 font-medium">
-                  ⏳ Valor acumulado de leituras anteriores: {formatCurrency(getAccumulatedAmount(readingModal.space.id))}
+                  Valor acumulado de leituras anteriores: {formatCurrency(getAccumulatedAmount(readingModal.space.id))}
                 </p>
                 <p className="text-xs text-yellow-600 mt-0.5">Este valor será somado ao cálculo atual</p>
               </div>
@@ -363,21 +360,20 @@ export default function QuadrosEspacosPage() {
                 </div>
               </div>
 
-              {/* Preview do cálculo */}
               {readingForm.reading_value && readingModal.lastReading && (
                 <div className="bg-blue-50 border border-blue-100 rounded-lg p-3">
-                  <p className="text-xs font-medium text-blue-700 mb-1">Pré-visualização do cálculo:</p>
+                  <p className="text-xs font-medium text-blue-700 mb-1">Pré-visualização:</p>
                   {(() => {
                     const kwh = parseFloat(readingForm.reading_value) - readingModal.lastReading!.reading_value
-                    const accumulated = getAccumulatedAmount(readingModal.space.id)
-                    const total = kwh * PRICE_WITH_VAT + accumulated
+                    const acc = getAccumulatedAmount(readingModal.space.id)
+                    const total = parseFloat((kwh * PRICE_WITH_VAT + acc).toFixed(2))
                     return (
                       <div className="text-xs text-blue-700 space-y-0.5">
-                        <p>{kwh.toFixed(1)} kWh × {formatCurrency(PRICE_WITH_VAT)} = {formatCurrency(kwh * PRICE_WITH_VAT)}</p>
-                        {accumulated > 0 && <p>+ Acumulado: {formatCurrency(accumulated)}</p>}
+                        <p>{kwh.toFixed(1)} kWh × {formatCurrency(PRICE_WITH_VAT)}/kWh = {formatCurrency(kwh * PRICE_WITH_VAT)}</p>
+                        {acc > 0 && <p>+ Acumulado: {formatCurrency(acc)}</p>}
                         <p className="font-semibold text-blue-800 text-sm mt-1">Total: {formatCurrency(total)}</p>
                         {total < MIN_CHARGE && (
-                          <p className="text-yellow-700 font-medium mt-1">⚠ Valor abaixo de {formatCurrency(MIN_CHARGE)} — recomenda-se acumular</p>
+                          <p className="text-yellow-700 font-medium mt-1">⚠ Abaixo de {formatCurrency(MIN_CHARGE)} — recomenda-se acumular</p>
                         )}
                       </div>
                     )
@@ -392,29 +388,22 @@ export default function QuadrosEspacosPage() {
               </div>
             </div>
 
-            {/* Botões de ação */}
             <div className="mt-6 space-y-2">
               {readingModal.space.tenant_id ? (
                 <>
-                  <button
-                    onClick={() => saveReading(true)}
-                    disabled={saving || !readingForm.reading_value}
+                  <button onClick={() => saveReading(true)} disabled={saving || !readingForm.reading_value}
                     className="w-full py-2.5 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50">
                     {saving ? 'A guardar...' : '✓ Cobrar ao inquilino'}
                   </button>
-                  <button
-                    onClick={() => saveReading(false)}
-                    disabled={saving || !readingForm.reading_value}
+                  <button onClick={() => saveReading(false)} disabled={saving || !readingForm.reading_value}
                     className="w-full py-2.5 rounded-lg bg-yellow-500 text-white text-sm font-medium hover:bg-yellow-600 disabled:opacity-50">
-                    {saving ? 'A guardar...' : '⏳ Acumular para próxima leitura'}
+                    {saving ? 'A guardar...' : 'Acumular para próxima leitura'}
                   </button>
                 </>
               ) : (
-                <button
-                  onClick={() => saveReading(false)}
-                  disabled={saving || !readingForm.reading_value}
+                <button onClick={() => saveReading(false)} disabled={saving || !readingForm.reading_value}
                   className="w-full py-2.5 rounded-lg bg-gray-600 text-white text-sm font-medium hover:bg-gray-700 disabled:opacity-50">
-                  {saving ? 'A guardar...' : '💾 Guardar leitura (sem inquilino)'}
+                  {saving ? 'A guardar...' : 'Guardar leitura (sem inquilino)'}
                 </button>
               )}
               <button onClick={() => setReadingModal(null)}
