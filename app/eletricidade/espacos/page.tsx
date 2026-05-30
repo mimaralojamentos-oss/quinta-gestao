@@ -4,13 +4,15 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Zap, Trash2, X, ChevronDown, ChevronRight } from 'lucide-react'
+import { Zap, Trash2, X, ChevronDown, ChevronRight, Settings, Save } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 
-const PRICE_PER_KWH = 0.18
-const VAT = 0.23
-const PRICE_WITH_VAT = PRICE_PER_KWH * (1 + VAT)
-const MIN_CHARGE = 5
+interface ElectricityConfig {
+  id: number
+  price_per_kwh: number
+  vat_rate: number
+  min_charge: number
+}
 
 interface Space {
   id: string
@@ -40,7 +42,8 @@ interface ReadingModal {
 }
 
 export default function QuadrosEspacosPage() {
-  const { isAdmin } = useAuth()
+  const { isAdmin, profile } = useAuth()
+  const canEdit = isAdmin || profile?.role === 'electrician'
   const [spaces, setSpaces] = useState<Space[]>([])
   const [readings, setReadings] = useState<Record<string, Reading[]>>({})
   const [loading, setLoading] = useState(true)
@@ -52,13 +55,63 @@ export default function QuadrosEspacosPage() {
     reading_value: '',
     notes: '',
   })
+
+  // Configurações
+  const [config, setConfig] = useState<ElectricityConfig | null>(null)
+  const [showConfig, setShowConfig] = useState(false)
+  const [configForm, setConfigForm] = useState({
+    price_per_kwh: '0.18',
+    vat_rate: '23',
+    min_charge: '5.00',
+  })
+  const [savingConfig, setSavingConfig] = useState(false)
+  const [configSaved, setConfigSaved] = useState(false)
+
   const supabase = createClient()
 
-  useEffect(() => { fetchAll() }, [])
+  // Valores calculados a partir da config
+  const pricePerKwh = config?.price_per_kwh ?? 0.18
+  const vatRate = config?.vat_rate ?? 0.23
+  const priceWithVat = pricePerKwh * (1 + vatRate)
+  const minCharge = config?.min_charge ?? 5
+
+  useEffect(() => {
+    fetchConfig()
+    fetchAll()
+  }, [])
+
+  async function fetchConfig() {
+    const { data } = await supabase
+      .from('electricity_config')
+      .select('*')
+      .single()
+    if (data) {
+      setConfig(data)
+      setConfigForm({
+        price_per_kwh: data.price_per_kwh.toString(),
+        vat_rate: (data.vat_rate * 100).toString(),
+        min_charge: data.min_charge.toString(),
+      })
+    }
+  }
+
+  async function saveConfig() {
+    if (!config) return
+    setSavingConfig(true)
+    await supabase.from('electricity_config').update({
+      price_per_kwh: parseFloat(configForm.price_per_kwh),
+      vat_rate: parseFloat(configForm.vat_rate) / 100,
+      min_charge: parseFloat(configForm.min_charge),
+      updated_at: new Date().toISOString(),
+    }).eq('id', config.id)
+    await fetchConfig()
+    setSavingConfig(false)
+    setConfigSaved(true)
+    setTimeout(() => setConfigSaved(false), 3000)
+  }
 
   async function fetchAll() {
     setLoading(true)
-
     const { data: spacesData } = await supabase
       .from('spaces')
       .select('id, ref, type, has_own_meter, tenant_id, tenant:tenants(name)')
@@ -119,8 +172,8 @@ export default function QuadrosEspacosPage() {
     const prevValue = lastReading?.reading_value ?? null
     const kwhConsumed = prevValue != null ? newValue - prevValue : null
     const accumulated = getAccumulatedAmount(space.id)
-    const amountCalc = kwhConsumed != null ? parseFloat((kwhConsumed * PRICE_WITH_VAT + accumulated).toFixed(2)) : null
-    const shouldCharge = charge && amountCalc != null && amountCalc >= MIN_CHARGE
+    const amountCalc = kwhConsumed != null ? parseFloat((kwhConsumed * priceWithVat + accumulated).toFixed(2)) : null
+    const shouldCharge = charge && amountCalc != null && amountCalc >= minCharge
 
     await supabase.from('electricity_readings').insert({
       space_id: space.id,
@@ -183,7 +236,79 @@ export default function QuadrosEspacosPage() {
             <h1 className="text-2xl font-bold text-gray-900">Quadros dos Espaços</h1>
             <p className="text-sm text-gray-500 mt-1">{spaces.length} espaços com contador partilhado</p>
           </div>
+          {canEdit && (
+            <button
+              onClick={() => setShowConfig(!showConfig)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-colors ${showConfig ? 'bg-blue-50 border-blue-200 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+            >
+              <Settings className="w-4 h-4" />
+              Configurações
+            </button>
+          )}
         </div>
+
+        {/* Painel de Configurações */}
+        {showConfig && canEdit && (
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 mb-6">
+            <h2 className="text-sm font-semibold text-blue-800 mb-4 flex items-center gap-2">
+              <Settings className="w-4 h-4" />
+              Parâmetros de Cobrança
+            </h2>
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label className="text-xs font-medium text-blue-700 block mb-1">Preço por kWh (€, sem IVA)</label>
+                <input
+                  type="number"
+                  step="0.001"
+                  className="w-full border border-blue-200 rounded-lg px-3 py-2 text-sm bg-white"
+                  value={configForm.price_per_kwh}
+                  onChange={e => setConfigForm(f => ({ ...f, price_per_kwh: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-blue-700 block mb-1">IVA (%)</label>
+                <input
+                  type="number"
+                  step="1"
+                  className="w-full border border-blue-200 rounded-lg px-3 py-2 text-sm bg-white"
+                  value={configForm.vat_rate}
+                  onChange={e => setConfigForm(f => ({ ...f, vat_rate: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-blue-700 block mb-1">Valor mínimo para cobrar (€)</label>
+                <input
+                  type="number"
+                  step="0.50"
+                  className="w-full border border-blue-200 rounded-lg px-3 py-2 text-sm bg-white"
+                  value={configForm.min_charge}
+                  onChange={e => setConfigForm(f => ({ ...f, min_charge: e.target.value }))}
+                />
+              </div>
+            </div>
+
+            {/* Pré-visualização do preço final */}
+            <div className="mt-3 bg-white border border-blue-100 rounded-lg px-4 py-2 text-sm text-blue-800">
+              Preço final com IVA: <strong>
+                {formatCurrency(parseFloat(configForm.price_per_kwh || '0') * (1 + parseFloat(configForm.vat_rate || '0') / 100))}
+              </strong> /kWh
+            </div>
+
+            <div className="flex items-center gap-3 mt-4">
+              <button
+                onClick={saveConfig}
+                disabled={savingConfig}
+                className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+              >
+                <Save className="w-4 h-4" />
+                {savingConfig ? 'A guardar...' : 'Guardar configurações'}
+              </button>
+              {configSaved && (
+                <span className="text-sm text-emerald-600 font-medium">✓ Guardado com sucesso!</span>
+              )}
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-3 gap-4 mb-6">
           <div className="card">
@@ -254,7 +379,7 @@ export default function QuadrosEspacosPage() {
                           <p className="text-xs text-gray-400">{lastReading.reading_value} kWh</p>
                         )}
                       </div>
-                      {isAdmin && (
+                      {canEdit && (
                         <button
                           onClick={e => { e.stopPropagation(); openReadingModal(space) }}
                           className="text-xs text-blue-600 hover:underline font-medium whitespace-nowrap">
@@ -279,7 +404,7 @@ export default function QuadrosEspacosPage() {
                               <th className="text-left py-2">kWh</th>
                               <th className="text-left py-2">Valor</th>
                               <th className="text-left py-2">Estado</th>
-                              {isAdmin && <th className="py-2"></th>}
+                              {canEdit && <th className="py-2"></th>}
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-50">
@@ -299,7 +424,7 @@ export default function QuadrosEspacosPage() {
                                     <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full font-medium">Acumulado</span>
                                   )}
                                 </td>
-                                {isAdmin && (
+                                {canEdit && (
                                   <td className="py-2">
                                     <button onClick={() => deleteReading(r.id)} className="text-gray-300 hover:text-red-500 transition-colors">
                                       <Trash2 className="w-3.5 h-3.5" />
@@ -366,14 +491,14 @@ export default function QuadrosEspacosPage() {
                   {(() => {
                     const kwh = parseFloat(readingForm.reading_value) - readingModal.lastReading!.reading_value
                     const acc = getAccumulatedAmount(readingModal.space.id)
-                    const total = parseFloat((kwh * PRICE_WITH_VAT + acc).toFixed(2))
+                    const total = parseFloat((kwh * priceWithVat + acc).toFixed(2))
                     return (
                       <div className="text-xs text-blue-700 space-y-0.5">
-                        <p>{kwh.toFixed(1)} kWh × {formatCurrency(PRICE_WITH_VAT)}/kWh = {formatCurrency(kwh * PRICE_WITH_VAT)}</p>
+                        <p>{kwh.toFixed(1)} kWh × {formatCurrency(priceWithVat)}/kWh = {formatCurrency(kwh * priceWithVat)}</p>
                         {acc > 0 && <p>+ Acumulado: {formatCurrency(acc)}</p>}
                         <p className="font-semibold text-blue-800 text-sm mt-1">Total: {formatCurrency(total)}</p>
-                        {total < MIN_CHARGE && (
-                          <p className="text-yellow-700 font-medium mt-1">⚠ Abaixo de {formatCurrency(MIN_CHARGE)} — recomenda-se acumular</p>
+                        {total < minCharge && (
+                          <p className="text-yellow-700 font-medium mt-1">⚠ Abaixo de {formatCurrency(minCharge)} — recomenda-se acumular</p>
                         )}
                       </div>
                     )
@@ -417,3 +542,5 @@ export default function QuadrosEspacosPage() {
     </AppLayout>
   )
 }
+
+// https://quinta-gestao.vercel.app/eletricidade/espacos
