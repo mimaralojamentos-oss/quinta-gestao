@@ -1,7 +1,7 @@
 'use client'
 
 import AppLayout from '@/components/layout/AppLayout'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { Search, FileText, Eye, FolderOpen, Trash2, X, Plus, Upload, Loader2, CheckCircle, AlertCircle, Edit2 } from 'lucide-react'
@@ -41,7 +41,7 @@ interface DeleteConfirm {
 
 interface UploadResult {
   fileName: string
-  status: 'pending' | 'processing' | 'success' | 'error' | 'duplicate'
+  status: 'pending' | 'processing' | 'success' | 'error' | 'duplicate' | 'skipped'
   error?: string
   autoExpense?: boolean
   duplicate?: any
@@ -87,6 +87,9 @@ export default function DocumentosPage() {
   const [editDoc, setEditDoc] = useState<Document | null>(null)
   const [editForm, setEditForm] = useState<any>({})
   const [saving, setSaving] = useState(false)
+
+  // Ref para controlar o ciclo de upload quando há duplicados
+  const remainingFiles = useRef<{ file: File; index: number }[]>([])
 
   useEffect(() => { fetchAll() }, [])
 
@@ -153,15 +156,16 @@ export default function DocumentosPage() {
     const res = await fetch('/api/process-document', { method: 'POST', body: formData })
     const data = await res.json()
     if (data.duplicate && !force) {
+      // Marcar como duplicado e pausar para perguntar
       setUploadResults(prev => prev.map((r, i) => i === index ? { ...r, status: 'duplicate', duplicate: data.existing } : r))
-      setForceDuplicate({ file, index })
-      return
+      return 'duplicate'
     }
     if (data.error) {
       setUploadResults(prev => prev.map((r, i) => i === index ? { ...r, status: 'error', error: data.error } : r))
     } else {
       setUploadResults(prev => prev.map((r, i) => i === index ? { ...r, status: 'success', autoExpense: data.autoExpense } : r))
     }
+    return 'done'
   }
 
   async function handleUpload() {
@@ -169,7 +173,18 @@ export default function DocumentosPage() {
     setUploading(true); setUploadDone(false)
     const results: UploadResult[] = files.map(f => ({ fileName: f.name, status: 'pending' }))
     setUploadResults(results)
-    for (let i = 0; i < files.length; i++) await processFile(files[i], i)
+
+    for (let i = 0; i < files.length; i++) {
+      const result = await processFile(files[i], i)
+      if (result === 'duplicate') {
+        // Guardar os ficheiros restantes e pausar
+        remainingFiles.current = files.slice(i + 1).map((f, j) => ({ file: f, index: i + 1 + j }))
+        setForceDuplicate({ file: files[i], index: i })
+        setUploading(false)
+        return
+      }
+    }
+
     setUploading(false); setUploadDone(true)
     fetchAll()
   }
@@ -177,7 +192,35 @@ export default function DocumentosPage() {
   async function handleForceDuplicate() {
     if (!forceDuplicate) return
     setForceDuplicate(null); setUploading(true)
+    // Carregar o duplicado com force=true
     await processFile(forceDuplicate.file, forceDuplicate.index, true)
+    // Continuar com os restantes
+    await continueUpload()
+  }
+
+  async function handleSkipDuplicate() {
+    if (!forceDuplicate) return
+    // Marcar como saltado
+    setUploadResults(prev => prev.map((r, i) => i === forceDuplicate.index ? { ...r, status: 'skipped' } : r))
+    setForceDuplicate(null); setUploading(true)
+    // Continuar com os restantes
+    await continueUpload()
+  }
+
+  async function continueUpload() {
+    // Processar os ficheiros que ficaram por fazer
+    for (const { file, index } of remainingFiles.current) {
+      const result = await processFile(file, index)
+      if (result === 'duplicate') {
+        // Outro duplicado — pausar de novo
+        const remaining = remainingFiles.current.filter(r => r.index > index)
+        remainingFiles.current = remaining
+        setForceDuplicate({ file, index })
+        setUploading(false)
+        return
+      }
+    }
+    remainingFiles.current = []
     setUploading(false); setUploadDone(true)
     fetchAll()
   }
@@ -214,6 +257,7 @@ export default function DocumentosPage() {
   function handleClose() {
     setShowUpload(false); setFiles([]); setUploadResults([])
     setUploadDone(false); setForceDuplicate(null)
+    remainingFiles.current = []
   }
 
   const allDocs = [
@@ -480,7 +524,8 @@ export default function DocumentosPage() {
               <h2 className="font-semibold text-lg text-gray-900">Carregar Documento</h2>
               <button onClick={handleClose}><X className="w-5 h-5 text-gray-400" /></button>
             </div>
-            {!uploading && !uploadDone && !forceDuplicate && (
+
+            {!uploading && !uploadDone && !forceDuplicate && uploadResults.length === 0 && (
               <div className="space-y-4">
                 <div>
                   <label className="label">Tipo de Documento *</label>
@@ -528,42 +573,76 @@ export default function DocumentosPage() {
                 </div>
               </div>
             )}
+
+            {/* Pergunta sobre duplicado */}
             {forceDuplicate && !uploading && (
-              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 space-y-3">
-                <p className="text-sm text-yellow-800 font-medium">⚠ Este ficheiro já foi carregado anteriormente!</p>
-                <p className="text-xs text-yellow-700">Ficheiro: <strong>{forceDuplicate.file.name}</strong></p>
-                <p className="text-sm text-yellow-700">Queres carregar mesmo assim?</p>
-                <div className="flex gap-2">
-                  <button onClick={handleForceDuplicate} className="flex-1 py-2 rounded-lg bg-yellow-500 text-white text-sm font-medium hover:bg-yellow-600">Sim, carregar na mesma</button>
-                  <button onClick={handleClose} className="flex-1 py-2 rounded-lg border border-gray-200 text-gray-600 text-sm font-medium hover:bg-gray-50">Cancelar</button>
+              <div className="space-y-4">
+                {/* Mostrar progresso até agora */}
+                {uploadResults.filter(r => r.status !== 'pending').length > 0 && (
+                  <div className="space-y-1 max-h-40 overflow-y-auto mb-2">
+                    {uploadResults.map((r, i) => (
+                      r.status !== 'pending' && (
+                        <div key={i} className={`flex items-center gap-2 p-2 rounded-lg text-xs ${r.status === 'success' ? 'bg-emerald-50' : r.status === 'error' ? 'bg-red-50' : r.status === 'skipped' ? 'bg-gray-50' : r.status === 'duplicate' ? 'bg-yellow-50' : 'bg-blue-50'}`}>
+                          {r.status === 'success' && <CheckCircle className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />}
+                          {r.status === 'error' && <AlertCircle className="w-3.5 h-3.5 text-red-600 flex-shrink-0" />}
+                          {r.status === 'skipped' && <span className="text-gray-400 flex-shrink-0">—</span>}
+                          {r.status === 'duplicate' && <AlertCircle className="w-3.5 h-3.5 text-yellow-600 flex-shrink-0" />}
+                          <span className="truncate text-gray-700">{r.fileName}</span>
+                        </div>
+                      )
+                    ))}
+                  </div>
+                )}
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 space-y-3">
+                  <p className="text-sm text-yellow-800 font-medium">⚠ Este ficheiro já foi carregado anteriormente!</p>
+                  <p className="text-xs text-yellow-700">Ficheiro: <strong>{forceDuplicate.file.name}</strong></p>
+                  <p className="text-sm text-yellow-700">Queres carregar mesmo assim?</p>
+                  <div className="flex gap-2">
+                    <button onClick={handleForceDuplicate}
+                      className="flex-1 py-2 rounded-lg bg-yellow-500 text-white text-sm font-medium hover:bg-yellow-600">
+                      Sim, carregar na mesma
+                    </button>
+                    <button onClick={handleSkipDuplicate}
+                      className="flex-1 py-2 rounded-lg border border-gray-200 text-gray-600 text-sm font-medium hover:bg-gray-50">
+                      Saltar este ficheiro
+                    </button>
+                  </div>
                 </div>
+                <p className="text-xs text-gray-400 text-center">
+                  {remainingFiles.current.length} ficheiro(s) por processar
+                </p>
               </div>
             )}
+
+            {/* Progresso geral */}
             {(uploading || uploadDone) && !forceDuplicate && (
               <div className="space-y-2">
                 {!uploadDone && <p className="text-sm text-gray-600 mb-3">A processar com IA...</p>}
                 {uploadDone && <p className="text-sm font-medium text-gray-700 mb-3">Processamento concluído!</p>}
                 {uploadResults.map((r, i) => (
-                  <div key={i} className={`flex items-center gap-3 p-3 rounded-lg ${r.status === 'success' ? 'bg-emerald-50' : r.status === 'error' ? 'bg-red-50' : r.status === 'duplicate' ? 'bg-yellow-50' : r.status === 'processing' ? 'bg-blue-50' : 'bg-gray-50'}`}>
+                  <div key={i} className={`flex items-center gap-3 p-3 rounded-lg ${r.status === 'success' ? 'bg-emerald-50' : r.status === 'error' ? 'bg-red-50' : r.status === 'duplicate' ? 'bg-yellow-50' : r.status === 'skipped' ? 'bg-gray-50' : r.status === 'processing' ? 'bg-blue-50' : 'bg-gray-50'}`}>
                     {r.status === 'success' && <CheckCircle className="w-4 h-4 text-emerald-600 flex-shrink-0" />}
                     {r.status === 'error' && <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />}
                     {r.status === 'duplicate' && <AlertCircle className="w-4 h-4 text-yellow-600 flex-shrink-0" />}
+                    {r.status === 'skipped' && <span className="text-gray-400 text-xs flex-shrink-0">—</span>}
                     {r.status === 'processing' && <Loader2 className="w-4 h-4 animate-spin text-blue-600 flex-shrink-0" />}
                     {r.status === 'pending' && <div className="w-4 h-4 rounded-full border-2 border-gray-300 flex-shrink-0" />}
                     <div className="min-w-0">
                       <p className="text-xs font-medium text-gray-800 truncate">{r.fileName}</p>
                       {r.status === 'success' && r.autoExpense && <p className="text-xs text-emerald-600">✓ Despesa criada automaticamente</p>}
                       {r.status === 'success' && !r.autoExpense && <p className="text-xs text-gray-500">✓ Documento guardado</p>}
-                      {r.status === 'duplicate' && <p className="text-xs text-yellow-700">⚠ Ficheiro duplicado detetado</p>}
+                      {r.status === 'duplicate' && <p className="text-xs text-yellow-700">⚠ Carregado na mesma</p>}
+                      {r.status === 'skipped' && <p className="text-xs text-gray-500">Saltado</p>}
                       {r.error && <p className="text-xs text-red-600">{r.error}</p>}
                     </div>
                   </div>
                 ))}
               </div>
             )}
+
             <div className="flex justify-end gap-3 mt-6">
               <button className="btn-secondary" onClick={handleClose}>{uploadDone ? 'Fechar' : 'Cancelar'}</button>
-              {!uploadDone && !uploading && !forceDuplicate && (
+              {!uploadDone && !uploading && !forceDuplicate && uploadResults.length === 0 && (
                 <button className="btn-primary" onClick={handleUpload} disabled={files.length === 0}>
                   <FileText className="w-4 h-4" />
                   Carregar {files.length > 0 ? `${files.length} ficheiro(s)` : ''}
@@ -614,3 +693,5 @@ export default function DocumentosPage() {
     </AppLayout>
   )
 }
+
+// https://quinta-gestao.vercel.app/documentos
