@@ -29,11 +29,37 @@ export default function UtilizadoresPage() {
   }, [])
 
   async function fetchProfiles() {
-    const { data } = await supabase
+    // Buscar profiles
+    const { data: profilesData } = await supabase
       .from('profiles')
       .select('*')
       .order('created_at')
-    setProfiles(data || [])
+
+    if (!profilesData) { setLoading(false); return }
+
+    // Buscar emails via API (Admin SDK)
+    const res = await fetch('/api/create-user', {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+    })
+
+    let emailMap: Record<string, string> = {}
+    if (res.ok) {
+      const data = await res.json()
+      if (data.users) {
+        for (const u of data.users) {
+          emailMap[u.id] = u.email
+        }
+      }
+    }
+
+    // Combinar profiles com emails
+    const combined = profilesData.map(p => ({
+      ...p,
+      email: emailMap[p.id] || p.email || '(sem email)'
+    }))
+
+    setProfiles(combined)
     setLoading(false)
   }
 
