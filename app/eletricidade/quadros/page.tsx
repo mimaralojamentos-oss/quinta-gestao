@@ -4,8 +4,9 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Plus, Zap, Trash2, X, ChevronDown, ChevronRight, Upload, Loader2, RefreshCw, CheckCircle, AlertCircle } from 'lucide-react'
+import { Plus, Zap, Trash2, X, ChevronDown, ChevronRight, Upload, Loader2, RefreshCw, CheckCircle, AlertCircle, BarChart2 } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 
 interface Meter {
   id: string
@@ -33,6 +34,10 @@ interface UploadResult {
   error?: string
 }
 
+type FilterType = 'all' | 'year' | 'semester' | 'trimester' | 'custom'
+
+const METER_COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6']
+
 export default function QuadrosPage() {
   const { isAdmin, profile } = useAuth()
   const canEdit = isAdmin || profile?.role === 'electrician'
@@ -44,6 +49,7 @@ export default function QuadrosPage() {
   const [showReadingModal, setShowReadingModal] = useState<string | null>(null)
   const [showUploadModal, setShowUploadModal] = useState(false)
   const [showImportModal, setShowImportModal] = useState(false)
+  const [showChart, setShowChart] = useState(false)
   const [editMeter, setEditMeter] = useState<Meter | null>(null)
   const [saving, setSaving] = useState(false)
   const [importing, setImporting] = useState(false)
@@ -58,6 +64,15 @@ export default function QuadrosPage() {
     invoice_number: '',
     notes: ''
   })
+
+  // Filtros do gráfico
+  const [filterType, setFilterType] = useState<FilterType>('all')
+  const [filterYear, setFilterYear] = useState('2026')
+  const [filterSemester, setFilterSemester] = useState('1')
+  const [filterTrimester, setFilterTrimester] = useState('1')
+  const [filterStart, setFilterStart] = useState('2026-01-01')
+  const [filterEnd, setFilterEnd] = useState(new Date().toISOString().slice(0, 10))
+
   const supabase = createClient()
 
   useEffect(() => { fetchAll() }, [])
@@ -75,6 +90,62 @@ export default function QuadrosPage() {
     }
     setReadings(allReadings)
     setLoading(false)
+  }
+
+  // Calcular dados do gráfico
+  function getChartData() {
+    // Determinar intervalo de datas
+    let startDate = new Date('2026-01-01')
+    let endDate = new Date()
+
+    if (filterType === 'year') {
+      startDate = new Date(`${filterYear}-01-01`)
+      endDate = new Date(`${filterYear}-12-31`)
+    } else if (filterType === 'semester') {
+      const y = parseInt(filterYear)
+      if (filterSemester === '1') {
+        startDate = new Date(`${y}-01-01`)
+        endDate = new Date(`${y}-06-30`)
+      } else {
+        startDate = new Date(`${y}-07-01`)
+        endDate = new Date(`${y}-12-31`)
+      }
+    } else if (filterType === 'trimester') {
+      const y = parseInt(filterYear)
+      const quarters: Record<string, [string, string]> = {
+        '1': [`${y}-01-01`, `${y}-03-31`],
+        '2': [`${y}-04-01`, `${y}-06-30`],
+        '3': [`${y}-07-01`, `${y}-09-30`],
+        '4': [`${y}-10-01`, `${y}-12-31`],
+      }
+      startDate = new Date(quarters[filterTrimester][0])
+      endDate = new Date(quarters[filterTrimester][1])
+    } else if (filterType === 'custom') {
+      startDate = new Date(filterStart)
+      endDate = new Date(filterEnd)
+    }
+
+    // Gerar lista de meses no intervalo
+    const months: string[] = []
+    const cur = new Date(startDate.getFullYear(), startDate.getMonth(), 1)
+    const end = new Date(endDate.getFullYear(), endDate.getMonth(), 1)
+    while (cur <= end) {
+      months.push(`${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}`)
+      cur.setMonth(cur.getMonth() + 1)
+    }
+
+    // Agregar valores por mês e quadro
+    return months.map(month => {
+      const point: Record<string, any> = {
+        month: new Date(month + '-01').toLocaleDateString('pt-PT', { month: 'short', year: '2-digit' })
+      }
+      for (const meter of meters) {
+        const meterReadings = readings[meter.id] ?? []
+        const monthReadings = meterReadings.filter(r => r.reading_date.slice(0, 7) === month)
+        point[meter.name] = monthReadings.reduce((s, r) => s + (r.invoice_amount ?? 0), 0) || null
+      }
+      return point
+    })
   }
 
   async function saveMeter() {
@@ -116,7 +187,6 @@ export default function QuadrosPage() {
     setImporting(true); setImportDone(false)
     const results: UploadResult[] = uploadFiles.map(f => ({ fileName: f.name, status: 'pending' }))
     setImportResults(results)
-
     for (let i = 0; i < uploadFiles.length; i++) {
       const file = uploadFiles[i]
       setImportResults(prev => prev.map((r, idx) => idx === i ? { ...r, status: 'processing' } : r))
@@ -144,80 +214,40 @@ export default function QuadrosPage() {
   async function handleImportExisting() {
     setImporting(true); setImportDone(false)
     setImportResults([{ fileName: 'A pesquisar faturas EDP nos documentos...', status: 'processing' }])
-
-    const { data: docs } = await supabase
-      .from('documents')
-      .select('*')
-      .eq('tipo', 'fatura_luz')
-      .eq('status', 'ativo')
-
+    const { data: docs } = await supabase.from('documents').select('*').eq('tipo', 'fatura_luz').eq('status', 'ativo')
     if (!docs || docs.length === 0) {
       setImportResults([{ fileName: 'Nenhuma fatura EDP encontrada nos documentos', status: 'error' }])
       setImporting(false); setImportDone(true)
       return
     }
-
     const results: UploadResult[] = []
-
     for (const doc of docs) {
-      if (!doc.doc_date) {
-        results.push({ fileName: doc.original_name ?? doc.file_path, status: 'error', error: 'Sem data' })
-        continue
-      }
-
+      if (!doc.doc_date) { results.push({ fileName: doc.original_name ?? doc.file_path, status: 'error', error: 'Sem data' }); continue }
       const { data: allMeters } = await supabase.from('meters').select('id, name, contract_number')
-
       let matchedMeter = null
       if (allMeters && doc.items_summary) {
         for (const m of allMeters) {
-          if (doc.items_summary.includes(m.contract_number) ||
-              (doc.original_name && doc.original_name.includes(m.name.replace('Quadro ', '')))) {
-            matchedMeter = m
-            break
+          if (doc.items_summary.includes(m.contract_number) || (doc.original_name && doc.original_name.includes(m.name.replace('Quadro ', '')))) {
+            matchedMeter = m; break
           }
         }
       }
-
       if (!matchedMeter && allMeters && doc.original_name) {
         for (const m of allMeters) {
-          const code = m.name.replace('Quadro ', '')
-          if (doc.original_name.includes(code)) {
-            matchedMeter = m
-            break
-          }
+          if (doc.original_name.includes(m.name.replace('Quadro ', ''))) { matchedMeter = m; break }
         }
       }
-
-      if (!matchedMeter) {
-        results.push({ fileName: doc.original_name ?? doc.file_path, status: 'error', error: 'Quadro não identificado' })
-        continue
-      }
-
-      const { data: existingReading } = await supabase
-        .from('meter_readings').select('id')
-        .eq('meter_id', matchedMeter.id)
-        .eq('reading_date', doc.doc_date)
-        .single()
-
-      if (existingReading) {
-        results.push({ fileName: doc.original_name ?? doc.file_path, status: 'duplicate', meterName: matchedMeter.name })
-        continue
-      }
-
+      if (!matchedMeter) { results.push({ fileName: doc.original_name ?? doc.file_path, status: 'error', error: 'Quadro não identificado' }); continue }
+      const { data: existingReading } = await supabase.from('meter_readings').select('id').eq('meter_id', matchedMeter.id).eq('reading_date', doc.doc_date).single()
+      if (existingReading) { results.push({ fileName: doc.original_name ?? doc.file_path, status: 'duplicate', meterName: matchedMeter.name }); continue }
       await supabase.from('meter_readings').insert({
-        meter_id: matchedMeter.id,
-        reading_date: doc.doc_date,
-        reading_value: 0,
-        invoice_amount: doc.amount ?? null,
-        invoice_number: doc.doc_number ?? null,
+        meter_id: matchedMeter.id, reading_date: doc.doc_date, reading_value: 0,
+        invoice_amount: doc.amount ?? null, invoice_number: doc.doc_number ?? null,
         notes: `Importado de documento existente: ${doc.original_name ?? ''}`,
       })
-
       results.push({ fileName: doc.original_name ?? doc.file_path, status: 'success', meterName: matchedMeter.name })
     }
-
-    setImportResults(results)
-    setImporting(false); setImportDone(true); fetchAll()
+    setImportResults(results); setImporting(false); setImportDone(true); fetchAll()
   }
 
   async function deleteReading(id: string) {
@@ -241,6 +271,9 @@ export default function QuadrosPage() {
   }
 
   const totalFaturas = Object.values(readings).flat().reduce((s, r) => s + (r.invoice_amount ?? 0), 0)
+  const chartData = getChartData()
+
+  const years = ['2026', '2027', '2028']
 
   return (
     <AppLayout>
@@ -250,19 +283,27 @@ export default function QuadrosPage() {
             <h1 className="text-2xl font-bold text-gray-900">Quadros da Quinta</h1>
             <p className="text-sm text-gray-500 mt-1">{meters.length} quadros registados</p>
           </div>
-          {canEdit && (
-            <div className="flex gap-3">
-              <button className="btn-secondary" onClick={() => { setShowImportModal(true); setImportResults([]); setImportDone(false) }}>
-                <RefreshCw className="w-4 h-4" /> Importar existentes
-              </button>
-              <button className="btn-secondary" onClick={() => { setShowUploadModal(true); setImportResults([]); setImportDone(false) }}>
-                <Upload className="w-4 h-4" /> Upload fatura EDP
-              </button>
-              <button className="btn-primary" onClick={() => { setEditMeter(null); setMeterForm({ name: '', contract_number: '', cpe: '', location: '' }); setShowModal(true) }}>
-                <Plus className="w-4 h-4" /> Novo Quadro
-              </button>
-            </div>
-          )}
+          <div className="flex gap-3">
+            <button
+              onClick={() => setShowChart(!showChart)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-colors ${showChart ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+              <BarChart2 className="w-4 h-4" />
+              Gráfico
+            </button>
+            {canEdit && (
+              <>
+                <button className="btn-secondary" onClick={() => { setShowImportModal(true); setImportResults([]); setImportDone(false) }}>
+                  <RefreshCw className="w-4 h-4" /> Importar existentes
+                </button>
+                <button className="btn-secondary" onClick={() => { setShowUploadModal(true); setImportResults([]); setImportDone(false) }}>
+                  <Upload className="w-4 h-4" /> Upload fatura EDP
+                </button>
+                <button className="btn-primary" onClick={() => { setEditMeter(null); setMeterForm({ name: '', contract_number: '', cpe: '', location: '' }); setShowModal(true) }}>
+                  <Plus className="w-4 h-4" /> Novo Quadro
+                </button>
+              </>
+            )}
+          </div>
         </div>
 
         <div className="grid grid-cols-2 gap-4 mb-6">
@@ -276,6 +317,105 @@ export default function QuadrosPage() {
           </div>
         </div>
 
+        {/* Painel do Gráfico */}
+        {showChart && (
+          <div className="bg-white border border-gray-100 rounded-xl shadow-sm p-6 mb-6">
+            <h2 className="text-base font-semibold text-gray-800 mb-4 flex items-center gap-2">
+              <BarChart2 className="w-4 h-4 text-emerald-600" />
+              Consumo por Quadro — Valor Fatura (€)
+            </h2>
+
+            {/* Filtros */}
+            <div className="flex flex-wrap items-center gap-3 mb-5">
+              {/* Tipo de filtro */}
+              <div className="flex rounded-lg border border-gray-200 overflow-hidden text-sm">
+                {[
+                  { value: 'all', label: 'Tudo' },
+                  { value: 'year', label: 'Ano' },
+                  { value: 'semester', label: 'Semestre' },
+                  { value: 'trimester', label: 'Trimestre' },
+                  { value: 'custom', label: 'Datas' },
+                ].map(opt => (
+                  <button key={opt.value}
+                    onClick={() => setFilterType(opt.value as FilterType)}
+                    className={`px-3 py-1.5 font-medium transition-colors ${filterType === opt.value ? 'bg-emerald-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Seletor de ano (para year, semester, trimester) */}
+              {(filterType === 'year' || filterType === 'semester' || filterType === 'trimester') && (
+                <select value={filterYear} onChange={e => setFilterYear(e.target.value)}
+                  className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-700">
+                  {years.map(y => <option key={y} value={y}>{y}</option>)}
+                </select>
+              )}
+
+              {/* Semestre */}
+              {filterType === 'semester' && (
+                <select value={filterSemester} onChange={e => setFilterSemester(e.target.value)}
+                  className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-700">
+                  <option value="1">1º Semestre (Jan–Jun)</option>
+                  <option value="2">2º Semestre (Jul–Dez)</option>
+                </select>
+              )}
+
+              {/* Trimestre */}
+              {filterType === 'trimester' && (
+                <select value={filterTrimester} onChange={e => setFilterTrimester(e.target.value)}
+                  className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-700">
+                  <option value="1">1º Trimestre (Jan–Mar)</option>
+                  <option value="2">2º Trimestre (Abr–Jun)</option>
+                  <option value="3">3º Trimestre (Jul–Set)</option>
+                  <option value="4">4º Trimestre (Out–Dez)</option>
+                </select>
+              )}
+
+              {/* Datas personalizadas */}
+              {filterType === 'custom' && (
+                <div className="flex items-center gap-2">
+                  <input type="date" value={filterStart} onChange={e => setFilterStart(e.target.value)}
+                    className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-700" />
+                  <span className="text-gray-400 text-sm">até</span>
+                  <input type="date" value={filterEnd} onChange={e => setFilterEnd(e.target.value)}
+                    className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-700" />
+                </div>
+              )}
+            </div>
+
+            {/* Gráfico */}
+            {chartData.length === 0 ? (
+              <p className="text-sm text-gray-400 text-center py-8">Sem dados para o período selecionado</p>
+            ) : (
+              <ResponsiveContainer width="100%" height={320}>
+                <LineChart data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                  <XAxis dataKey="month" tick={{ fontSize: 12, fill: '#6b7280' }} />
+                  <YAxis tick={{ fontSize: 12, fill: '#6b7280' }}
+                    tickFormatter={v => `${v}€`} />
+                  <Tooltip
+                    formatter={(value: any, name: string) => [formatCurrency(value), name]}
+                    contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb', fontSize: '12px' }} />
+                  <Legend wrapperStyle={{ fontSize: '12px' }} />
+                  {meters.map((meter, i) => (
+                    <Line
+                      key={meter.id}
+                      type="monotone"
+                      dataKey={meter.name}
+                      stroke={METER_COLORS[i % METER_COLORS.length]}
+                      strokeWidth={2}
+                      dot={{ r: 4 }}
+                      activeDot={{ r: 6 }}
+                      connectNulls={false}
+                    />
+                  ))}
+                </LineChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+        )}
+
         {loading ? (
           <div className="flex justify-center py-12">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600" />
@@ -287,7 +427,6 @@ export default function QuadrosPage() {
               const isOpen = expanded[meter.id]
               const lastReading = meterReadings[0]
               const totalMeter = meterReadings.reduce((s, r) => s + (r.invoice_amount ?? 0), 0)
-
               return (
                 <div key={meter.id} className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
                   <div className="p-5 flex items-center justify-between cursor-pointer hover:bg-gray-50 transition-colors"
@@ -323,7 +462,6 @@ export default function QuadrosPage() {
                       {isOpen ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
                     </div>
                   </div>
-
                   {isOpen && (
                     <div className="border-t border-gray-100 px-5 pb-4">
                       {meterReadings.length === 0 ? (
@@ -436,9 +574,7 @@ export default function QuadrosPage() {
             </div>
             {!importing && !importDone && (
               <div>
-                <p className="text-sm text-gray-600 mb-4">
-                  Vai pesquisar todos os documentos do tipo <strong>Fatura da Luz</strong> já carregados na app e criar as leituras nos quadros correspondentes automaticamente.
-                </p>
+                <p className="text-sm text-gray-600 mb-4">Vai pesquisar todos os documentos do tipo <strong>Fatura da Luz</strong> já carregados na app e criar as leituras nos quadros correspondentes automaticamente.</p>
                 <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 text-sm text-blue-700">
                   ℹ️ Documentos já importados serão ignorados automaticamente.
                 </div>
