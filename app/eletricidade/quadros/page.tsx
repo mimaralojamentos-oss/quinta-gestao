@@ -75,11 +75,9 @@ export default function QuadrosPage() {
     notes: ''
   })
 
-  // Modal associar documento
   const [associateReading, setAssociateReading] = useState<MeterReading | null>(null)
   const [associateSearch, setAssociateSearch] = useState('')
 
-  // Filtros do gráfico
   const [filterType, setFilterType] = useState<FilterType>('all')
   const [filterYear, setFilterYear] = useState('2026')
   const [filterSemester, setFilterSemester] = useState('1')
@@ -104,7 +102,6 @@ export default function QuadrosPage() {
     }
     setReadings(allReadings)
 
-    // Buscar documentos do tipo fatura_luz para associação
     const { data: docs } = await supabase
       .from('documents')
       .select('id, file_path, original_name, doc_number, doc_date, amount')
@@ -116,7 +113,6 @@ export default function QuadrosPage() {
     setLoading(false)
   }
 
-  // Encontrar documento automaticamente pelo nº de fatura
   function findDocument(reading: MeterReading): Document | null {
     if (!reading.invoice_number) return null
     return documents.find(d =>
@@ -129,7 +125,6 @@ export default function QuadrosPage() {
     if (data?.signedUrl) window.open(data.signedUrl, '_blank')
   }
 
-  // Filtrar documentos no modal de associação
   const filteredDocs = documents.filter(d => {
     if (!associateSearch) return true
     const s = associateSearch.toLowerCase()
@@ -140,8 +135,13 @@ export default function QuadrosPage() {
   })
 
   function getChartData() {
-    let startDate = new Date('2026-01-01')
+    // Para 'all', usar a leitura mais antiga disponível
+    const allReadingDates = Object.values(readings).flat().map(r => r.reading_date).sort()
+    const oldestDate = allReadingDates[0] ?? '2026-01-01'
+
+    let startDate = new Date(oldestDate)
     let endDate = new Date()
+
     if (filterType === 'year') {
       startDate = new Date(`${filterYear}-01-01`)
       endDate = new Date(`${filterYear}-12-31`)
@@ -159,6 +159,7 @@ export default function QuadrosPage() {
     } else if (filterType === 'custom') {
       startDate = new Date(filterStart); endDate = new Date(filterEnd)
     }
+
     const months: string[] = []
     const cur = new Date(startDate.getFullYear(), startDate.getMonth(), 1)
     const end = new Date(endDate.getFullYear(), endDate.getMonth(), 1)
@@ -166,6 +167,7 @@ export default function QuadrosPage() {
       months.push(`${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}`)
       cur.setMonth(cur.getMonth() + 1)
     }
+
     return months.map(month => {
       const point: Record<string, any> = {
         month: new Date(month + '-01').toLocaleDateString('pt-PT', { month: 'short', year: '2-digit' })
@@ -173,7 +175,8 @@ export default function QuadrosPage() {
       for (const meter of meters) {
         const meterReadings = readings[meter.id] ?? []
         const monthReadings = meterReadings.filter(r => r.reading_date.slice(0, 7) === month)
-        point[meter.name] = monthReadings.reduce((s, r) => s + (r.invoice_amount ?? 0), 0) || null
+        const total = monthReadings.reduce((s, r) => s + (r.invoice_amount ?? 0), 0)
+        point[meter.name] = monthReadings.length > 0 ? total : null
       }
       return point
     })
@@ -302,7 +305,7 @@ export default function QuadrosPage() {
 
   const totalFaturas = Object.values(readings).flat().reduce((s, r) => s + (r.invoice_amount ?? 0), 0)
   const chartData = getChartData()
-  const years = ['2026', '2027', '2028']
+  const years = ['2025', '2026', '2027', '2028']
 
   return (
     <AppLayout>
@@ -536,15 +539,11 @@ export default function QuadrosPage() {
               </div>
               <button onClick={() => setAssociateReading(null)}><X className="w-5 h-5 text-gray-400" /></button>
             </div>
-
-            {/* Pesquisa */}
             <div className="relative mb-4">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input className="input pl-9 w-full" placeholder="Pesquisar por nome ou nº fatura..."
                 value={associateSearch} onChange={e => setAssociateSearch(e.target.value)} autoFocus />
             </div>
-
-            {/* Lista de documentos */}
             <div className="flex-1 overflow-y-auto space-y-2 min-h-0">
               {filteredDocs.length === 0 ? (
                 <p className="text-sm text-gray-400 text-center py-8">Nenhum documento encontrado</p>
@@ -568,7 +567,6 @@ export default function QuadrosPage() {
                 ))
               )}
             </div>
-
             <div className="flex justify-end mt-4 pt-4 border-t border-gray-100">
               <button className="btn-secondary" onClick={() => setAssociateReading(null)}>Fechar</button>
             </div>
