@@ -15,10 +15,14 @@ const navItems = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/espacos', label: 'Espaços', icon: Building2 },
   { href: '/inquilinos', label: 'Inquilinos', icon: Users },
-  { href: '/eletricidade', label: 'Eletricidade', icon: Zap },
   { href: '/projetos', label: 'Projetos', icon: HardHat },
   { href: '/documentos', label: 'Documentos', icon: FolderOpen },
   { href: '/alertas', label: 'Alertas', icon: Bell },
+]
+
+const eletricidadeItems = [
+  { href: '/eletricidade/quadros', label: 'Quadros da Quinta', icon: Zap },
+  { href: '/eletricidade/espacos', label: 'Quadros dos Espaços', icon: Building2 },
 ]
 
 const financeItems = [
@@ -36,6 +40,9 @@ export default function Sidebar() {
     pathname.startsWith('/despesas') ||
     pathname.startsWith('/caixa') ||
     pathname.startsWith('/financeiro')
+  )
+  const [eletricidadeOpen, setEletricidadeOpen] = useState(
+    pathname.startsWith('/eletricidade')
   )
 
   return (
@@ -65,12 +72,41 @@ export default function Sidebar() {
           )
         })}
 
-        {/* Secção Financeiro */}
-        <div className="pt-2">
+        {/* Eletricidade com submenus */}
+        <div className="pt-1">
+          <button
+            onClick={() => setEletricidadeOpen(v => !v)}
+            className="w-full flex items-center justify-between px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-emerald-50 hover:text-emerald-700 transition-colors">
+            <div className="flex items-center gap-3">
+              <Zap className="w-4 h-4 flex-shrink-0" />
+              <span>Eletricidade</span>
+            </div>
+            {eletricidadeOpen
+              ? <ChevronDown className="w-3 h-3" />
+              : <ChevronRight className="w-3 h-3" />}
+          </button>
+          {eletricidadeOpen && (
+            <div className="ml-4 mt-1 space-y-1 border-l-2 border-gray-100 pl-3">
+              {eletricidadeItems.map((item) => {
+                const Icon = item.icon
+                const isActive = pathname === item.href || pathname.startsWith(item.href + '/')
+                return (
+                  <Link key={item.href} href={item.href} prefetch={false}
+                    className={cn('sidebar-link text-xs py-2', isActive ? 'active' : '')}>
+                    <Icon className="w-3.5 h-3.5 flex-shrink-0" />
+                    {item.label}
+                  </Link>
+                )
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Financeiro */}
+        <div className="pt-1">
           <button
             onClick={() => setFinanceOpen(v => !v)}
-            className="w-full flex items-center justify-between px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-emerald-50 hover:text-emerald-700 transition-colors"
-          >
+            className="w-full flex items-center justify-between px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-emerald-50 hover:text-emerald-700 transition-colors">
             <div className="flex items-center gap-3">
               <TrendingUp className="w-4 h-4 flex-shrink-0" />
               <span>Financeiro</span>
@@ -79,7 +115,6 @@ export default function Sidebar() {
               ? <ChevronDown className="w-3 h-3" />
               : <ChevronRight className="w-3 h-3" />}
           </button>
-
           {financeOpen && (
             <div className="ml-4 mt-1 space-y-1 border-l-2 border-gray-100 pl-3">
               {financeItems.map((item) => {
