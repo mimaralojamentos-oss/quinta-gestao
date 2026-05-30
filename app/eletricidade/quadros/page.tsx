@@ -4,7 +4,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Plus, Zap, FileText, Trash2, X, ChevronDown, ChevronRight } from 'lucide-react'
+import { Plus, Zap, Trash2, X, ChevronDown, ChevronRight, Upload, Loader2, RefreshCw, CheckCircle, AlertCircle } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 
 interface Meter {
@@ -26,6 +26,13 @@ interface MeterReading {
   notes: string | null
 }
 
+interface UploadResult {
+  fileName: string
+  status: 'pending' | 'processing' | 'success' | 'error' | 'duplicate'
+  meterName?: string
+  error?: string
+}
+
 export default function QuadrosPage() {
   const { isAdmin } = useAuth()
   const [meters, setMeters] = useState<Meter[]>([])
@@ -34,10 +41,22 @@ export default function QuadrosPage() {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [showModal, setShowModal] = useState(false)
   const [showReadingModal, setShowReadingModal] = useState<string | null>(null)
+  const [showUploadModal, setShowUploadModal] = useState(false)
+  const [showImportModal, setShowImportModal] = useState(false)
   const [editMeter, setEditMeter] = useState<Meter | null>(null)
   const [saving, setSaving] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const [importDone, setImportDone] = useState(false)
+  const [importResults, setImportResults] = useState<UploadResult[]>([])
+  const [uploadFiles, setUploadFiles] = useState<File[]>([])
   const [meterForm, setMeterForm] = useState({ name: '', contract_number: '', cpe: '', location: '' })
-  const [readingForm, setReadingForm] = useState({ reading_date: new Date().toISOString().slice(0, 10), reading_value: '', invoice_amount: '', invoice_number: '', notes: '' })
+  const [readingForm, setReadingForm] = useState({
+    reading_date: new Date().toISOString().slice(0, 10),
+    reading_value: '',
+    invoice_amount: '',
+    invoice_number: '',
+    notes: ''
+  })
   const supabase = createClient()
 
   useEffect(() => { fetchAll() }, [])
@@ -46,7 +65,6 @@ export default function QuadrosPage() {
     setLoading(true)
     const { data: metersData } = await supabase.from('meters').select('*').eq('active', true).order('name')
     setMeters(metersData ?? [])
-
     const allReadings: Record<string, MeterReading[]> = {}
     for (const m of metersData ?? []) {
       const { data } = await supabase
@@ -63,23 +81,16 @@ export default function QuadrosPage() {
     setSaving(true)
     if (editMeter) {
       await supabase.from('meters').update({
-        name: meterForm.name,
-        contract_number: meterForm.contract_number,
-        cpe: meterForm.cpe || null,
-        location: meterForm.location || null,
+        name: meterForm.name, contract_number: meterForm.contract_number,
+        cpe: meterForm.cpe || null, location: meterForm.location || null,
       }).eq('id', editMeter.id)
     } else {
       await supabase.from('meters').insert({
-        name: meterForm.name,
-        contract_number: meterForm.contract_number,
-        cpe: meterForm.cpe || null,
-        location: meterForm.location || null,
+        name: meterForm.name, contract_number: meterForm.contract_number,
+        cpe: meterForm.cpe || null, location: meterForm.location || null,
       })
     }
-    setSaving(false)
-    setShowModal(false)
-    setEditMeter(null)
-    fetchAll()
+    setSaving(false); setShowModal(false); setEditMeter(null); fetchAll()
   }
 
   async function saveReading() {
@@ -99,6 +110,122 @@ export default function QuadrosPage() {
     fetchAll()
   }
 
+  async function handleUploadPDF() {
+    if (uploadFiles.length === 0) return
+    setImporting(true); setImportDone(false)
+    const results: UploadResult[] = uploadFiles.map(f => ({ fileName: f.name, status: 'pending' }))
+    setImportResults(results)
+
+    for (let i = 0; i < uploadFiles.length; i++) {
+      const file = uploadFiles[i]
+      setImportResults(prev => prev.map((r, idx) => idx === i ? { ...r, status: 'processing' } : r))
+      try {
+        const formData = new FormData()
+        formData.append('file', file)
+        formData.append('tipo', 'fatura_luz')
+        const res = await fetch('/api/process-document', { method: 'POST', body: formData })
+        const data = await res.json()
+        if (data.duplicate) {
+          setImportResults(prev => prev.map((r, idx) => idx === i ? { ...r, status: 'duplicate' } : r))
+        } else if (data.error) {
+          setImportResults(prev => prev.map((r, idx) => idx === i ? { ...r, status: 'error', error: data.error } : r))
+        } else {
+          const meterName = data.meterReadingCreated ? 'Leitura criada' : 'Sem quadro correspondente'
+          setImportResults(prev => prev.map((r, idx) => idx === i ? { ...r, status: 'success', meterName } : r))
+        }
+      } catch (e: any) {
+        setImportResults(prev => prev.map((r, idx) => idx === i ? { ...r, status: 'error', error: e.message } : r))
+      }
+    }
+    setImporting(false); setImportDone(true); fetchAll()
+  }
+
+  async function handleImportExisting() {
+    setImporting(true); setImportDone(false)
+    setImportResults([{ fileName: 'A pesquisar faturas EDP nos documentos...', status: 'processing' }])
+
+    // Buscar documentos do tipo fatura_luz já carregados
+    const { data: docs } = await supabase
+      .from('documents')
+      .select('*')
+      .eq('tipo', 'fatura_luz')
+      .eq('status', 'ativo')
+
+    if (!docs || docs.length === 0) {
+      setImportResults([{ fileName: 'Nenhuma fatura EDP encontrada nos documentos', status: 'error' }])
+      setImporting(false); setImportDone(true)
+      return
+    }
+
+    const results: UploadResult[] = []
+
+    for (const doc of docs) {
+      // Verificar se já tem leitura para esta data
+      if (!doc.doc_date) {
+        results.push({ fileName: doc.original_name ?? doc.file_path, status: 'error', error: 'Sem data' })
+        continue
+      }
+
+      // Tentar encontrar o quadro pelo items_summary ou supplier_name (contém nº contrato)
+      // Vamos buscar todos os quadros e tentar match
+      const { data: allMeters } = await supabase.from('meters').select('id, name, contract_number')
+
+      let matchedMeter = null
+      if (allMeters && doc.items_summary) {
+        for (const m of allMeters) {
+          if (doc.items_summary.includes(m.contract_number) ||
+              (doc.original_name && doc.original_name.includes(m.name.replace('Quadro ', '')))) {
+            matchedMeter = m
+            break
+          }
+        }
+      }
+
+      // Se não encontrou pelo texto, tentar pelo nome do ficheiro
+      if (!matchedMeter && allMeters && doc.original_name) {
+        for (const m of allMeters) {
+          const code = m.name.replace('Quadro ', '')
+          if (doc.original_name.includes(code)) {
+            matchedMeter = m
+            break
+          }
+        }
+      }
+
+      if (!matchedMeter) {
+        results.push({ fileName: doc.original_name ?? doc.file_path, status: 'error', error: 'Quadro não identificado' })
+        continue
+      }
+
+      // Verificar se já existe leitura para esta data
+      const { data: existingReading } = await supabase
+        .from('meter_readings').select('id')
+        .eq('meter_id', matchedMeter.id)
+        .eq('reading_date', doc.doc_date)
+        .single()
+
+      if (existingReading) {
+        results.push({ fileName: doc.original_name ?? doc.file_path, status: 'duplicate', meterName: matchedMeter.name })
+        continue
+      }
+
+      // Criar leitura
+      await supabase.from('meter_readings').insert({
+        meter_id: matchedMeter.id,
+        reading_date: doc.doc_date,
+        reading_value: 0, // Sem leitura do contador disponível
+        invoice_amount: doc.amount ?? null,
+        invoice_number: doc.doc_number ?? null,
+        notes: `Importado de documento existente: ${doc.original_name ?? ''}`,
+      })
+
+      results.push({ fileName: doc.original_name ?? doc.file_path, status: 'success', meterName: matchedMeter.name })
+    }
+
+    setImportResults(results)
+    setImporting(false); setImportDone(true); fetchAll()
+  }
+
   async function deleteReading(id: string) {
     if (!confirm('Apagar esta leitura?')) return
     await supabase.from('meter_readings').delete().eq('id', id)
@@ -115,6 +242,10 @@ export default function QuadrosPage() {
     setExpanded(prev => ({ ...prev, [id]: !prev[id] }))
   }
 
+  function closeUploadModal() {
+    setShowUploadModal(false); setUploadFiles([]); setImportResults([]); setImportDone(false)
+  }
+
   const totalFaturas = Object.values(readings).flat().reduce((s, r) => s + (r.invoice_amount ?? 0), 0)
 
   return (
@@ -126,9 +257,17 @@ export default function QuadrosPage() {
             <p className="text-sm text-gray-500 mt-1">{meters.length} quadros registados</p>
           </div>
           {isAdmin && (
-            <button className="btn-primary" onClick={() => { setEditMeter(null); setMeterForm({ name: '', contract_number: '', cpe: '', location: '' }); setShowModal(true) }}>
-              <Plus className="w-4 h-4" /> Novo Quadro
-            </button>
+            <div className="flex gap-3">
+              <button className="btn-secondary" onClick={() => { setShowImportModal(true); setImportResults([]); setImportDone(false) }}>
+                <RefreshCw className="w-4 h-4" /> Importar existentes
+              </button>
+              <button className="btn-secondary" onClick={() => { setShowUploadModal(true); setImportResults([]); setImportDone(false) }}>
+                <Upload className="w-4 h-4" /> Upload fatura EDP
+              </button>
+              <button className="btn-primary" onClick={() => { setEditMeter(null); setMeterForm({ name: '', contract_number: '', cpe: '', location: '' }); setShowModal(true) }}>
+                <Plus className="w-4 h-4" /> Novo Quadro
+              </button>
+            </div>
           )}
         </div>
 
@@ -184,7 +323,7 @@ export default function QuadrosPage() {
                         <div className="flex gap-2" onClick={e => e.stopPropagation()}>
                           <button onClick={() => openEdit(meter)} className="text-xs text-emerald-600 hover:underline font-medium">Editar</button>
                           <button onClick={() => { setShowReadingModal(meter.id); setReadingForm({ reading_date: new Date().toISOString().slice(0, 10), reading_value: '', invoice_amount: '', invoice_number: '', notes: '' }) }}
-                            className="text-xs text-blue-600 hover:underline font-medium">+ Leitura</button>
+                            className="text-xs text-blue-600 hover:underline font-medium">+ Leitura manual</button>
                         </div>
                       )}
                       {isOpen ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
@@ -211,7 +350,7 @@ export default function QuadrosPage() {
                             {meterReadings.map(r => (
                               <tr key={r.id} className="hover:bg-gray-50">
                                 <td className="py-2 text-sm">{formatDate(r.reading_date)}</td>
-                                <td className="py-2 text-sm font-mono">{r.reading_value}</td>
+                                <td className="py-2 text-sm font-mono">{r.reading_value || '—'}</td>
                                 <td className="py-2 text-sm text-gray-500">{r.invoice_number ?? '—'}</td>
                                 <td className="py-2 text-sm font-semibold text-red-600">{r.invoice_amount ? formatCurrency(r.invoice_amount) : '—'}</td>
                                 <td className="py-2 text-sm text-gray-400 max-w-xs truncate">{r.notes ?? '—'}</td>
@@ -235,6 +374,115 @@ export default function QuadrosPage() {
           </div>
         )}
       </div>
+
+      {/* Modal Upload PDF */}
+      {showUploadModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="font-semibold text-lg text-gray-900">Upload Fatura EDP</h2>
+              <button onClick={closeUploadModal}><X className="w-5 h-5 text-gray-400" /></button>
+            </div>
+            {!importing && !importDone && (
+              <div className="space-y-4">
+                <p className="text-sm text-gray-500">Carrega faturas EDP — os dados são extraídos automaticamente com IA e a leitura é associada ao quadro correto.</p>
+                <label className="flex flex-col items-center gap-3 border-2 border-dashed border-gray-200 rounded-xl p-6 cursor-pointer hover:border-emerald-400 transition-colors">
+                  <Upload className="w-8 h-8 text-gray-300" />
+                  <div className="text-center">
+                    <p className="font-medium text-gray-700 text-sm">
+                      {uploadFiles.length > 0 ? `${uploadFiles.length} ficheiro(s) selecionado(s)` : 'Clica para selecionar faturas EDP (PDF)'}
+                    </p>
+                    <p className="text-xs text-gray-400 mt-1">✨ OCR automático — extrai leituras e valores</p>
+                  </div>
+                  <input type="file" accept=".pdf" multiple className="hidden"
+                    onChange={e => setUploadFiles(Array.from(e.target.files ?? []))} />
+                </label>
+              </div>
+            )}
+            {(importing || importDone) && (
+              <div className="space-y-2">
+                {!importDone && <p className="text-sm text-gray-600 mb-3">A processar faturas com IA...</p>}
+                {importDone && <p className="text-sm font-medium text-gray-700 mb-3">Processamento concluído!</p>}
+                {importResults.map((r, i) => (
+                  <div key={i} className={`flex items-center gap-3 p-3 rounded-lg ${r.status === 'success' ? 'bg-emerald-50' : r.status === 'error' ? 'bg-red-50' : r.status === 'duplicate' ? 'bg-yellow-50' : r.status === 'processing' ? 'bg-blue-50' : 'bg-gray-50'}`}>
+                    {r.status === 'success' && <CheckCircle className="w-4 h-4 text-emerald-600 flex-shrink-0" />}
+                    {r.status === 'error' && <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />}
+                    {r.status === 'duplicate' && <AlertCircle className="w-4 h-4 text-yellow-600 flex-shrink-0" />}
+                    {r.status === 'processing' && <Loader2 className="w-4 h-4 animate-spin text-blue-600 flex-shrink-0" />}
+                    {r.status === 'pending' && <div className="w-4 h-4 rounded-full border-2 border-gray-300 flex-shrink-0" />}
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium text-gray-800 truncate">{r.fileName}</p>
+                      {r.status === 'success' && <p className="text-xs text-emerald-600">{r.meterName}</p>}
+                      {r.status === 'duplicate' && <p className="text-xs text-yellow-700">Já carregado anteriormente</p>}
+                      {r.error && <p className="text-xs text-red-600">{r.error}</p>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="flex justify-end gap-3 mt-6">
+              <button className="btn-secondary" onClick={closeUploadModal}>{importDone ? 'Fechar' : 'Cancelar'}</button>
+              {!importing && !importDone && (
+                <button className="btn-primary" onClick={handleUploadPDF} disabled={uploadFiles.length === 0}>
+                  <Upload className="w-4 h-4" /> Processar {uploadFiles.length > 0 ? `${uploadFiles.length} fatura(s)` : ''}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Importar Existentes */}
+      {showImportModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="font-semibold text-lg text-gray-900">Importar faturas EDP existentes</h2>
+              <button onClick={() => { setShowImportModal(false); setImportResults([]); setImportDone(false) }}><X className="w-5 h-5 text-gray-400" /></button>
+            </div>
+            {!importing && !importDone && (
+              <div>
+                <p className="text-sm text-gray-600 mb-4">
+                  Vai pesquisar todos os documentos do tipo <strong>Fatura da Luz</strong> já carregados na app e criar as leituras nos quadros correspondentes automaticamente.
+                </p>
+                <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 text-sm text-blue-700">
+                  ℹ️ Documentos já importados serão ignorados automaticamente.
+                </div>
+              </div>
+            )}
+            {(importing || importDone) && (
+              <div className="space-y-2">
+                {!importDone && <p className="text-sm text-gray-600 mb-3">A importar...</p>}
+                {importDone && <p className="text-sm font-medium text-gray-700 mb-3">Importação concluída!</p>}
+                {importResults.map((r, i) => (
+                  <div key={i} className={`flex items-center gap-3 p-3 rounded-lg ${r.status === 'success' ? 'bg-emerald-50' : r.status === 'error' ? 'bg-red-50' : r.status === 'duplicate' ? 'bg-yellow-50' : 'bg-blue-50'}`}>
+                    {r.status === 'success' && <CheckCircle className="w-4 h-4 text-emerald-600 flex-shrink-0" />}
+                    {r.status === 'error' && <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />}
+                    {r.status === 'duplicate' && <AlertCircle className="w-4 h-4 text-yellow-600 flex-shrink-0" />}
+                    {r.status === 'processing' && <Loader2 className="w-4 h-4 animate-spin text-blue-600 flex-shrink-0" />}
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium text-gray-800 truncate">{r.fileName}</p>
+                      {r.meterName && <p className="text-xs text-emerald-600">{r.meterName}</p>}
+                      {r.error && <p className="text-xs text-red-600">{r.error}</p>}
+                      {r.status === 'duplicate' && <p className="text-xs text-yellow-700">Já importado</p>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="flex justify-end gap-3 mt-6">
+              <button className="btn-secondary" onClick={() => { setShowImportModal(false); setImportResults([]); setImportDone(false) }}>
+                {importDone ? 'Fechar' : 'Cancelar'}
+              </button>
+              {!importing && !importDone && (
+                <button className="btn-primary" onClick={handleImportExisting}>
+                  <RefreshCw className="w-4 h-4" /> Importar agora
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal Quadro */}
       {showModal && (
@@ -276,12 +524,12 @@ export default function QuadrosPage() {
         </div>
       )}
 
-      {/* Modal Leitura */}
+      {/* Modal Leitura Manual */}
       {showReadingModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
             <div className="flex items-center justify-between mb-5">
-              <h2 className="font-semibold text-lg text-gray-900">Nova Leitura</h2>
+              <h2 className="font-semibold text-lg text-gray-900">Nova Leitura Manual</h2>
               <button onClick={() => setShowReadingModal(null)}><X className="w-5 h-5 text-gray-400" /></button>
             </div>
             <div className="space-y-4">
@@ -292,7 +540,7 @@ export default function QuadrosPage() {
                     onChange={e => setReadingForm(f => ({ ...f, reading_date: e.target.value }))} />
                 </div>
                 <div>
-                  <label className="label">Valor contador (kWh) *</label>
+                  <label className="label">Valor contador (kWh)</label>
                   <input type="number" step="0.01" className="input" placeholder="ex: 8581"
                     value={readingForm.reading_value}
                     onChange={e => setReadingForm(f => ({ ...f, reading_value: e.target.value }))} />
