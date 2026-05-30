@@ -16,7 +16,6 @@ export async function POST(request: Request) {
     const bytes = await file.arrayBuffer()
     const buffer = Buffer.from(bytes)
 
-    // Calcular hash SHA-256 para detetar duplicados
     const fileHash = createHash('sha256').update(buffer).digest('hex')
 
     const supabase = createClient(
@@ -25,20 +24,15 @@ export async function POST(request: Request) {
       { auth: { autoRefreshToken: false, persistSession: false } }
     )
 
-    // Verificar duplicado de ficheiro
+    // Verificar duplicado
     if (!force) {
       const { data: existing } = await supabase
         .from('documents')
         .select('id, file_path, supplier_name, doc_date, amount, tipo')
         .eq('file_hash', fileHash)
         .single()
-
       if (existing) {
-        return NextResponse.json({
-          duplicate: true,
-          existing,
-          message: 'Este ficheiro já foi carregado anteriormente'
-        })
+        return NextResponse.json({ duplicate: true, existing, message: 'Este ficheiro já foi carregado anteriormente' })
       }
     }
 
@@ -51,6 +45,37 @@ export async function POST(request: Request) {
       try {
         const base64 = buffer.toString('base64')
         const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
+
+        const isEdp = tipo === 'fatura_luz'
+        const prompt = isEdp ? `Extrai os seguintes dados desta fatura EDP em JSON (sem markdown, só JSON puro):
+{
+  "doc_number": "número da fatura",
+  "supplier_name": "nome do fornecedor",
+  "supplier_nif": "NIF do fornecedor (só números)",
+  "buyer_name": "nome do comprador",
+  "buyer_nif": "NIF do comprador (só números)",
+  "amount": valor total a pagar (número sem símbolo),
+  "doc_date": "data de emissão no formato YYYY-MM-DD",
+  "items_summary": "resumo em português, máximo 200 caracteres",
+  "category": "edp",
+  "edp_contract_number": "código de contrato EDP (ex: 160807307528)",
+  "edp_cpe": "CPE (ex: PT0002000003480097WQ)",
+  "edp_meter_number": "número do contador (ex: 16802460082814)",
+  "edp_reading_value": valor numérico da leitura actual do contador (soma de vazio+ponta+cheias se existir, ou valor simples),
+  "edp_reading_date": "data da leitura no formato YYYY-MM-DD",
+  "edp_kwh_consumed": número total de kWh consumidos faturados
+}` : `Extrai os seguintes dados deste documento em JSON (sem markdown, só JSON puro):
+{
+  "doc_number": "número do documento/fatura se existir",
+  "supplier_name": "nome do fornecedor/entidade emissora",
+  "supplier_nif": "NIF do fornecedor (só números, null se não existir)",
+  "buyer_name": "nome do comprador/destinatário",
+  "buyer_nif": "NIF do comprador (só números, null se não existir)",
+  "amount": valor numérico total sem símbolo (null se não existir),
+  "doc_date": "data no formato YYYY-MM-DD (null se não existir)",
+  "items_summary": "resumo do conteúdo em português, máximo 200 caracteres",
+  "category": "uma de: obras, edp, pessoal, contabilidade, manutencao, outros"
+}`
 
         const response = await anthropic.messages.create({
           model: 'claude-sonnet-4-5',
@@ -65,21 +90,7 @@ export async function POST(request: Request) {
                 type: 'image',
                 source: { type: 'base64', media_type: file.type as any, data: base64 }
               },
-              {
-                type: 'text',
-                text: `Extrai os seguintes dados deste documento em JSON (sem markdown, só JSON puro):
-{
-  "doc_number": "número do documento/fatura se existir",
-  "supplier_name": "nome do fornecedor/entidade emissora",
-  "supplier_nif": "NIF do fornecedor (só números, null se não existir)",
-  "buyer_name": "nome do comprador/destinatário",
-  "buyer_nif": "NIF do comprador (só números, null se não existir)",
-  "amount": valor numérico total sem símbolo (null se não existir),
-  "doc_date": "data no formato YYYY-MM-DD (null se não existir)",
-  "items_summary": "resumo do conteúdo em português, máximo 200 caracteres",
-  "category": "uma de: obras, edp, pessoal, contabilidade, manutencao, outros"
-}`
-              }
+              { type: 'text', text: prompt }
             ] as any
           }]
         })
@@ -93,24 +104,17 @@ export async function POST(request: Request) {
       }
     }
 
-    // Procurar proprietário pelo NIF do comprador
+    // Procurar proprietário pelo NIF
     let ownerName = 'N/D'
     if (extracted.buyer_nif) {
-      const { data: ownerData } = await supabase
-        .from('owners')
-        .select('name')
-        .eq('nif', extracted.buyer_nif)
-        .single()
+      const { data: ownerData } = await supabase.from('owners').select('name').eq('nif', extracted.buyer_nif).single()
       if (ownerData?.name) ownerName = ownerData.name
     }
 
-    // Guardar ficheiro no bucket documents
+    // Guardar ficheiro no bucket
     const cleanName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
     const fileName = `${tipo}/${Date.now()}_${cleanName}`
-    const { error: uploadErr } = await supabase.storage
-      .from('documents')
-      .upload(fileName, buffer, { contentType: file.type })
-
+    const { error: uploadErr } = await supabase.storage.from('documents').upload(fileName, buffer, { contentType: file.type })
     if (uploadErr) return NextResponse.json({ error: uploadErr.message }, { status: 400 })
 
     // Guardar na tabela documents
@@ -136,36 +140,61 @@ export async function POST(request: Request) {
 
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })
 
-    // Criar despesa automaticamente para faturas
+    // ── FATURA LUZ: criar leitura no quadro correspondente ──
+    let meterReadingCreated = false
+    if (tipo === 'fatura_luz' && extracted.edp_contract_number) {
+      const { data: meter } = await supabase
+        .from('meters')
+        .select('id, name')
+        .eq('contract_number', extracted.edp_contract_number)
+        .single()
+
+      if (meter && extracted.edp_reading_date) {
+        // Verificar se já existe leitura para esta data neste quadro
+        const { data: existingReading } = await supabase
+          .from('meter_readings')
+          .select('id')
+          .eq('meter_id', meter.id)
+          .eq('reading_date', extracted.edp_reading_date)
+          .single()
+
+        if (!existingReading) {
+          await supabase.from('meter_readings').insert({
+            meter_id: meter.id,
+            reading_date: extracted.edp_reading_date,
+            reading_value: extracted.edp_reading_value ?? null,
+            invoice_amount: extracted.amount ?? null,
+            invoice_number: extracted.doc_number ?? null,
+            notes: `Importado automaticamente do documento ${file.name}`,
+          })
+          meterReadingCreated = true
+        }
+      }
+    }
+
+    // ── CRIAR DESPESA automaticamente para faturas ──
     const isFatura = ['fatura', 'fatura_luz', 'fatura_agua'].includes(tipo)
     let autoExpense = false
     let expenseId = null
 
     if (isFatura && doc && extracted.amount && extracted.doc_date) {
-
-      // Verificar se já existe despesa com mesmo valor e data (±1 dia)
       const dateFrom = new Date(extracted.doc_date)
       dateFrom.setDate(dateFrom.getDate() - 1)
       const dateTo = new Date(extracted.doc_date)
       dateTo.setDate(dateTo.getDate() + 1)
 
       const { data: existingExpense } = await supabase
-        .from('expenses')
-        .select('id')
+        .from('expenses').select('id')
         .eq('amount', extracted.amount)
         .gte('expense_date', dateFrom.toISOString().slice(0, 10))
         .lte('expense_date', dateTo.toISOString().slice(0, 10))
         .is('invoice_id', null)
-        .limit(1)
-        .single()
+        .limit(1).single()
 
       if (existingExpense) {
-        // Ligar documento à despesa existente — não criar nova!
         await supabase.from('documents').update({ expense_id: existingExpense.id }).eq('id', doc.id)
         expenseId = existingExpense.id
-        autoExpense = false
       } else {
-        // Criar despesa nova apenas se não existir
         const { data: newExpense } = await supabase.from('expenses').insert({
           expense_date: extracted.doc_date,
           category: extracted.category ?? 'outros',
@@ -185,7 +214,7 @@ export async function POST(request: Request) {
       }
     }
 
-    return NextResponse.json({ success: true, document: doc, autoExpense, duplicate: false, expenseId })
+    return NextResponse.json({ success: true, document: doc, autoExpense, duplicate: false, expenseId, meterReadingCreated })
 
   } catch (e: any) {
     console.error(e)
