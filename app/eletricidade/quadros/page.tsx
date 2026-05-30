@@ -4,7 +4,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Plus, Zap, Trash2, X, ChevronDown, ChevronRight, Upload, Loader2, RefreshCw, CheckCircle, AlertCircle, BarChart2 } from 'lucide-react'
+import { Plus, Zap, Trash2, X, ChevronDown, ChevronRight, Upload, Loader2, RefreshCw, CheckCircle, AlertCircle, BarChart2, Eye, Search } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 
@@ -27,6 +27,15 @@ interface MeterReading {
   notes: string | null
 }
 
+interface Document {
+  id: string
+  file_path: string
+  original_name: string | null
+  doc_number: string | null
+  doc_date: string | null
+  amount: number | null
+}
+
 interface UploadResult {
   fileName: string
   status: 'pending' | 'processing' | 'success' | 'error' | 'duplicate'
@@ -43,6 +52,7 @@ export default function QuadrosPage() {
   const canEdit = isAdmin || profile?.role === 'electrician'
   const [meters, setMeters] = useState<Meter[]>([])
   const [readings, setReadings] = useState<Record<string, MeterReading[]>>({})
+  const [documents, setDocuments] = useState<Document[]>([])
   const [loading, setLoading] = useState(true)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [showModal, setShowModal] = useState(false)
@@ -64,6 +74,10 @@ export default function QuadrosPage() {
     invoice_number: '',
     notes: ''
   })
+
+  // Modal associar documento
+  const [associateReading, setAssociateReading] = useState<MeterReading | null>(null)
+  const [associateSearch, setAssociateSearch] = useState('')
 
   // Filtros do gráfico
   const [filterType, setFilterType] = useState<FilterType>('all')
@@ -89,43 +103,62 @@ export default function QuadrosPage() {
       allReadings[m.id] = data ?? []
     }
     setReadings(allReadings)
+
+    // Buscar documentos do tipo fatura_luz para associação
+    const { data: docs } = await supabase
+      .from('documents')
+      .select('id, file_path, original_name, doc_number, doc_date, amount')
+      .eq('tipo', 'fatura_luz')
+      .eq('status', 'ativo')
+      .order('doc_date', { ascending: false })
+    setDocuments(docs ?? [])
+
     setLoading(false)
   }
 
-  // Calcular dados do gráfico
+  // Encontrar documento automaticamente pelo nº de fatura
+  function findDocument(reading: MeterReading): Document | null {
+    if (!reading.invoice_number) return null
+    return documents.find(d =>
+      d.doc_number && d.doc_number.trim() === reading.invoice_number!.trim()
+    ) ?? null
+  }
+
+  async function openDocument(doc: Document) {
+    const { data } = await supabase.storage.from('documents').createSignedUrl(doc.file_path, 60)
+    if (data?.signedUrl) window.open(data.signedUrl, '_blank')
+  }
+
+  // Filtrar documentos no modal de associação
+  const filteredDocs = documents.filter(d => {
+    if (!associateSearch) return true
+    const s = associateSearch.toLowerCase()
+    return (
+      (d.original_name ?? '').toLowerCase().includes(s) ||
+      (d.doc_number ?? '').toLowerCase().includes(s)
+    )
+  })
+
   function getChartData() {
-    // Determinar intervalo de datas
     let startDate = new Date('2026-01-01')
     let endDate = new Date()
-
     if (filterType === 'year') {
       startDate = new Date(`${filterYear}-01-01`)
       endDate = new Date(`${filterYear}-12-31`)
     } else if (filterType === 'semester') {
       const y = parseInt(filterYear)
-      if (filterSemester === '1') {
-        startDate = new Date(`${y}-01-01`)
-        endDate = new Date(`${y}-06-30`)
-      } else {
-        startDate = new Date(`${y}-07-01`)
-        endDate = new Date(`${y}-12-31`)
-      }
+      if (filterSemester === '1') { startDate = new Date(`${y}-01-01`); endDate = new Date(`${y}-06-30`) }
+      else { startDate = new Date(`${y}-07-01`); endDate = new Date(`${y}-12-31`) }
     } else if (filterType === 'trimester') {
       const y = parseInt(filterYear)
       const quarters: Record<string, [string, string]> = {
-        '1': [`${y}-01-01`, `${y}-03-31`],
-        '2': [`${y}-04-01`, `${y}-06-30`],
-        '3': [`${y}-07-01`, `${y}-09-30`],
-        '4': [`${y}-10-01`, `${y}-12-31`],
+        '1': [`${y}-01-01`, `${y}-03-31`], '2': [`${y}-04-01`, `${y}-06-30`],
+        '3': [`${y}-07-01`, `${y}-09-30`], '4': [`${y}-10-01`, `${y}-12-31`],
       }
-      startDate = new Date(quarters[filterTrimester][0])
-      endDate = new Date(quarters[filterTrimester][1])
+      startDate = new Date(quarters[filterTrimester][0]); endDate = new Date(quarters[filterTrimester][1])
     } else if (filterType === 'custom') {
-      startDate = new Date(filterStart)
-      endDate = new Date(filterEnd)
+      startDate = new Date(filterStart); endDate = new Date(filterEnd)
     }
-
-    // Gerar lista de meses no intervalo
     const months: string[] = []
     const cur = new Date(startDate.getFullYear(), startDate.getMonth(), 1)
     const end = new Date(endDate.getFullYear(), endDate.getMonth(), 1)
@@ -133,8 +166,6 @@ export default function QuadrosPage() {
       months.push(`${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}`)
       cur.setMonth(cur.getMonth() + 1)
     }
-
-    // Agregar valores por mês e quadro
     return months.map(month => {
       const point: Record<string, any> = {
         month: new Date(month + '-01').toLocaleDateString('pt-PT', { month: 'short', year: '2-digit' })
@@ -217,8 +248,7 @@ export default function QuadrosPage() {
     const { data: docs } = await supabase.from('documents').select('*').eq('tipo', 'fatura_luz').eq('status', 'ativo')
     if (!docs || docs.length === 0) {
       setImportResults([{ fileName: 'Nenhuma fatura EDP encontrada nos documentos', status: 'error' }])
-      setImporting(false); setImportDone(true)
-      return
+      setImporting(false); setImportDone(true); return
     }
     const results: UploadResult[] = []
     for (const doc of docs) {
@@ -272,7 +302,6 @@ export default function QuadrosPage() {
 
   const totalFaturas = Object.values(readings).flat().reduce((s, r) => s + (r.invoice_amount ?? 0), 0)
   const chartData = getChartData()
-
   const years = ['2026', '2027', '2028']
 
   return (
@@ -284,11 +313,9 @@ export default function QuadrosPage() {
             <p className="text-sm text-gray-500 mt-1">{meters.length} quadros registados</p>
           </div>
           <div className="flex gap-3">
-            <button
-              onClick={() => setShowChart(!showChart)}
+            <button onClick={() => setShowChart(!showChart)}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-colors ${showChart ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
-              <BarChart2 className="w-4 h-4" />
-              Gráfico
+              <BarChart2 className="w-4 h-4" /> Gráfico
             </button>
             {canEdit && (
               <>
@@ -324,35 +351,21 @@ export default function QuadrosPage() {
               <BarChart2 className="w-4 h-4 text-emerald-600" />
               Consumo por Quadro — Valor Fatura (€)
             </h2>
-
-            {/* Filtros */}
             <div className="flex flex-wrap items-center gap-3 mb-5">
-              {/* Tipo de filtro */}
               <div className="flex rounded-lg border border-gray-200 overflow-hidden text-sm">
-                {[
-                  { value: 'all', label: 'Tudo' },
-                  { value: 'year', label: 'Ano' },
-                  { value: 'semester', label: 'Semestre' },
-                  { value: 'trimester', label: 'Trimestre' },
-                  { value: 'custom', label: 'Datas' },
-                ].map(opt => (
-                  <button key={opt.value}
-                    onClick={() => setFilterType(opt.value as FilterType)}
+                {[{ value: 'all', label: 'Tudo' }, { value: 'year', label: 'Ano' }, { value: 'semester', label: 'Semestre' }, { value: 'trimester', label: 'Trimestre' }, { value: 'custom', label: 'Datas' }].map(opt => (
+                  <button key={opt.value} onClick={() => setFilterType(opt.value as FilterType)}
                     className={`px-3 py-1.5 font-medium transition-colors ${filterType === opt.value ? 'bg-emerald-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
                     {opt.label}
                   </button>
                 ))}
               </div>
-
-              {/* Seletor de ano (para year, semester, trimester) */}
               {(filterType === 'year' || filterType === 'semester' || filterType === 'trimester') && (
                 <select value={filterYear} onChange={e => setFilterYear(e.target.value)}
                   className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-700">
                   {years.map(y => <option key={y} value={y}>{y}</option>)}
                 </select>
               )}
-
-              {/* Semestre */}
               {filterType === 'semester' && (
                 <select value={filterSemester} onChange={e => setFilterSemester(e.target.value)}
                   className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-700">
@@ -360,8 +373,6 @@ export default function QuadrosPage() {
                   <option value="2">2º Semestre (Jul–Dez)</option>
                 </select>
               )}
-
-              {/* Trimestre */}
               {filterType === 'trimester' && (
                 <select value={filterTrimester} onChange={e => setFilterTrimester(e.target.value)}
                   className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-700">
@@ -371,8 +382,6 @@ export default function QuadrosPage() {
                   <option value="4">4º Trimestre (Out–Dez)</option>
                 </select>
               )}
-
-              {/* Datas personalizadas */}
               {filterType === 'custom' && (
                 <div className="flex items-center gap-2">
                   <input type="date" value={filterStart} onChange={e => setFilterStart(e.target.value)}
@@ -383,8 +392,6 @@ export default function QuadrosPage() {
                 </div>
               )}
             </div>
-
-            {/* Gráfico */}
             {chartData.length === 0 ? (
               <p className="text-sm text-gray-400 text-center py-8">Sem dados para o período selecionado</p>
             ) : (
@@ -392,23 +399,14 @@ export default function QuadrosPage() {
                 <LineChart data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                   <XAxis dataKey="month" tick={{ fontSize: 12, fill: '#6b7280' }} />
-                  <YAxis tick={{ fontSize: 12, fill: '#6b7280' }}
-                    tickFormatter={v => `${v}€`} />
-                  <Tooltip
-                    formatter={(value: any, name: string) => [formatCurrency(value), name]}
+                  <YAxis tick={{ fontSize: 12, fill: '#6b7280' }} tickFormatter={v => `${v}€`} />
+                  <Tooltip formatter={(value: any, name: string) => [formatCurrency(value), name]}
                     contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb', fontSize: '12px' }} />
                   <Legend wrapperStyle={{ fontSize: '12px' }} />
                   {meters.map((meter, i) => (
-                    <Line
-                      key={meter.id}
-                      type="monotone"
-                      dataKey={meter.name}
-                      stroke={METER_COLORS[i % METER_COLORS.length]}
-                      strokeWidth={2}
-                      dot={{ r: 4 }}
-                      activeDot={{ r: 6 }}
-                      connectNulls={false}
-                    />
+                    <Line key={meter.id} type="monotone" dataKey={meter.name}
+                      stroke={METER_COLORS[i % METER_COLORS.length]} strokeWidth={2}
+                      dot={{ r: 4 }} activeDot={{ r: 6 }} connectNulls={false} />
                   ))}
                 </LineChart>
               </ResponsiveContainer>
@@ -474,27 +472,44 @@ export default function QuadrosPage() {
                               <th className="text-left py-2">Leitura (kWh)</th>
                               <th className="text-left py-2">Nº Fatura</th>
                               <th className="text-left py-2">Valor Fatura</th>
+                              <th className="text-left py-2">Documento</th>
                               <th className="text-left py-2">Notas</th>
                               {canEdit && <th className="py-2"></th>}
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-50">
-                            {meterReadings.map(r => (
-                              <tr key={r.id} className="hover:bg-gray-50">
-                                <td className="py-2 text-sm">{formatDate(r.reading_date)}</td>
-                                <td className="py-2 text-sm font-mono">{r.reading_value || '—'}</td>
-                                <td className="py-2 text-sm text-gray-500">{r.invoice_number ?? '—'}</td>
-                                <td className="py-2 text-sm font-semibold text-red-600">{r.invoice_amount ? formatCurrency(r.invoice_amount) : '—'}</td>
-                                <td className="py-2 text-sm text-gray-400 max-w-xs truncate">{r.notes ?? '—'}</td>
-                                {canEdit && (
+                            {meterReadings.map(r => {
+                              const doc = findDocument(r)
+                              return (
+                                <tr key={r.id} className="hover:bg-gray-50">
+                                  <td className="py-2 text-sm">{formatDate(r.reading_date)}</td>
+                                  <td className="py-2 text-sm font-mono">{r.reading_value || '—'}</td>
+                                  <td className="py-2 text-sm text-gray-500">{r.invoice_number ?? '—'}</td>
+                                  <td className="py-2 text-sm font-semibold text-red-600">{r.invoice_amount ? formatCurrency(r.invoice_amount) : '—'}</td>
                                   <td className="py-2">
-                                    <button onClick={() => deleteReading(r.id)} className="text-gray-300 hover:text-red-500 transition-colors">
-                                      <Trash2 className="w-3.5 h-3.5" />
-                                    </button>
+                                    {doc ? (
+                                      <button onClick={() => openDocument(doc)}
+                                        className="flex items-center gap-1 text-xs text-emerald-600 hover:underline font-medium">
+                                        <Eye className="w-3.5 h-3.5" /> Ver fatura
+                                      </button>
+                                    ) : (
+                                      <button onClick={() => { setAssociateReading(r); setAssociateSearch('') }}
+                                        className="flex items-center gap-1 text-xs text-blue-500 hover:underline font-medium">
+                                        <Search className="w-3.5 h-3.5" /> Associar
+                                      </button>
+                                    )}
                                   </td>
-                                )}
-                              </tr>
-                            ))}
+                                  <td className="py-2 text-sm text-gray-400 max-w-xs truncate">{r.notes ?? '—'}</td>
+                                  {canEdit && (
+                                    <td className="py-2">
+                                      <button onClick={() => deleteReading(r.id)} className="text-gray-300 hover:text-red-500 transition-colors">
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </td>
+                                  )}
+                                </tr>
+                              )
+                            })}
                           </tbody>
                         </table>
                       )}
@@ -506,6 +521,60 @@ export default function QuadrosPage() {
           </div>
         )}
       </div>
+
+      {/* Modal Associar Documento */}
+      {associateReading && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="font-semibold text-lg text-gray-900">Associar Documento</h2>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Leitura de {formatDate(associateReading.reading_date)}
+                  {associateReading.invoice_number && ` — Nº ${associateReading.invoice_number}`}
+                </p>
+              </div>
+              <button onClick={() => setAssociateReading(null)}><X className="w-5 h-5 text-gray-400" /></button>
+            </div>
+
+            {/* Pesquisa */}
+            <div className="relative mb-4">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input className="input pl-9 w-full" placeholder="Pesquisar por nome ou nº fatura..."
+                value={associateSearch} onChange={e => setAssociateSearch(e.target.value)} autoFocus />
+            </div>
+
+            {/* Lista de documentos */}
+            <div className="flex-1 overflow-y-auto space-y-2 min-h-0">
+              {filteredDocs.length === 0 ? (
+                <p className="text-sm text-gray-400 text-center py-8">Nenhum documento encontrado</p>
+              ) : (
+                filteredDocs.map(doc => (
+                  <div key={doc.id}
+                    className="flex items-center justify-between p-3 rounded-lg border border-gray-100 hover:border-emerald-300 hover:bg-emerald-50 transition-colors cursor-pointer"
+                    onClick={() => openDocument(doc)}>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-gray-800 truncate">{doc.original_name ?? doc.file_path}</p>
+                      <div className="flex items-center gap-3 mt-0.5">
+                        {doc.doc_number && <span className="text-xs text-gray-500 font-mono">{doc.doc_number}</span>}
+                        {doc.doc_date && <span className="text-xs text-gray-400">{formatDate(doc.doc_date)}</span>}
+                        {doc.amount && <span className="text-xs font-medium text-red-600">{formatCurrency(doc.amount)}</span>}
+                      </div>
+                    </div>
+                    <button className="flex items-center gap-1 text-xs text-emerald-600 font-medium ml-3 flex-shrink-0">
+                      <Eye className="w-3.5 h-3.5" /> Abrir
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="flex justify-end mt-4 pt-4 border-t border-gray-100">
+              <button className="btn-secondary" onClick={() => setAssociateReading(null)}>Fechar</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal Upload PDF */}
       {showUploadModal && (
