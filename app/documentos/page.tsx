@@ -4,7 +4,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Search, FileText, Eye, FolderOpen, Trash2, X, Plus, Upload, Loader2, CheckCircle, AlertCircle, Edit2, Filter, ChevronDown, ChevronUp } from 'lucide-react'
+import { Search, FileText, Eye, FolderOpen, Trash2, X, Plus, Upload, Loader2, CheckCircle, AlertCircle, Edit2, Filter, ChevronDown, ChevronUp, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 
 interface Document {
@@ -47,6 +47,9 @@ interface UploadResult {
   duplicate?: any
 }
 
+type SortField = 'tipo' | 'nome' | 'associado' | 'data' | 'valor' | 'despesa' | null
+type SortDir = 'asc' | 'desc'
+
 const tipoLabels: Record<string, string> = {
   fatura: '🧾 Fatura',
   fatura_luz: '⚡ Fatura Luz',
@@ -81,6 +84,9 @@ export default function DocumentosPage() {
   const [filterValueMax, setFilterValueMax] = useState('')
   const [filterDespesa, setFilterDespesa] = useState('all')
   const [showFilters, setShowFilters] = useState(false)
+
+  const [sortField, setSortField] = useState<SortField>('data')
+  const [sortDir, setSortDir] = useState<SortDir>('desc')
 
   const [showUpload, setShowUpload] = useState(false)
   const [uploadTipo, setUploadTipo] = useState('fatura')
@@ -119,6 +125,22 @@ export default function DocumentosPage() {
     if (!space) return '—'
     if (Array.isArray(space)) return space[0]?.ref ?? '—'
     return space.ref ?? '—'
+  }
+
+  function handleSort(field: SortField) {
+    if (sortField === field) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortField(field)
+      setSortDir('asc')
+    }
+  }
+
+  function SortIcon({ field }: { field: SortField }) {
+    if (sortField !== field) return <ArrowUpDown className="w-3 h-3 text-gray-300 ml-1 inline" />
+    return sortDir === 'asc'
+      ? <ArrowUp className="w-3 h-3 text-emerald-600 ml-1 inline" />
+      : <ArrowDown className="w-3 h-3 text-emerald-600 ml-1 inline" />
   }
 
   function openEditModal(doc: Document) {
@@ -304,12 +326,35 @@ export default function DocumentosPage() {
     if (filterDespesa === 'nao' && d._expense_id) return false
     return true
   }).sort((a, b) => {
+    const dir = sortDir === 'asc' ? 1 : -1
+    if (sortField === 'tipo') return dir * a._tipo.localeCompare(b._tipo)
+    if (sortField === 'nome') return dir * a._nome.localeCompare(b._nome)
+    if (sortField === 'associado') return dir * a._associado.localeCompare(b._associado)
+    if (sortField === 'data') {
+      if (!a._data) return 1
+      if (!b._data) return -1
+      return dir * a._data.localeCompare(b._data)
+    }
+    if (sortField === 'valor') return dir * ((a._amount ?? 0) - (b._amount ?? 0))
+    if (sortField === 'despesa') return dir * ((a._expense_id ? 1 : 0) - (b._expense_id ? 1 : 0))
+    // default: data desc
     if (!a._data) return 1
     if (!b._data) return -1
     return b._data.localeCompare(a._data)
   })
 
   const countByTipo = (tipo: string) => allDocs.filter(d => d._tipo === tipo).length
+
+  const tipoCards = [
+    { tipo: 'all', emoji: '📁', label: 'Todos', color: 'text-gray-600' },
+    { tipo: 'contrato', emoji: '📄', label: 'Contratos', color: 'text-blue-600' },
+    { tipo: 'fatura', emoji: '🧾', label: 'Faturas', color: 'text-orange-600' },
+    { tipo: 'fatura_luz', emoji: '⚡', label: 'Luz', color: 'text-yellow-600' },
+    { tipo: 'fatura_agua', emoji: '💧', label: 'Água', color: 'text-blue-500' },
+    { tipo: 'registo_predial', emoji: '🏠', label: 'Prediais', color: 'text-purple-600' },
+    { tipo: 'carta', emoji: '✉️', label: 'Cartas', color: 'text-gray-600' },
+    { tipo: 'outro', emoji: '📦', label: 'Outros', color: 'text-gray-500' },
+  ]
 
   return (
     <AppLayout>
@@ -326,60 +371,29 @@ export default function DocumentosPage() {
           )}
         </div>
 
-        {/* Cards de tipo */}
-        <div className="grid grid-cols-4 gap-3 mb-4">
-          {[
-            { tipo: 'contrato', emoji: '📄', label: 'Contratos', color: 'text-blue-600' },
-            { tipo: 'fatura', emoji: '🧾', label: 'Faturas', color: 'text-orange-600' },
-            { tipo: 'fatura_luz', emoji: '⚡', label: 'Luz', color: 'text-yellow-600' },
-            { tipo: 'fatura_agua', emoji: '💧', label: 'Água', color: 'text-blue-500' },
-          ].map(({ tipo, emoji, label, color }) => (
-            <div key={tipo}
-              className={`card text-center py-3 cursor-pointer transition-colors hover:border-emerald-300 ${filterTipo === tipo ? 'border-emerald-400 bg-emerald-50' : ''}`}
-              onClick={() => setFilterTipo(filterTipo === tipo ? 'all' : tipo)}>
-              <p className="text-xl mb-1">{emoji}</p>
-              <p className={`text-lg font-bold ${color}`}>{countByTipo(tipo)}</p>
-              <p className="text-xs text-gray-500">{label}</p>
-            </div>
-          ))}
-        </div>
-        <div className="grid grid-cols-3 gap-3 mb-6">
-          {[
-            { tipo: 'registo_predial', emoji: '🏠', label: 'Registos Prediais', color: 'text-purple-600' },
-            { tipo: 'carta', emoji: '✉️', label: 'Cartas', color: 'text-gray-600' },
-            { tipo: 'outro', emoji: '📦', label: 'Outros', color: 'text-gray-500' },
-          ].map(({ tipo, emoji, label, color }) => (
-            <div key={tipo}
-              className={`card text-center py-3 cursor-pointer transition-colors hover:border-emerald-300 ${filterTipo === tipo ? 'border-emerald-400 bg-emerald-50' : ''}`}
-              onClick={() => setFilterTipo(filterTipo === tipo ? 'all' : tipo)}>
-              <p className="text-xl mb-1">{emoji}</p>
-              <p className={`text-lg font-bold ${color}`}>{countByTipo(tipo)}</p>
-              <p className="text-xs text-gray-500">{label}</p>
-            </div>
+        {/* Cards de tipo — compactos numa linha */}
+        <div className="flex gap-2 mb-6 flex-wrap">
+          {tipoCards.map(({ tipo, emoji, label, color }) => (
+            <button key={tipo}
+              onClick={() => setFilterTipo(tipo)}
+              className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${filterTipo === tipo ? 'border-emerald-400 bg-emerald-50 text-emerald-700' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'}`}>
+              <span>{emoji}</span>
+              <span>{label}</span>
+              <span className={`text-xs font-bold ${filterTipo === tipo ? 'text-emerald-600' : color}`}>
+                {tipo === 'all' ? allDocs.length : countByTipo(tipo)}
+              </span>
+            </button>
           ))}
         </div>
 
         {/* Barra de filtros */}
         <div className="bg-white border border-gray-100 rounded-xl shadow-sm p-4 mb-6">
           <div className="flex gap-3 items-center">
-            {/* Campo de pesquisa — ocupa o espaço disponível */}
             <div className="relative flex-1 min-w-0">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input className="input pl-9 w-full" placeholder="Pesquisar por nome, fornecedor ou descrição..."
                 value={search} onChange={e => setSearch(e.target.value)} />
             </div>
-            {/* Tipo — tamanho fixo compacto */}
-            <select className="input w-36 flex-shrink-0" value={filterTipo} onChange={e => setFilterTipo(e.target.value)}>
-              <option value="all">Todos os tipos</option>
-              <option value="contrato">📄 Contratos</option>
-              <option value="fatura">🧾 Faturas</option>
-              <option value="fatura_luz">⚡ Luz</option>
-              <option value="fatura_agua">💧 Água</option>
-              <option value="registo_predial">🏠 Prediais</option>
-              <option value="carta">✉️ Cartas</option>
-              <option value="outro">📦 Outros</option>
-            </select>
-            {/* Botão mais filtros */}
             <button
               onClick={() => setShowFilters(!showFilters)}
               className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-colors flex-shrink-0 ${showFilters || filterDateStart || filterDateEnd || filterValueMin || filterValueMax || filterDespesa !== 'all' ? 'bg-blue-50 border-blue-200 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
@@ -394,7 +408,6 @@ export default function DocumentosPage() {
             )}
           </div>
 
-          {/* Filtros avançados */}
           {showFilters && (
             <div className="mt-4 pt-4 border-t border-gray-100 grid grid-cols-3 gap-4">
               <div>
@@ -428,11 +441,10 @@ export default function DocumentosPage() {
             </div>
           )}
 
-          {/* Resumo filtros ativos */}
           {hasActiveFilters && (
             <div className="mt-3 flex items-center gap-2 flex-wrap">
               <span className="text-xs text-gray-500">{filtered.length} resultado(s)</span>
-              {search && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">Texto: "{search}"</span>}
+              {search && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">"{search}"</span>}
               {filterTipo !== 'all' && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">{tipoLabels[filterTipo] ?? filterTipo}</span>}
               {filterDateStart && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">De: {filterDateStart}</span>}
               {filterDateEnd && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">Até: {filterDateEnd}</span>}
@@ -456,12 +468,24 @@ export default function DocumentosPage() {
             <table className="w-full">
               <thead className="bg-gray-50 border-b border-gray-100">
                 <tr>
-                  <th className="table-header">Tipo</th>
-                  <th className="table-header">Ficheiro</th>
-                  <th className="table-header">Associado a</th>
-                  <th className="table-header">Data</th>
-                  <th className="table-header">Valor</th>
-                  <th className="table-header">Despesa</th>
+                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('tipo')}>
+                    Tipo <SortIcon field="tipo" />
+                  </th>
+                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('nome')}>
+                    Ficheiro <SortIcon field="nome" />
+                  </th>
+                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('associado')}>
+                    Associado a <SortIcon field="associado" />
+                  </th>
+                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('data')}>
+                    Data <SortIcon field="data" />
+                  </th>
+                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('valor')}>
+                    Valor <SortIcon field="valor" />
+                  </th>
+                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('despesa')}>
+                    Despesa <SortIcon field="despesa" />
+                  </th>
                   <th className="table-header"></th>
                 </tr>
               </thead>
