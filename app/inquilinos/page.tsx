@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Tenant, Lease } from '@/lib/types'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Plus, Search, FileText, Phone, Mail } from 'lucide-react'
+import { Plus, Search, FileText, Phone, Mail, X, AlertTriangle } from 'lucide-react'
 import TenantModal from './TenantModal'
 import LeaseModal from './LeaseModal'
 import { useAuth } from '@/lib/auth-context'
@@ -14,6 +14,25 @@ interface TenantWithLease extends Tenant {
   leases?: (Lease & { space?: any })[]
   spaces?: { ref: string; type: string }[]
   debt?: number
+}
+
+interface Debt {
+  id: string
+  tenant_id: string
+  description: string
+  original_amount: number
+  reference_date: string
+  created_at: string
+  payments?: DebtPayment[]
+}
+
+interface DebtPayment {
+  id: string
+  debt_id: string
+  payment_date: string
+  amount: number
+  payment_method: string
+  notes: string | null
 }
 
 export default function InquilinosPage() {
@@ -31,33 +50,28 @@ export default function InquilinosPage() {
   const [selectedTenant, setSelectedTenant] = useState<Tenant | null>(null)
   const [allSpaceRefs, setAllSpaceRefs] = useState<string[]>([])
 
+  // Modal de dívidas
+  const [debtTenant, setDebtTenant] = useState<TenantWithLease | null>(null)
+  const [debts, setDebts] = useState<Debt[]>([])
+  const [loadingDebts, setLoadingDebts] = useState(false)
+  const [showNewDebt, setShowNewDebt] = useState(false)
+  const [showNewPayment, setShowNewPayment] = useState<string | null>(null) // debt_id
+  const [savingDebt, setSavingDebt] = useState(false)
+  const [newDebt, setNewDebt] = useState({ description: '', original_amount: '', reference_date: new Date().toISOString().slice(0, 10) })
+  const [newPayment, setNewPayment] = useState({ payment_date: new Date().toISOString().slice(0, 10), amount: '', payment_method: 'dinheiro', notes: '' })
+
   useEffect(() => { fetchTenants() }, [])
 
   async function fetchTenants() {
     setLoading(true)
-
-    const { data: tenantsData } = await supabase
-      .from('tenants')
-      .select('*')
-      .order('name')
-
-    const { data: leasesData } = await supabase
-      .from('leases')
-      .select('*, space:spaces(*)')
-
-    const { data: spacesData } = await supabase
-      .from('spaces')
-      .select('ref, type, tenant_id')
-      .not('tenant_id', 'is', null)
-
-    const { data: paymentsData } = await supabase
-      .from('rent_payments')
-      .select('amount, lease_id, payment_date, reference_month, tipo')
+    const { data: tenantsData } = await supabase.from('tenants').select('*').order('name')
+    const { data: leasesData } = await supabase.from('leases').select('*, space:spaces(*)')
+    const { data: spacesData } = await supabase.from('spaces').select('ref, type, tenant_id').not('tenant_id', 'is', null)
+    const { data: paymentsData } = await supabase.from('rent_payments').select('amount, lease_id, payment_date, reference_month, tipo')
 
     const mayStart = new Date('2026-05-01')
     const today = new Date()
     today.setDate(1)
-
     const refs = [...new Set((spacesData ?? []).map(s => s.ref))].sort()
     setAllSpaceRefs(refs)
 
@@ -65,11 +79,7 @@ export default function InquilinosPage() {
       const leases = (leasesData ?? []).filter(l => l.tenant_id === t.id)
       const spaces = (spacesData ?? []).filter(s => s.tenant_id === t.id)
       const leaseIds = leases.map(l => l.id)
-
-      const explicitDebt = (paymentsData ?? [])
-        .filter(p => leaseIds.includes(p.lease_id) && !p.payment_date)
-        .reduce((sum, p) => sum + (p.amount ?? 0), 0)
-
+      const explicitDebt = (paymentsData ?? []).filter(p => leaseIds.includes(p.lease_id) && !p.payment_date).reduce((sum, p) => sum + (p.amount ?? 0), 0)
       let missingDebt = 0
       for (const lease of leases.filter(l => l.status === 'ativo')) {
         if (!lease.start_date) continue
@@ -79,44 +89,100 @@ export default function InquilinosPage() {
         const cursor = new Date(start)
         while (cursor <= today) {
           const monthStr = cursor.toISOString().slice(0, 7)
-          const hasPayment = (paymentsData ?? []).some(p =>
-            p.lease_id === lease.id &&
-            p.reference_month?.slice(0, 7) === monthStr &&
-            (p.tipo === 'renda' || !p.tipo)
-          )
+          const hasPayment = (paymentsData ?? []).some(p => p.lease_id === lease.id && p.reference_month?.slice(0, 7) === monthStr && (p.tipo === 'renda' || !p.tipo))
           if (!hasPayment) missingDebt += lease.monthly_rent
           cursor.setMonth(cursor.getMonth() + 1)
         }
       }
-
       return { ...t, leases, spaces, debt: explicitDebt + missingDebt }
     })
-
     setTenants(tenantsWithData)
     setLoading(false)
+  }
+
+  async function fetchDebts(tenantId: string) {
+    setLoadingDebts(true)
+    const { data: debtsData } = await supabase.from('debts').select('*').eq('tenant_id', tenantId).order('reference_date', { ascending: false })
+    const allDebts: Debt[] = []
+    for (const d of debtsData ?? []) {
+      const { data: payments } = await supabase.from('debt_payments').select('*').eq('debt_id', d.id).order('payment_date')
+      allDebts.push({ ...d, payments: payments ?? [] })
+    }
+    setDebts(allDebts)
+    setLoadingDebts(false)
+  }
+
+  function openDebtModal(tenant: TenantWithLease) {
+    setDebtTenant(tenant)
+    setShowNewDebt(false)
+    setShowNewPayment(null)
+    setNewDebt({ description: '', original_amount: '', reference_date: new Date().toISOString().slice(0, 10) })
+    fetchDebts(tenant.id)
+  }
+
+  async function saveDebt() {
+    if (!debtTenant || !newDebt.description || !newDebt.original_amount) return
+    setSavingDebt(true)
+    await supabase.from('debts').insert({
+      tenant_id: debtTenant.id,
+      description: newDebt.description,
+      original_amount: parseFloat(newDebt.original_amount),
+      reference_date: newDebt.reference_date,
+    })
+    setSavingDebt(false)
+    setShowNewDebt(false)
+    setNewDebt({ description: '', original_amount: '', reference_date: new Date().toISOString().slice(0, 10) })
+    fetchDebts(debtTenant.id)
+  }
+
+  async function savePayment() {
+    if (!showNewPayment || !newPayment.amount) return
+    setSavingDebt(true)
+    await supabase.from('debt_payments').insert({
+      debt_id: showNewPayment,
+      payment_date: newPayment.payment_date,
+      amount: parseFloat(newPayment.amount),
+      payment_method: newPayment.payment_method,
+      notes: newPayment.notes || null,
+    })
+    setSavingDebt(false)
+    setShowNewPayment(null)
+    setNewPayment({ payment_date: new Date().toISOString().slice(0, 10), amount: '', payment_method: 'dinheiro', notes: '' })
+    if (debtTenant) fetchDebts(debtTenant.id)
+  }
+
+  async function deleteDebt(id: string) {
+    if (!confirm('Apagar esta dívida e todos os seus pagamentos?')) return
+    await supabase.from('debt_payments').delete().eq('debt_id', id)
+    await supabase.from('debts').delete().eq('id', id)
+    if (debtTenant) fetchDebts(debtTenant.id)
+  }
+
+  async function deletePayment(id: string) {
+    if (!confirm('Apagar este pagamento?')) return
+    await supabase.from('debt_payments').delete().eq('id', id)
+    if (debtTenant) fetchDebts(debtTenant.id)
+  }
+
+  function getRemainingDebt(debt: Debt): number {
+    const paid = (debt.payments ?? []).reduce((s, p) => s + p.amount, 0)
+    return Math.max(0, debt.original_amount - paid)
+  }
+
+  function getTotalRemainingDebts(): number {
+    return debts.reduce((s, d) => s + getRemainingDebt(d), 0)
   }
 
   const today = new Date()
 
   const filtered = tenants.filter(t => {
-    const matchSearch = !search ||
-      t.name.toLowerCase().includes(search.toLowerCase()) ||
-      t.phone?.includes(search) ||
-      t.email?.toLowerCase().includes(search.toLowerCase())
-
-    const matchSpace = !filterSpace ||
-      t.spaces?.some(s => s.ref === filterSpace) ||
-      t.leases?.some(l => l.status === 'ativo' && l.space?.ref === filterSpace)
-
-    const matchSpaceType = filterSpaceType === 'all' ||
-      t.spaces?.some(s => s.type === filterSpaceType) ||
-      t.leases?.some(l => l.status === 'ativo' && l.space?.type === filterSpaceType)
-
+    const matchSearch = !search || t.name.toLowerCase().includes(search.toLowerCase()) || t.phone?.includes(search) || t.email?.toLowerCase().includes(search.toLowerCase())
+    const matchSpace = !filterSpace || t.spaces?.some(s => s.ref === filterSpace) || t.leases?.some(l => l.status === 'ativo' && l.space?.ref === filterSpace)
+    const matchSpaceType = filterSpaceType === 'all' || t.spaces?.some(s => s.type === filterSpaceType) || t.leases?.some(l => l.status === 'ativo' && l.space?.type === filterSpaceType)
     const debt = t.debt ?? 0
     let matchDebt = true
     if (filterDebt === 'com_divida') matchDebt = debt > 0
     else if (filterDebt === 'sem_divida') matchDebt = debt === 0
-
     const activeLease = t.leases?.find(l => l.status === 'ativo')
     let matchContract = true
     if (filterContract !== 'all' && activeLease?.end_date) {
@@ -130,7 +196,6 @@ export default function InquilinosPage() {
     } else if (filterContract !== 'all' && !activeLease?.end_date) {
       matchContract = false
     }
-
     return matchSearch && matchSpace && matchSpaceType && matchDebt && matchContract
   })
 
@@ -146,8 +211,7 @@ export default function InquilinosPage() {
           </div>
           {isAdmin && (
             <button className="btn-primary" onClick={() => { setEditTenant(null); setShowTenantModal(true) }}>
-              <Plus className="w-4 h-4" />
-              Novo Inquilino
+              <Plus className="w-4 h-4" /> Novo Inquilino
             </button>
           )}
         </div>
@@ -155,14 +219,11 @@ export default function InquilinosPage() {
         <div className="grid grid-cols-3 gap-3 mb-3">
           <div className="relative col-span-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <input className="input pl-9 w-full" placeholder="Nome, telefone, email..." value={search}
-              onChange={e => setSearch(e.target.value)} />
+            <input className="input pl-9 w-full" placeholder="Nome, telefone, email..." value={search} onChange={e => setSearch(e.target.value)} />
           </div>
           <select className="input" value={filterSpace} onChange={e => setFilterSpace(e.target.value)}>
             <option value="">Todos os espaços</option>
-            {allSpaceRefs.map(ref => (
-              <option key={ref} value={ref}>{ref}</option>
-            ))}
+            {allSpaceRefs.map(ref => <option key={ref} value={ref}>{ref}</option>)}
           </select>
           <select className="input" value={filterSpaceType} onChange={e => setFilterSpaceType(e.target.value as any)}>
             <option value="all">Todos os tipos</option>
@@ -191,9 +252,7 @@ export default function InquilinosPage() {
           <p className="text-sm text-gray-500 mb-3">
             {filtered.length} resultado(s)
             <button onClick={() => { setSearch(''); setFilterSpace(''); setFilterSpaceType('all'); setFilterDebt('all'); setFilterContract('all') }}
-              className="ml-2 text-xs text-emerald-600 hover:underline">
-              Limpar filtros
-            </button>
+              className="ml-2 text-xs text-emerald-600 hover:underline">Limpar filtros</button>
           </p>
         )}
 
@@ -221,7 +280,6 @@ export default function InquilinosPage() {
                 {filtered.map(tenant => {
                   const activeLease = tenant.leases?.find(l => l.status === 'ativo')
                   const hasDebt = (tenant.debt ?? 0) > 0
-
                   let contractAlert = null
                   if (activeLease?.end_date) {
                     const endDate = new Date(activeLease.end_date)
@@ -232,7 +290,6 @@ export default function InquilinosPage() {
                     else if (diffDays <= 90) contractAlert = { label: `🟡 ${diffDays}d`, color: 'text-yellow-600' }
                     else if (diffDays <= 180) contractAlert = { label: `🟢 ${diffDays}d`, color: 'text-green-600' }
                   }
-
                   return (
                     <tr key={tenant.id} className="hover:bg-gray-50 transition-colors">
                       <td className="table-cell">
@@ -240,32 +297,18 @@ export default function InquilinosPage() {
                       </td>
                       <td className="table-cell">
                         <div className="space-y-0.5">
-                          {tenant.phone && (
-                            <div className="flex items-center gap-1.5 text-xs text-gray-600">
-                              <Phone className="w-3 h-3" />{tenant.phone}
-                            </div>
-                          )}
-                          {tenant.email && (
-                            <div className="flex items-center gap-1.5 text-xs text-gray-600">
-                              <Mail className="w-3 h-3" />{tenant.email}
-                            </div>
-                          )}
+                          {tenant.phone && <div className="flex items-center gap-1.5 text-xs text-gray-600"><Phone className="w-3 h-3" />{tenant.phone}</div>}
+                          {tenant.email && <div className="flex items-center gap-1.5 text-xs text-gray-600"><Mail className="w-3 h-3" />{tenant.email}</div>}
                         </div>
                       </td>
                       <td className="table-cell text-sm">{tenant.nif ?? '—'}</td>
                       <td className="table-cell">
                         <div className="flex flex-wrap gap-1">
                           {tenant.spaces && tenant.spaces.length > 0
-                            ? tenant.spaces.map(s => (
-                                <span key={s.ref} className="badge-verde">{s.ref}</span>
-                              ))
-                            : tenant.leases?.filter(l => l.status === 'ativo').map(l => (
-                                <span key={l.id} className="badge-verde">{l.space?.ref}</span>
-                              ))
+                            ? tenant.spaces.map(s => <span key={s.ref} className="badge-verde">{s.ref}</span>)
+                            : tenant.leases?.filter(l => l.status === 'ativo').map(l => <span key={l.id} className="badge-verde">{l.space?.ref}</span>)
                           }
-                          {(!tenant.spaces || tenant.spaces.length === 0) && !activeLease && (
-                            <span className="text-gray-400 text-sm">—</span>
-                          )}
+                          {(!tenant.spaces || tenant.spaces.length === 0) && !activeLease && <span className="text-gray-400 text-sm">—</span>}
                         </div>
                       </td>
                       <td className="table-cell font-medium">
@@ -277,9 +320,7 @@ export default function InquilinosPage() {
                             {formatCurrency(tenant.debt!)}
                           </span>
                         ) : (
-                          <span className="inline-flex items-center text-sm text-emerald-600 font-medium">
-                            ✓ Sem dívida
-                          </span>
+                          <span className="inline-flex items-center text-sm text-emerald-600 font-medium">✓ Sem dívida</span>
                         )}
                       </td>
                       <td className="table-cell text-sm">
@@ -310,6 +351,8 @@ export default function InquilinosPage() {
                               className="text-xs text-emerald-600 hover:underline font-medium">Editar</button>
                             <button onClick={() => { setSelectedTenant(tenant); setShowLeaseModal(true) }}
                               className="text-xs text-blue-600 hover:underline font-medium">Contrato</button>
+                            <button onClick={() => openDebtModal(tenant)}
+                              className="text-xs text-red-500 hover:underline font-medium">Dívidas</button>
                           </div>
                         </td>
                       )}
@@ -329,21 +372,172 @@ export default function InquilinosPage() {
         )}
       </div>
 
+      {/* Modal Dívidas */}
+      {debtTenant && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6 max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="font-semibold text-lg text-gray-900">Dívidas — {debtTenant.name}</h2>
+                {!loadingDebts && (
+                  <p className={`text-sm font-medium mt-0.5 ${getTotalRemainingDebts() > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                    Total em dívida: {formatCurrency(getTotalRemainingDebts())}
+                  </p>
+                )}
+              </div>
+              <div className="flex items-center gap-3">
+                <button onClick={() => setShowNewDebt(true)}
+                  className="flex items-center gap-2 bg-red-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-700">
+                  <Plus className="w-4 h-4" /> Nova Dívida
+                </button>
+                <button onClick={() => setDebtTenant(null)}><X className="w-5 h-5 text-gray-400" /></button>
+              </div>
+            </div>
+
+            {/* Formulário nova dívida */}
+            {showNewDebt && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
+                <h3 className="text-sm font-semibold text-red-800 mb-3">Nova Dívida</h3>
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="col-span-2">
+                    <label className="text-xs font-medium text-gray-600 block mb-1">Descrição *</label>
+                    <input className="input text-sm w-full" placeholder="ex: Renda Jan 2025, Luz 2025..."
+                      value={newDebt.description} onChange={e => setNewDebt(f => ({ ...f, description: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-600 block mb-1">Valor (€) *</label>
+                    <input type="number" step="0.01" className="input text-sm w-full" placeholder="ex: 500"
+                      value={newDebt.original_amount} onChange={e => setNewDebt(f => ({ ...f, original_amount: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-600 block mb-1">Data de referência</label>
+                    <input type="date" className="input text-sm w-full"
+                      value={newDebt.reference_date} onChange={e => setNewDebt(f => ({ ...f, reference_date: e.target.value }))} />
+                  </div>
+                </div>
+                <div className="flex gap-2 mt-3">
+                  <button onClick={() => setShowNewDebt(false)} className="btn-secondary text-sm">Cancelar</button>
+                  <button onClick={saveDebt} disabled={savingDebt || !newDebt.description || !newDebt.original_amount}
+                    className="btn-primary text-sm disabled:opacity-50">
+                    {savingDebt ? 'A guardar...' : 'Guardar Dívida'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Lista de dívidas */}
+            <div className="flex-1 overflow-y-auto space-y-3 min-h-0">
+              {loadingDebts ? (
+                <div className="flex justify-center py-8">
+                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-red-600" />
+                </div>
+              ) : debts.length === 0 ? (
+                <div className="text-center py-10 text-gray-400">
+                  <AlertTriangle className="w-8 h-8 mx-auto mb-2 text-gray-300" />
+                  <p className="text-sm">Sem dívidas registadas</p>
+                </div>
+              ) : (
+                debts.map(debt => {
+                  const remaining = getRemainingDebt(debt)
+                  const paid = (debt.payments ?? []).reduce((s, p) => s + p.amount, 0)
+                  const isSettled = remaining === 0
+                  return (
+                    <div key={debt.id} className={`border rounded-xl p-4 ${isSettled ? 'border-emerald-200 bg-emerald-50' : 'border-red-100 bg-white'}`}>
+                      <div className="flex items-start justify-between mb-2">
+                        <div>
+                          <p className="font-medium text-gray-900 text-sm">{debt.description}</p>
+                          <p className="text-xs text-gray-500">{formatDate(debt.reference_date)}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xs text-gray-500">Valor original: {formatCurrency(debt.original_amount)}</p>
+                          {paid > 0 && <p className="text-xs text-emerald-600">Pago: {formatCurrency(paid)}</p>}
+                          <p className={`text-sm font-bold ${isSettled ? 'text-emerald-600' : 'text-red-600'}`}>
+                            {isSettled ? '✓ Liquidada' : `Em dívida: ${formatCurrency(remaining)}`}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Pagamentos */}
+                      {(debt.payments ?? []).length > 0 && (
+                        <div className="mt-2 space-y-1 border-t border-gray-100 pt-2">
+                          {debt.payments!.map(p => (
+                            <div key={p.id} className="flex items-center justify-between text-xs text-gray-600">
+                              <span>{formatDate(p.payment_date)} — {p.payment_method}</span>
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium text-emerald-600">+{formatCurrency(p.amount)}</span>
+                                <button onClick={() => deletePayment(p.id)} className="text-gray-300 hover:text-red-400">✕</button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Botões */}
+                      <div className="flex gap-2 mt-3">
+                        {!isSettled && (
+                          <button onClick={() => { setShowNewPayment(debt.id); setNewPayment({ payment_date: new Date().toISOString().slice(0, 10), amount: String(remaining), payment_method: 'dinheiro', notes: '' }) }}
+                            className="text-xs text-emerald-600 hover:underline font-medium">
+                            + Registar pagamento
+                          </button>
+                        )}
+                        <button onClick={() => deleteDebt(debt.id)} className="text-xs text-red-400 hover:underline font-medium">
+                          Apagar dívida
+                        </button>
+                      </div>
+
+                      {/* Formulário novo pagamento */}
+                      {showNewPayment === debt.id && (
+                        <div className="mt-3 bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+                          <h4 className="text-xs font-semibold text-emerald-800 mb-2">Registar Pagamento</h4>
+                          <div className="grid grid-cols-3 gap-2">
+                            <div>
+                              <label className="text-xs text-gray-600 block mb-1">Data</label>
+                              <input type="date" className="input text-xs w-full"
+                                value={newPayment.payment_date} onChange={e => setNewPayment(f => ({ ...f, payment_date: e.target.value }))} />
+                            </div>
+                            <div>
+                              <label className="text-xs text-gray-600 block mb-1">Valor (€)</label>
+                              <input type="number" step="0.01" className="input text-xs w-full"
+                                value={newPayment.amount} onChange={e => setNewPayment(f => ({ ...f, amount: e.target.value }))} />
+                            </div>
+                            <div>
+                              <label className="text-xs text-gray-600 block mb-1">Método</label>
+                              <select className="input text-xs w-full" value={newPayment.payment_method} onChange={e => setNewPayment(f => ({ ...f, payment_method: e.target.value }))}>
+                                <option value="dinheiro">Dinheiro</option>
+                                <option value="transferencia">Transferência</option>
+                                <option value="banco">Banco</option>
+                              </select>
+                            </div>
+                          </div>
+                          <div className="flex gap-2 mt-2">
+                            <button onClick={() => setShowNewPayment(null)} className="text-xs text-gray-500 hover:underline">Cancelar</button>
+                            <button onClick={savePayment} disabled={savingDebt || !newPayment.amount}
+                              className="text-xs bg-emerald-600 text-white px-3 py-1 rounded-lg hover:bg-emerald-700 disabled:opacity-50">
+                              {savingDebt ? 'A guardar...' : 'Guardar'}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {showTenantModal && isAdmin && (
-        <TenantModal
-          tenant={editTenant}
-          onClose={() => setShowTenantModal(false)}
-          onSaved={() => { setShowTenantModal(false); fetchTenants() }}
-        />
+        <TenantModal tenant={editTenant} onClose={() => setShowTenantModal(false)}
+          onSaved={() => { setShowTenantModal(false); fetchTenants() }} />
       )}
 
       {showLeaseModal && selectedTenant && isAdmin && (
-        <LeaseModal
-          tenant={selectedTenant}
-          onClose={() => setShowLeaseModal(false)}
-          onSaved={() => { setShowLeaseModal(false); fetchTenants() }}
-        />
+        <LeaseModal tenant={selectedTenant} onClose={() => setShowLeaseModal(false)}
+          onSaved={() => { setShowLeaseModal(false); fetchTenants() }} />
       )}
     </AppLayout>
   )
 }
+
+// https://quinta-gestao.vercel.app/inquilinos
