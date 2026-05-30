@@ -4,7 +4,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Zap, Trash2, X, ChevronDown, ChevronRight, Settings, Save } from 'lucide-react'
+import { Zap, Trash2, X, ChevronDown, ChevronRight, Settings, Save, Pencil } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 
 interface ElectricityConfig {
@@ -49,9 +49,15 @@ export default function QuadrosEspacosPage() {
   const [loading, setLoading] = useState(true)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [readingModal, setReadingModal] = useState<ReadingModal | null>(null)
+  const [editReadingModal, setEditReadingModal] = useState<Reading | null>(null)
   const [saving, setSaving] = useState(false)
   const [readingForm, setReadingForm] = useState({
     reading_date: new Date().toISOString().slice(0, 10),
+    reading_value: '',
+    notes: '',
+  })
+  const [editForm, setEditForm] = useState({
+    reading_date: '',
     reading_value: '',
     notes: '',
   })
@@ -69,7 +75,6 @@ export default function QuadrosEspacosPage() {
 
   const supabase = createClient()
 
-  // Valores calculados a partir da config
   const pricePerKwh = config?.price_per_kwh ?? 0.18
   const vatRate = config?.vat_rate ?? 0.23
   const priceWithVat = pricePerKwh * (1 + vatRate)
@@ -81,10 +86,7 @@ export default function QuadrosEspacosPage() {
   }, [])
 
   async function fetchConfig() {
-    const { data } = await supabase
-      .from('electricity_config')
-      .select('*')
-      .single()
+    const { data } = await supabase.from('electricity_config').select('*').single()
     if (data) {
       setConfig(data)
       setConfigForm({
@@ -161,6 +163,38 @@ export default function QuadrosEspacosPage() {
       reading_value: '',
       notes: '',
     })
+  }
+
+  function openEditModal(reading: Reading) {
+    setEditReadingModal(reading)
+    setEditForm({
+      reading_date: reading.reading_date,
+      reading_value: reading.reading_value.toString(),
+      notes: reading.notes ?? '',
+    })
+  }
+
+  async function saveEditReading() {
+    if (!editReadingModal || !editForm.reading_value) return
+    setSaving(true)
+
+    const newValue = parseFloat(editForm.reading_value)
+    const prevValue = editReadingModal.previous_value
+    const kwhConsumed = prevValue != null ? newValue - prevValue : editReadingModal.kwh_consumed
+    const acc = editReadingModal.accumulated ? (editReadingModal.amount_calculated ?? 0) : 0
+    const amountCalc = kwhConsumed != null ? parseFloat((kwhConsumed * priceWithVat).toFixed(2)) : editReadingModal.amount_calculated
+
+    await supabase.from('electricity_readings').update({
+      reading_date: editForm.reading_date,
+      reading_value: newValue,
+      kwh_consumed: kwhConsumed,
+      amount_calculated: amountCalc,
+      notes: editForm.notes || null,
+    }).eq('id', editReadingModal.id)
+
+    setSaving(false)
+    setEditReadingModal(null)
+    fetchAll()
   }
 
   async function saveReading(charge: boolean) {
@@ -257,55 +291,35 @@ export default function QuadrosEspacosPage() {
             <div className="grid grid-cols-3 gap-4">
               <div>
                 <label className="text-xs font-medium text-blue-700 block mb-1">Preço por kWh (€, sem IVA)</label>
-                <input
-                  type="number"
-                  step="0.001"
-                  className="w-full border border-blue-200 rounded-lg px-3 py-2 text-sm bg-white"
+                <input type="number" step="0.001" className="w-full border border-blue-200 rounded-lg px-3 py-2 text-sm bg-white"
                   value={configForm.price_per_kwh}
-                  onChange={e => setConfigForm(f => ({ ...f, price_per_kwh: e.target.value }))}
-                />
+                  onChange={e => setConfigForm(f => ({ ...f, price_per_kwh: e.target.value }))} />
               </div>
               <div>
                 <label className="text-xs font-medium text-blue-700 block mb-1">IVA (%)</label>
-                <input
-                  type="number"
-                  step="1"
-                  className="w-full border border-blue-200 rounded-lg px-3 py-2 text-sm bg-white"
+                <input type="number" step="1" className="w-full border border-blue-200 rounded-lg px-3 py-2 text-sm bg-white"
                   value={configForm.vat_rate}
-                  onChange={e => setConfigForm(f => ({ ...f, vat_rate: e.target.value }))}
-                />
+                  onChange={e => setConfigForm(f => ({ ...f, vat_rate: e.target.value }))} />
               </div>
               <div>
                 <label className="text-xs font-medium text-blue-700 block mb-1">Valor mínimo para cobrar (€)</label>
-                <input
-                  type="number"
-                  step="0.50"
-                  className="w-full border border-blue-200 rounded-lg px-3 py-2 text-sm bg-white"
+                <input type="number" step="0.50" className="w-full border border-blue-200 rounded-lg px-3 py-2 text-sm bg-white"
                   value={configForm.min_charge}
-                  onChange={e => setConfigForm(f => ({ ...f, min_charge: e.target.value }))}
-                />
+                  onChange={e => setConfigForm(f => ({ ...f, min_charge: e.target.value }))} />
               </div>
             </div>
-
-            {/* Pré-visualização do preço final */}
             <div className="mt-3 bg-white border border-blue-100 rounded-lg px-4 py-2 text-sm text-blue-800">
               Preço final com IVA: <strong>
                 {formatCurrency(parseFloat(configForm.price_per_kwh || '0') * (1 + parseFloat(configForm.vat_rate || '0') / 100))}
               </strong> /kWh
             </div>
-
             <div className="flex items-center gap-3 mt-4">
-              <button
-                onClick={saveConfig}
-                disabled={savingConfig}
-                className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
-              >
+              <button onClick={saveConfig} disabled={savingConfig}
+                className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
                 <Save className="w-4 h-4" />
                 {savingConfig ? 'A guardar...' : 'Guardar configurações'}
               </button>
-              {configSaved && (
-                <span className="text-sm text-emerald-600 font-medium">✓ Guardado com sucesso!</span>
-              )}
+              {configSaved && <span className="text-sm text-emerald-600 font-medium">✓ Guardado com sucesso!</span>}
             </div>
           </div>
         )}
@@ -408,7 +422,7 @@ export default function QuadrosEspacosPage() {
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-50">
-                            {spaceReadings.map(r => (
+                            {spaceReadings.map((r, index) => (
                               <tr key={r.id} className="hover:bg-gray-50">
                                 <td className="py-2 text-sm">{formatDate(r.reading_date)}</td>
                                 <td className="py-2 text-sm font-mono">{r.reading_value}</td>
@@ -426,9 +440,18 @@ export default function QuadrosEspacosPage() {
                                 </td>
                                 {canEdit && (
                                   <td className="py-2">
-                                    <button onClick={() => deleteReading(r.id)} className="text-gray-300 hover:text-red-500 transition-colors">
-                                      <Trash2 className="w-3.5 h-3.5" />
-                                    </button>
+                                    <div className="flex items-center gap-2">
+                                      {index === 0 && (
+                                        <button onClick={() => openEditModal(r)}
+                                          className="text-gray-300 hover:text-blue-500 transition-colors"
+                                          title="Editar última leitura">
+                                          <Pencil className="w-3.5 h-3.5" />
+                                        </button>
+                                      )}
+                                      <button onClick={() => deleteReading(r.id)} className="text-gray-300 hover:text-red-500 transition-colors">
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
                                   </td>
                                 )}
                               </tr>
@@ -532,6 +555,72 @@ export default function QuadrosEspacosPage() {
                 </button>
               )}
               <button onClick={() => setReadingModal(null)}
+                className="w-full py-2.5 rounded-lg border border-gray-200 text-gray-600 text-sm hover:bg-gray-50">
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Editar Última Leitura */}
+      {editReadingModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-semibold text-lg text-gray-900">Editar Última Leitura</h2>
+              <button onClick={() => setEditReadingModal(null)}><X className="w-5 h-5 text-gray-400" /></button>
+            </div>
+
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
+              <p className="text-xs text-yellow-700 font-medium">⚠ Só é possível editar a última leitura.</p>
+              <p className="text-xs text-yellow-600 mt-0.5">O valor calculado será recalculado automaticamente.</p>
+            </div>
+
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="label">Data *</label>
+                  <input type="date" className="input" value={editForm.reading_date}
+                    onChange={e => setEditForm(f => ({ ...f, reading_date: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="label">Valor do contador *</label>
+                  <input type="number" step="0.01" className="input"
+                    value={editForm.reading_value}
+                    onChange={e => setEditForm(f => ({ ...f, reading_value: e.target.value }))} />
+                </div>
+              </div>
+
+              {editForm.reading_value && editReadingModal.previous_value != null && (
+                <div className="bg-blue-50 border border-blue-100 rounded-lg p-3">
+                  <p className="text-xs font-medium text-blue-700 mb-1">Pré-visualização:</p>
+                  {(() => {
+                    const kwh = parseFloat(editForm.reading_value) - editReadingModal.previous_value!
+                    const total = parseFloat((kwh * priceWithVat).toFixed(2))
+                    return (
+                      <div className="text-xs text-blue-700 space-y-0.5">
+                        <p>{kwh.toFixed(1)} kWh × {formatCurrency(priceWithVat)}/kWh = {formatCurrency(kwh * priceWithVat)}</p>
+                        <p className="font-semibold text-blue-800 text-sm mt-1">Total: {formatCurrency(total)}</p>
+                      </div>
+                    )
+                  })()}
+                </div>
+              )}
+
+              <div>
+                <label className="label">Notas</label>
+                <textarea className="input" rows={2} value={editForm.notes}
+                  onChange={e => setEditForm(f => ({ ...f, notes: e.target.value }))} />
+              </div>
+            </div>
+
+            <div className="mt-6 space-y-2">
+              <button onClick={saveEditReading} disabled={saving || !editForm.reading_value}
+                className="w-full py-2.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+                {saving ? 'A guardar...' : '✓ Guardar alterações'}
+              </button>
+              <button onClick={() => setEditReadingModal(null)}
                 className="w-full py-2.5 rounded-lg border border-gray-200 text-gray-600 text-sm hover:bg-gray-50">
                 Cancelar
               </button>
