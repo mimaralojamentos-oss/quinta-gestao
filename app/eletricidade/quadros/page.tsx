@@ -34,7 +34,8 @@ interface UploadResult {
 }
 
 export default function QuadrosPage() {
-  const { isAdmin } = useAuth()
+  const { isAdmin, profile } = useAuth()
+  const canEdit = isAdmin || profile?.role === 'electrician'
   const [meters, setMeters] = useState<Meter[]>([])
   const [readings, setReadings] = useState<Record<string, MeterReading[]>>({})
   const [loading, setLoading] = useState(true)
@@ -144,7 +145,6 @@ export default function QuadrosPage() {
     setImporting(true); setImportDone(false)
     setImportResults([{ fileName: 'A pesquisar faturas EDP nos documentos...', status: 'processing' }])
 
-    // Buscar documentos do tipo fatura_luz já carregados
     const { data: docs } = await supabase
       .from('documents')
       .select('*')
@@ -160,14 +160,11 @@ export default function QuadrosPage() {
     const results: UploadResult[] = []
 
     for (const doc of docs) {
-      // Verificar se já tem leitura para esta data
       if (!doc.doc_date) {
         results.push({ fileName: doc.original_name ?? doc.file_path, status: 'error', error: 'Sem data' })
         continue
       }
 
-      // Tentar encontrar o quadro pelo items_summary ou supplier_name (contém nº contrato)
-      // Vamos buscar todos os quadros e tentar match
       const { data: allMeters } = await supabase.from('meters').select('id, name, contract_number')
 
       let matchedMeter = null
@@ -181,7 +178,6 @@ export default function QuadrosPage() {
         }
       }
 
-      // Se não encontrou pelo texto, tentar pelo nome do ficheiro
       if (!matchedMeter && allMeters && doc.original_name) {
         for (const m of allMeters) {
           const code = m.name.replace('Quadro ', '')
@@ -197,7 +193,6 @@ export default function QuadrosPage() {
         continue
       }
 
-      // Verificar se já existe leitura para esta data
       const { data: existingReading } = await supabase
         .from('meter_readings').select('id')
         .eq('meter_id', matchedMeter.id)
@@ -209,11 +204,10 @@ export default function QuadrosPage() {
         continue
       }
 
-      // Criar leitura
       await supabase.from('meter_readings').insert({
         meter_id: matchedMeter.id,
         reading_date: doc.doc_date,
-        reading_value: 0, // Sem leitura do contador disponível
+        reading_value: 0,
         invoice_amount: doc.amount ?? null,
         invoice_number: doc.doc_number ?? null,
         notes: `Importado de documento existente: ${doc.original_name ?? ''}`,
@@ -256,7 +250,7 @@ export default function QuadrosPage() {
             <h1 className="text-2xl font-bold text-gray-900">Quadros da Quinta</h1>
             <p className="text-sm text-gray-500 mt-1">{meters.length} quadros registados</p>
           </div>
-          {isAdmin && (
+          {canEdit && (
             <div className="flex gap-3">
               <button className="btn-secondary" onClick={() => { setShowImportModal(true); setImportResults([]); setImportDone(false) }}>
                 <RefreshCw className="w-4 h-4" /> Importar existentes
@@ -319,7 +313,7 @@ export default function QuadrosPage() {
                         <p className="text-xs text-gray-500">Total faturas</p>
                         <p className="text-sm font-semibold text-red-600">{formatCurrency(totalMeter)}</p>
                       </div>
-                      {isAdmin && (
+                      {canEdit && (
                         <div className="flex gap-2" onClick={e => e.stopPropagation()}>
                           <button onClick={() => openEdit(meter)} className="text-xs text-emerald-600 hover:underline font-medium">Editar</button>
                           <button onClick={() => { setShowReadingModal(meter.id); setReadingForm({ reading_date: new Date().toISOString().slice(0, 10), reading_value: '', invoice_amount: '', invoice_number: '', notes: '' }) }}
@@ -343,7 +337,7 @@ export default function QuadrosPage() {
                               <th className="text-left py-2">Nº Fatura</th>
                               <th className="text-left py-2">Valor Fatura</th>
                               <th className="text-left py-2">Notas</th>
-                              {isAdmin && <th className="py-2"></th>}
+                              {canEdit && <th className="py-2"></th>}
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-50">
@@ -354,7 +348,7 @@ export default function QuadrosPage() {
                                 <td className="py-2 text-sm text-gray-500">{r.invoice_number ?? '—'}</td>
                                 <td className="py-2 text-sm font-semibold text-red-600">{r.invoice_amount ? formatCurrency(r.invoice_amount) : '—'}</td>
                                 <td className="py-2 text-sm text-gray-400 max-w-xs truncate">{r.notes ?? '—'}</td>
-                                {isAdmin && (
+                                {canEdit && (
                                   <td className="py-2">
                                     <button onClick={() => deleteReading(r.id)} className="text-gray-300 hover:text-red-500 transition-colors">
                                       <Trash2 className="w-3.5 h-3.5" />
@@ -577,3 +571,5 @@ export default function QuadrosPage() {
     </AppLayout>
   )
 }
+
+// https://quinta-gestao.vercel.app/eletricidade/quadros
