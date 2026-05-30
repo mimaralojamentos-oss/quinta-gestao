@@ -55,7 +55,7 @@ export default function InquilinosPage() {
   const [debts, setDebts] = useState<Debt[]>([])
   const [loadingDebts, setLoadingDebts] = useState(false)
   const [showNewDebt, setShowNewDebt] = useState(false)
-  const [showNewPayment, setShowNewPayment] = useState<string | null>(null) // debt_id
+  const [showNewPayment, setShowNewPayment] = useState<string | null>(null)
   const [savingDebt, setSavingDebt] = useState(false)
   const [newDebt, setNewDebt] = useState({ description: '', original_amount: '', reference_date: new Date().toISOString().slice(0, 10) })
   const [newPayment, setNewPayment] = useState({ payment_date: new Date().toISOString().slice(0, 10), amount: '', payment_method: 'dinheiro', notes: '' })
@@ -69,6 +69,10 @@ export default function InquilinosPage() {
     const { data: spacesData } = await supabase.from('spaces').select('ref, type, tenant_id').not('tenant_id', 'is', null)
     const { data: paymentsData } = await supabase.from('rent_payments').select('amount, lease_id, payment_date, reference_month, tipo')
 
+    // Buscar dívidas manuais e seus pagamentos
+    const { data: debtsData } = await supabase.from('debts').select('id, tenant_id, original_amount')
+    const { data: debtPaymentsData } = await supabase.from('debt_payments').select('debt_id, amount')
+
     const mayStart = new Date('2026-05-01')
     const today = new Date()
     today.setDate(1)
@@ -79,7 +83,11 @@ export default function InquilinosPage() {
       const leases = (leasesData ?? []).filter(l => l.tenant_id === t.id)
       const spaces = (spacesData ?? []).filter(s => s.tenant_id === t.id)
       const leaseIds = leases.map(l => l.id)
-      const explicitDebt = (paymentsData ?? []).filter(p => leaseIds.includes(p.lease_id) && !p.payment_date).reduce((sum, p) => sum + (p.amount ?? 0), 0)
+
+      const explicitDebt = (paymentsData ?? [])
+        .filter(p => leaseIds.includes(p.lease_id) && !p.payment_date)
+        .reduce((sum, p) => sum + (p.amount ?? 0), 0)
+
       let missingDebt = 0
       for (const lease of leases.filter(l => l.status === 'ativo')) {
         if (!lease.start_date) continue
@@ -89,12 +97,26 @@ export default function InquilinosPage() {
         const cursor = new Date(start)
         while (cursor <= today) {
           const monthStr = cursor.toISOString().slice(0, 7)
-          const hasPayment = (paymentsData ?? []).some(p => p.lease_id === lease.id && p.reference_month?.slice(0, 7) === monthStr && (p.tipo === 'renda' || !p.tipo))
+          const hasPayment = (paymentsData ?? []).some(p =>
+            p.lease_id === lease.id &&
+            p.reference_month?.slice(0, 7) === monthStr &&
+            (p.tipo === 'renda' || !p.tipo)
+          )
           if (!hasPayment) missingDebt += lease.monthly_rent
           cursor.setMonth(cursor.getMonth() + 1)
         }
       }
-      return { ...t, leases, spaces, debt: explicitDebt + missingDebt }
+
+      // Calcular dívidas manuais pendentes
+      const tenantDebts = (debtsData ?? []).filter(d => d.tenant_id === t.id)
+      const manualDebt = tenantDebts.reduce((sum, d) => {
+        const paid = (debtPaymentsData ?? [])
+          .filter(p => p.debt_id === d.id)
+          .reduce((s, p) => s + p.amount, 0)
+        return sum + Math.max(0, d.original_amount - paid)
+      }, 0)
+
+      return { ...t, leases, spaces, debt: explicitDebt + missingDebt + manualDebt }
     })
     setTenants(tenantsWithData)
     setLoading(false)
@@ -133,6 +155,7 @@ export default function InquilinosPage() {
     setShowNewDebt(false)
     setNewDebt({ description: '', original_amount: '', reference_date: new Date().toISOString().slice(0, 10) })
     fetchDebts(debtTenant.id)
+    fetchTenants()
   }
 
   async function savePayment() {
@@ -149,6 +172,7 @@ export default function InquilinosPage() {
     setShowNewPayment(null)
     setNewPayment({ payment_date: new Date().toISOString().slice(0, 10), amount: '', payment_method: 'dinheiro', notes: '' })
     if (debtTenant) fetchDebts(debtTenant.id)
+    fetchTenants()
   }
 
   async function deleteDebt(id: string) {
@@ -156,12 +180,14 @@ export default function InquilinosPage() {
     await supabase.from('debt_payments').delete().eq('debt_id', id)
     await supabase.from('debts').delete().eq('id', id)
     if (debtTenant) fetchDebts(debtTenant.id)
+    fetchTenants()
   }
 
   async function deletePayment(id: string) {
     if (!confirm('Apagar este pagamento?')) return
     await supabase.from('debt_payments').delete().eq('id', id)
     if (debtTenant) fetchDebts(debtTenant.id)
+    fetchTenants()
   }
 
   function getRemainingDebt(debt: Debt): number {
@@ -394,7 +420,6 @@ export default function InquilinosPage() {
               </div>
             </div>
 
-            {/* Formulário nova dívida */}
             {showNewDebt && (
               <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
                 <h3 className="text-sm font-semibold text-red-800 mb-3">Nova Dívida</h3>
@@ -425,7 +450,6 @@ export default function InquilinosPage() {
               </div>
             )}
 
-            {/* Lista de dívidas */}
             <div className="flex-1 overflow-y-auto space-y-3 min-h-0">
               {loadingDebts ? (
                 <div className="flex justify-center py-8">
@@ -457,7 +481,6 @@ export default function InquilinosPage() {
                         </div>
                       </div>
 
-                      {/* Pagamentos */}
                       {(debt.payments ?? []).length > 0 && (
                         <div className="mt-2 space-y-1 border-t border-gray-100 pt-2">
                           {debt.payments!.map(p => (
@@ -472,7 +495,6 @@ export default function InquilinosPage() {
                         </div>
                       )}
 
-                      {/* Botões */}
                       <div className="flex gap-2 mt-3">
                         {!isSettled && (
                           <button onClick={() => { setShowNewPayment(debt.id); setNewPayment({ payment_date: new Date().toISOString().slice(0, 10), amount: String(remaining), payment_method: 'dinheiro', notes: '' }) }}
@@ -485,7 +507,6 @@ export default function InquilinosPage() {
                         </button>
                       </div>
 
-                      {/* Formulário novo pagamento */}
                       {showNewPayment === debt.id && (
                         <div className="mt-3 bg-emerald-50 border border-emerald-200 rounded-lg p-3">
                           <h4 className="text-xs font-semibold text-emerald-800 mb-2">Registar Pagamento</h4>
