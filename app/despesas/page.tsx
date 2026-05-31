@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Expense } from '@/lib/types'
 import { formatCurrency, formatDate, categoryLabel } from '@/lib/utils'
-import { Plus, Search, FileText, Trash2, X, SlidersHorizontal, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react'
+import { Plus, Search, FileText, Trash2, X, SlidersHorizontal, ChevronUp, ChevronDown, ChevronsUpDown, Eye } from 'lucide-react'
 import ExpenseModal from './ExpenseModal'
 import { useAuth } from '@/lib/auth-context'
 
@@ -21,6 +21,7 @@ export default function DespesasPage() {
   const { isAdmin } = useAuth()
   const [expenses, setExpenses] = useState<any[]>([])
   const [projects, setProjects] = useState<any[]>([])
+  const [documents, setDocuments] = useState<Record<string, any>>({}) // expense_id -> document
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [editExpense, setEditExpense] = useState<Expense | null>(null)
@@ -54,8 +55,22 @@ export default function DespesasPage() {
       .from('projects')
       .select('id, name, type, location_label, space:spaces(ref)')
       .order('name')
+
+    // Buscar documentos ligados a despesas
+    const { data: docsData } = await supabase
+      .from('documents')
+      .select('id, expense_id, file_path, original_name')
+      .not('expense_id', 'is', null)
+
+    // Criar mapa expense_id -> document
+    const docsMap: Record<string, any> = {}
+    for (const doc of docsData ?? []) {
+      if (doc.expense_id) docsMap[doc.expense_id] = doc
+    }
+
     setExpenses(expensesData ?? [])
     setProjects(projectsData ?? [])
+    setDocuments(docsMap)
     const total = (expensesData ?? []).reduce((s, e) => s + e.amount, 0)
     const cash = (expensesData ?? []).filter(e => e.payment_method === 'dinheiro').reduce((s, e) => s + e.amount, 0)
     setSummary({ total, cash, bank: total - cash })
@@ -81,17 +96,11 @@ export default function DespesasPage() {
   async function handlePaymentMethodToggle(expense: any) {
     if (!isAdmin) return
     setTogglingPayment(expense.id)
-
     const newMethod = expense.payment_method === 'dinheiro' ? 'banco' : 'dinheiro'
-
     await supabase.from('expenses').update({ payment_method: newMethod }).eq('id', expense.id)
-
-    // Atualizar Fundo de Maneio
     const { data: existingCash } = await supabase
       .from('cash_fund_movements').select('id').eq('source_id', expense.id).single()
-
     if (newMethod === 'dinheiro') {
-      // Passou para dinheiro → criar movimento no Fundo de Maneio
       if (existingCash) {
         await supabase.from('cash_fund_movements').update({
           amount: -Math.abs(expense.amount),
@@ -109,24 +118,19 @@ export default function DespesasPage() {
         })
       }
     } else {
-      // Passou para banco → remover do Fundo de Maneio
       if (existingCash) {
         await supabase.from('cash_fund_movements').delete().eq('id', existingCash.id)
       }
     }
-
-    // Atualizar localmente
     setExpenses(prev => prev.map(e =>
       e.id === expense.id ? { ...e, payment_method: newMethod } : e
     ))
-    // Recalcular summary
     setExpenses(prev => {
       const total = prev.reduce((s, e) => s + e.amount, 0)
       const cash = prev.filter(e => e.payment_method === 'dinheiro').reduce((s, e) => s + e.amount, 0)
       setSummary({ total, cash, bank: total - cash })
       return prev
     })
-
     setTogglingPayment(null)
   }
 
@@ -139,10 +143,19 @@ export default function DespesasPage() {
     }))
   }
 
+  async function viewDocument(expenseId: string) {
+    const doc = documents[expenseId]
+    if (!doc) return
+    // Tentar bucket 'documents' primeiro, depois 'fatura'
+    const bucket = doc.file_path.startsWith('fatura/') ? 'fatura' : 'documents'
+    const { data } = await supabase.storage.from(bucket).createSignedUrl(doc.file_path, 60)
+    if (data?.signedUrl) window.open(data.signedUrl, '_blank')
+  }
+
   function handleDeleteClick(expense: any) {
     setDeleteConfirm({
       expense,
-      hasInvoice: !!(expense.invoice_id || expense.invoice_file_path),
+      hasInvoice: !!(documents[expense.id]),
     })
   }
 
@@ -152,32 +165,17 @@ export default function DespesasPage() {
     const { expense } = deleteConfirm
     try {
       await supabase.from('cash_fund_movements').delete().eq('source_id', expense.id)
-      if (deleteInvoice && expense.invoice_id) {
-        const { data: inv } = await supabase.from('invoices').select('file_path').eq('id', expense.invoice_id).single()
-        if (inv?.file_path) await supabase.storage.from('invoices').remove([inv.file_path])
-        await supabase.from('invoices').delete().eq('id', expense.invoice_id)
-      }
-      if (deleteInvoice && expense.invoice_file_path && !expense.invoice_id) {
-        await supabase.storage.from('documents').remove([expense.invoice_file_path])
+      if (deleteInvoice && documents[expense.id]) {
+        const doc = documents[expense.id]
+        const bucket = doc.file_path.startsWith('fatura/') ? 'fatura' : 'documents'
+        await supabase.storage.from(bucket).remove([doc.file_path])
+        await supabase.from('documents').delete().eq('id', doc.id)
       }
       await supabase.from('expenses').delete().eq('id', expense.id)
     } catch (e: any) { console.error('Erro ao apagar:', e) }
     setDeleting(false)
     setDeleteConfirm(null)
     fetchAll()
-  }
-
-  async function viewInvoice(expense: any) {
-    if (expense.invoice_id) {
-      const { data: inv } = await supabase.from('invoices').select('file_path').eq('id', expense.invoice_id).single()
-      if (inv?.file_path) {
-        const { data } = supabase.storage.from('invoices').getPublicUrl(inv.file_path)
-        if (data?.publicUrl) window.open(data.publicUrl, '_blank')
-      }
-    } else if (expense.invoice_file_path) {
-      const { data } = await supabase.storage.from('documents').createSignedUrl(expense.invoice_file_path, 60)
-      if (data?.signedUrl) window.open(data.signedUrl, '_blank')
-    }
   }
 
   function projectLabel(p: any) {
@@ -251,8 +249,7 @@ export default function DespesasPage() {
           </div>
           {isAdmin && (
             <button className="btn-primary" onClick={() => { setEditExpense(null); setShowModal(true) }}>
-              <Plus className="w-4 h-4" />
-              Nova Despesa
+              <Plus className="w-4 h-4" /> Nova Despesa
             </button>
           )}
         </div>
@@ -299,8 +296,7 @@ export default function DespesasPage() {
           {hasActiveFilters && (
             <button onClick={resetFilters}
               className="flex items-center gap-1 px-3 py-2 rounded-lg border border-red-200 text-red-600 text-sm hover:bg-red-50 transition-colors">
-              <X className="w-3.5 h-3.5" />
-              Limpar filtros
+              <X className="w-3.5 h-3.5" /> Limpar filtros
             </button>
           )}
         </div>
@@ -400,73 +396,78 @@ export default function DespesasPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {filtered.map(expense => (
-                  <tr key={expense.id} className={`hover:bg-gray-50 ${!expense.project_id ? 'bg-yellow-50/30' : ''}`}>
-                    <td className="table-cell text-sm">{formatDate(expense.expense_date)}</td>
-                    <td className="table-cell">
-                      <p className="font-medium text-gray-800">{expense.description}</p>
-                      {expense.notes && <p className="text-xs text-gray-500">{expense.notes}</p>}
-                    </td>
-                    <td className="table-cell">
-                      <span className={`text-xs px-2 py-1 rounded-full font-medium ${categoryColors[expense.category] ?? 'bg-gray-100 text-gray-700'}`}>
-                        {categoryLabel(expense.category)}
-                      </span>
-                    </td>
-                    <td className="table-cell text-sm">{expense.supplier ?? '—'}</td>
-                    <td className="table-cell font-semibold text-red-600">{formatCurrency(expense.amount)}</td>
-                    <td className="table-cell">
-                      {isAdmin ? (
-                        <button
-                          onClick={() => handlePaymentMethodToggle(expense)}
-                          disabled={togglingPayment === expense.id}
-                          title={expense.payment_method === 'dinheiro' ? 'Clica para mudar para Banco' : 'Clica para mudar para Dinheiro'}
-                          className={`text-xs px-2 py-1 rounded-full font-medium transition-all hover:opacity-70 cursor-pointer ${
-                            expense.payment_method === 'dinheiro'
-                              ? 'bg-green-100 text-green-700 hover:bg-green-200'
-                              : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
-                          } ${togglingPayment === expense.id ? 'opacity-50' : ''}`}>
-                          {togglingPayment === expense.id ? '...' : expense.payment_method === 'dinheiro' ? '💵 Dinheiro' : '🏦 Banco'}
-                        </button>
-                      ) : (
-                        <span className={`text-xs px-2 py-1 rounded-full ${expense.payment_method === 'dinheiro' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
-                          {expense.payment_method === 'dinheiro' ? '💵' : '🏦'}
-                        </span>
-                      )}
-                    </td>
-                    <td className="table-cell">
-                      {isAdmin ? (
-                        <select value={expense.project_id ?? ''}
-                          onChange={e => handleProjectChange(expense.id, e.target.value)}
-                          className={`text-xs border rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-emerald-500 max-w-[180px] ${expense.project_id ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-yellow-200 bg-yellow-50 text-yellow-700'}`}>
-                          <option value="">— Sem projeto —</option>
-                          {projects.map(p => <option key={p.id} value={p.id}>{projectLabel(p)}</option>)}
-                        </select>
-                      ) : (
-                        <span className="text-xs text-gray-600">{expense.project ? projectLabel(expense.project) : '—'}</span>
-                      )}
-                    </td>
-                    <td className="table-cell">
-                      {(expense.invoice_id || expense.invoice_file_path) ? (
-                        <button onClick={() => viewInvoice(expense)}
-                          className="flex items-center gap-1 text-xs text-emerald-600 hover:underline">
-                          <FileText className="w-3 h-3" /> Ver
-                        </button>
-                      ) : '—'}
-                    </td>
-                    {isAdmin && (
+                {filtered.map(expense => {
+                  const hasDoc = !!documents[expense.id]
+                  return (
+                    <tr key={expense.id} className={`hover:bg-gray-50 ${!expense.project_id ? 'bg-yellow-50/30' : ''}`}>
+                      <td className="table-cell text-sm">{formatDate(expense.expense_date)}</td>
                       <td className="table-cell">
-                        <div className="flex items-center gap-2">
-                          <button onClick={() => { setEditExpense(expense); setShowModal(true) }}
-                            className="text-xs text-emerald-600 hover:underline font-medium">Editar</button>
-                          <button onClick={() => handleDeleteClick(expense)}
-                            className="text-gray-300 hover:text-red-500 transition-colors">
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
+                        <p className="font-medium text-gray-800">{expense.description}</p>
+                        {expense.notes && <p className="text-xs text-gray-500">{expense.notes}</p>}
                       </td>
-                    )}
-                  </tr>
-                ))}
+                      <td className="table-cell">
+                        <span className={`text-xs px-2 py-1 rounded-full font-medium ${categoryColors[expense.category] ?? 'bg-gray-100 text-gray-700'}`}>
+                          {categoryLabel(expense.category)}
+                        </span>
+                      </td>
+                      <td className="table-cell text-sm">{expense.supplier ?? '—'}</td>
+                      <td className="table-cell font-semibold text-red-600">{formatCurrency(expense.amount)}</td>
+                      <td className="table-cell">
+                        {isAdmin ? (
+                          <button
+                            onClick={() => handlePaymentMethodToggle(expense)}
+                            disabled={togglingPayment === expense.id}
+                            title={expense.payment_method === 'dinheiro' ? 'Clica para mudar para Banco' : 'Clica para mudar para Dinheiro'}
+                            className={`text-xs px-2 py-1 rounded-full font-medium transition-all hover:opacity-70 cursor-pointer ${
+                              expense.payment_method === 'dinheiro'
+                                ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                                : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+                            } ${togglingPayment === expense.id ? 'opacity-50' : ''}`}>
+                            {togglingPayment === expense.id ? '...' : expense.payment_method === 'dinheiro' ? '💵 Dinheiro' : '🏦 Banco'}
+                          </button>
+                        ) : (
+                          <span className={`text-xs px-2 py-1 rounded-full ${expense.payment_method === 'dinheiro' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
+                            {expense.payment_method === 'dinheiro' ? '💵' : '🏦'}
+                          </span>
+                        )}
+                      </td>
+                      <td className="table-cell">
+                        {isAdmin ? (
+                          <select value={expense.project_id ?? ''}
+                            onChange={e => handleProjectChange(expense.id, e.target.value)}
+                            className={`text-xs border rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-emerald-500 max-w-[180px] ${expense.project_id ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-yellow-200 bg-yellow-50 text-yellow-700'}`}>
+                            <option value="">— Sem projeto —</option>
+                            {projects.map(p => <option key={p.id} value={p.id}>{projectLabel(p)}</option>)}
+                          </select>
+                        ) : (
+                          <span className="text-xs text-gray-600">{expense.project ? projectLabel(expense.project) : '—'}</span>
+                        )}
+                      </td>
+                      <td className="table-cell">
+                        {hasDoc ? (
+                          <button onClick={() => viewDocument(expense.id)}
+                            className="flex items-center gap-1 text-xs text-emerald-600 hover:underline font-medium">
+                            <Eye className="w-3.5 h-3.5" /> Ver
+                          </button>
+                        ) : (
+                          <span className="text-gray-300 text-xs">—</span>
+                        )}
+                      </td>
+                      {isAdmin && (
+                        <td className="table-cell">
+                          <div className="flex items-center gap-2">
+                            <button onClick={() => { setEditExpense(expense); setShowModal(true) }}
+                              className="text-xs text-emerald-600 hover:underline font-medium">Editar</button>
+                            <button onClick={() => handleDeleteClick(expense)}
+                              className="text-gray-300 hover:text-red-500 transition-colors">
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      )}
+                    </tr>
+                  )
+                })}
                 {filtered.length === 0 && (
                   <tr><td colSpan={isAdmin ? 9 : 8} className="py-12 text-center text-gray-400 text-sm">
                     {hasActiveFilters ? 'Nenhuma despesa encontrada com estes filtros' : 'Nenhuma despesa encontrada'}
@@ -529,3 +530,5 @@ export default function DespesasPage() {
     </AppLayout>
   )
 }
+
+// https://quinta-gestao.vercel.app/despesas
