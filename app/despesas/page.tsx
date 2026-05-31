@@ -50,10 +50,14 @@ export default function DespesasPage() {
       .from('expenses')
       .select('*, project:projects(id, name, type, location_label, space:spaces(ref))')
       .order('expense_date', { ascending: false })
+
+    // Apenas projetos não concluídos no dropdown
     const { data: projectsData } = await supabase
       .from('projects')
       .select('id, name, type, location_label, space:spaces(ref)')
+      .neq('status', 'concluido')
       .order('name')
+
     const { data: docsData } = await supabase
       .from('documents')
       .select('id, expense_id, file_path, original_name')
@@ -134,7 +138,6 @@ export default function DespesasPage() {
   async function viewDocument(expenseId: string) {
     const doc = documents[expenseId]
     if (!doc) return
-    // Todos os ficheiros estão no bucket 'documents'
     const { data } = await supabase.storage.from('documents').createSignedUrl(doc.file_path, 60)
     if (data?.signedUrl) window.open(data.signedUrl, '_blank')
   }
