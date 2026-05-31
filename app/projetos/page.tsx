@@ -4,7 +4,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Plus, Search, FolderOpen, X, FileText } from 'lucide-react'
+import { Plus, Search, FolderOpen, X, FileText, Eye, FolderInput } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import ProjectModal from './ProjectModal'
 
@@ -34,6 +34,8 @@ interface Expense {
   amount: number
   category: string
   payment_method: string
+  invoice_file_path: string | null
+  project_id: string | null
 }
 
 const typeLabels: Record<string, string> = {
@@ -88,6 +90,7 @@ export default function ProjetosPage() {
   const [selectedProject, setSelectedProject] = useState<Project | null>(null)
   const [projectExpenses, setProjectExpenses] = useState<Expense[]>([])
   const [loadingExpenses, setLoadingExpenses] = useState(false)
+  const [movingExpense, setMovingExpense] = useState<string | null>(null) // expense id
 
   useEffect(() => { fetchProjects() }, [])
 
@@ -116,6 +119,7 @@ export default function ProjetosPage() {
 
   async function handleSelectProject(project: Project) {
     setSelectedProject(project)
+    setMovingExpense(null)
     setLoadingExpenses(true)
     const { data } = await supabase
       .from('expenses')
@@ -124,6 +128,19 @@ export default function ProjetosPage() {
       .order('expense_date', { ascending: false })
     setProjectExpenses(data ?? [])
     setLoadingExpenses(false)
+  }
+
+  async function openDocument(filePath: string) {
+    const { data } = await supabase.storage.from('documents').createSignedUrl(filePath, 60)
+    if (data?.signedUrl) window.open(data.signedUrl, '_blank')
+  }
+
+  async function moveExpense(expenseId: string, newProjectId: string | null) {
+    await supabase.from('expenses').update({ project_id: newProjectId }).eq('id', expenseId)
+    setMovingExpense(null)
+    // Recarregar despesas e projetos
+    await fetchProjects()
+    if (selectedProject) await handleSelectProject({ ...selectedProject })
   }
 
   const filtered = projects.filter(p => {
@@ -139,7 +156,6 @@ export default function ProjetosPage() {
   const totalBudget = projects.filter(p => p.status === 'em_curso').reduce((s, p) => s + (p.budget ?? 0), 0)
   const totalSpent = projects.filter(p => p.status === 'em_curso').reduce((s, p) => s + (p.total_spent ?? 0), 0)
 
-  // Agrupar despesas por categoria
   const expensesByCategory = projectExpenses.reduce((acc, e) => {
     const cat = e.category ?? 'outros'
     if (!acc[cat]) acc[cat] = { total: 0, items: [] }
@@ -147,6 +163,9 @@ export default function ProjetosPage() {
     acc[cat].items.push(e)
     return acc
   }, {} as Record<string, { total: number; items: Expense[] }>)
+
+  // Projetos disponíveis para mover (excluindo o atual)
+  const otherProjects = projects.filter(p => p.id !== selectedProject?.id)
 
   return (
     <AppLayout>
@@ -160,8 +179,7 @@ export default function ProjetosPage() {
             </div>
             {isAdmin && (
               <button className="btn-primary" onClick={() => { setEditProject(null); setShowModal(true) }}>
-                <Plus className="w-4 h-4" />
-                Novo Projeto
+                <Plus className="w-4 h-4" /> Novo Projeto
               </button>
             )}
           </div>
@@ -219,11 +237,8 @@ export default function ProjetosPage() {
                 const isSelected = selectedProject?.id === project.id
 
                 return (
-                  <div
-                    key={project.id}
-                    onClick={() => handleSelectProject(project)}
-                    className={`bg-white rounded-xl border shadow-sm p-5 cursor-pointer transition-all hover:shadow-md ${isSelected ? 'border-emerald-400 ring-2 ring-emerald-200' : 'border-gray-100'}`}
-                  >
+                  <div key={project.id} onClick={() => handleSelectProject(project)}
+                    className={`bg-white rounded-xl border shadow-sm p-5 cursor-pointer transition-all hover:shadow-md ${isSelected ? 'border-emerald-400 ring-2 ring-emerald-200' : 'border-gray-100'}`}>
                     <div className="flex items-start justify-between mb-3">
                       <div className="flex-1">
                         <div className="flex items-center gap-2 mb-1 flex-wrap">
@@ -298,7 +313,6 @@ export default function ProjetosPage() {
         {/* Painel lateral de custos */}
         {selectedProject && (
           <div className="w-[40%] border-l border-gray-100 bg-gray-50 flex flex-col h-screen sticky top-0">
-            {/* Header */}
             <div className="p-5 bg-white border-b border-gray-100 flex items-start justify-between">
               <div>
                 <h2 className="font-bold text-gray-900">{selectedProject.name}</h2>
@@ -308,7 +322,7 @@ export default function ProjetosPage() {
                     : `Total gasto: ${formatCurrency(selectedProject.total_spent ?? 0)}`}
                 </p>
               </div>
-              <button onClick={() => setSelectedProject(null)} className="text-gray-400 hover:text-gray-600 ml-3">
+              <button onClick={() => { setSelectedProject(null); setMovingExpense(null) }} className="text-gray-400 hover:text-gray-600 ml-3">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -359,7 +373,7 @@ export default function ProjetosPage() {
                         <p className="text-sm font-medium text-gray-800 flex-1 pr-2">{expense.description}</p>
                         <p className="text-sm font-bold text-red-600 whitespace-nowrap">{formatCurrency(expense.amount)}</p>
                       </div>
-                      <div className="flex items-center gap-2 flex-wrap">
+                      <div className="flex items-center gap-2 flex-wrap mb-2">
                         <span className="text-xs text-gray-400">{formatDate(expense.expense_date)}</span>
                         {expense.supplier && <span className="text-xs text-gray-500">· {expense.supplier}</span>}
                         <span className={`text-xs px-1.5 py-0.5 rounded-full ${categoryColors[expense.category]}`}>
@@ -368,6 +382,51 @@ export default function ProjetosPage() {
                         <span className={`text-xs px-1.5 py-0.5 rounded-full ${expense.payment_method === 'dinheiro' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
                           {expense.payment_method === 'dinheiro' ? '💵' : '🏦'}
                         </span>
+                      </div>
+
+                      {/* Botões de ação */}
+                      <div className="flex items-center gap-3 pt-1 border-t border-gray-50">
+                        {/* Ver documento */}
+                        {expense.invoice_file_path ? (
+                          <button onClick={() => openDocument(expense.invoice_file_path!)}
+                            className="flex items-center gap-1 text-xs text-emerald-600 hover:underline font-medium">
+                            <Eye className="w-3.5 h-3.5" /> Ver fatura
+                          </button>
+                        ) : (
+                          <span className="text-xs text-gray-300 flex items-center gap-1">
+                            <Eye className="w-3.5 h-3.5" /> Sem documento
+                          </span>
+                        )}
+
+                        <span className="text-gray-200">|</span>
+
+                        {/* Mover projeto */}
+                        {isAdmin && (
+                          <div className="relative">
+                            <button onClick={() => setMovingExpense(movingExpense === expense.id ? null : expense.id)}
+                              className="flex items-center gap-1 text-xs text-blue-500 hover:underline font-medium">
+                              <FolderInput className="w-3.5 h-3.5" /> Mover projeto
+                            </button>
+
+                            {movingExpense === expense.id && (
+                              <div className="absolute bottom-full left-0 mb-1 bg-white border border-gray-200 rounded-xl shadow-lg z-20 w-56 py-1">
+                                <p className="text-xs text-gray-400 px-3 py-1.5 border-b border-gray-100">Mover para:</p>
+                                <button
+                                  onClick={() => moveExpense(expense.id, null)}
+                                  className="w-full text-left px-3 py-2 text-xs text-gray-500 hover:bg-gray-50">
+                                  — Sem projeto
+                                </button>
+                                {otherProjects.map(p => (
+                                  <button key={p.id}
+                                    onClick={() => moveExpense(expense.id, p.id)}
+                                    className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-emerald-50 hover:text-emerald-700">
+                                    {p.name}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -388,3 +447,5 @@ export default function ProjetosPage() {
     </AppLayout>
   )
 }
+
+// https://quinta-gestao.vercel.app/projetos
