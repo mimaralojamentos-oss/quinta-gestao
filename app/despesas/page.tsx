@@ -21,7 +21,7 @@ export default function DespesasPage() {
   const { isAdmin } = useAuth()
   const [expenses, setExpenses] = useState<any[]>([])
   const [projects, setProjects] = useState<any[]>([])
-  const [documents, setDocuments] = useState<Record<string, any>>({}) // expense_id -> document
+  const [documents, setDocuments] = useState<Record<string, any>>({})
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [editExpense, setEditExpense] = useState<Expense | null>(null)
@@ -33,7 +33,6 @@ export default function DespesasPage() {
   const [sortDir, setSortDir] = useState<SortDir>('desc')
   const [togglingPayment, setTogglingPayment] = useState<string | null>(null)
 
-  // Filtros
   const [search, setSearch] = useState('')
   const [filterCategory, setFilterCategory] = useState('all')
   const [filterSupplier, setFilterSupplier] = useState('')
@@ -55,14 +54,11 @@ export default function DespesasPage() {
       .from('projects')
       .select('id, name, type, location_label, space:spaces(ref)')
       .order('name')
-
-    // Buscar documentos ligados a despesas
     const { data: docsData } = await supabase
       .from('documents')
       .select('id, expense_id, file_path, original_name')
       .not('expense_id', 'is', null)
 
-    // Criar mapa expense_id -> document
     const docsMap: Record<string, any> = {}
     for (const doc of docsData ?? []) {
       if (doc.expense_id) docsMap[doc.expense_id] = doc
@@ -78,12 +74,8 @@ export default function DespesasPage() {
   }
 
   function handleSort(field: SortField) {
-    if (sortField === field) {
-      setSortDir(d => d === 'asc' ? 'desc' : 'asc')
-    } else {
-      setSortField(field)
-      setSortDir('asc')
-    }
+    if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortField(field); setSortDir('asc') }
   }
 
   function SortIcon({ field }: { field: SortField }) {
@@ -118,13 +110,9 @@ export default function DespesasPage() {
         })
       }
     } else {
-      if (existingCash) {
-        await supabase.from('cash_fund_movements').delete().eq('id', existingCash.id)
-      }
+      if (existingCash) await supabase.from('cash_fund_movements').delete().eq('id', existingCash.id)
     }
-    setExpenses(prev => prev.map(e =>
-      e.id === expense.id ? { ...e, payment_method: newMethod } : e
-    ))
+    setExpenses(prev => prev.map(e => e.id === expense.id ? { ...e, payment_method: newMethod } : e))
     setExpenses(prev => {
       const total = prev.reduce((s, e) => s + e.amount, 0)
       const cash = prev.filter(e => e.payment_method === 'dinheiro').reduce((s, e) => s + e.amount, 0)
@@ -146,16 +134,15 @@ export default function DespesasPage() {
   async function viewDocument(expenseId: string) {
     const doc = documents[expenseId]
     if (!doc) return
-    // Tentar bucket 'documents' primeiro, depois 'fatura'
-    const bucket = doc.file_path.startsWith('fatura/') ? 'fatura' : 'documents'
-    const { data } = await supabase.storage.from(bucket).createSignedUrl(doc.file_path, 60)
+    // Todos os ficheiros estão no bucket 'documents'
+    const { data } = await supabase.storage.from('documents').createSignedUrl(doc.file_path, 60)
     if (data?.signedUrl) window.open(data.signedUrl, '_blank')
   }
 
   function handleDeleteClick(expense: any) {
     setDeleteConfirm({
       expense,
-      hasInvoice: !!(documents[expense.id]),
+      hasInvoice: !!documents[expense.id],
     })
   }
 
@@ -167,8 +154,7 @@ export default function DespesasPage() {
       await supabase.from('cash_fund_movements').delete().eq('source_id', expense.id)
       if (deleteInvoice && documents[expense.id]) {
         const doc = documents[expense.id]
-        const bucket = doc.file_path.startsWith('fatura/') ? 'fatura' : 'documents'
-        await supabase.storage.from(bucket).remove([doc.file_path])
+        await supabase.storage.from('documents').remove([doc.file_path])
         await supabase.from('documents').delete().eq('id', doc.id)
       }
       await supabase.from('expenses').delete().eq('id', expense.id)
@@ -187,14 +173,9 @@ export default function DespesasPage() {
   }
 
   function resetFilters() {
-    setSearch('')
-    setFilterCategory('all')
-    setFilterSupplier('')
-    setFilterProject('all')
-    setFilterDateFrom('')
-    setFilterDateTo('')
-    setFilterAmountMin('')
-    setFilterAmountMax('')
+    setSearch(''); setFilterCategory('all'); setFilterSupplier('')
+    setFilterProject('all'); setFilterDateFrom(''); setFilterDateTo('')
+    setFilterAmountMin(''); setFilterAmountMax('')
   }
 
   const hasActiveFilters = search || filterCategory !== 'all' || filterSupplier ||
@@ -217,11 +198,8 @@ export default function DespesasPage() {
   }).sort((a, b) => {
     let valA = a[sortField] ?? ''
     let valB = b[sortField] ?? ''
-    if (sortField === 'amount') {
-      valA = Number(valA); valB = Number(valB)
-    } else {
-      valA = String(valA).toLowerCase(); valB = String(valB).toLowerCase()
-    }
+    if (sortField === 'amount') { valA = Number(valA); valB = Number(valB) }
+    else { valA = String(valA).toLowerCase(); valB = String(valB).toLowerCase() }
     if (valA < valB) return sortDir === 'asc' ? -1 : 1
     if (valA > valB) return sortDir === 'asc' ? 1 : -1
     return 0
@@ -374,21 +352,11 @@ export default function DespesasPage() {
             <table className="w-full">
               <thead className="bg-gray-50 border-b border-gray-100">
                 <tr>
-                  <th className={thClass} onClick={() => handleSort('expense_date')}>
-                    Data <SortIcon field="expense_date" />
-                  </th>
-                  <th className={thClass} onClick={() => handleSort('description')}>
-                    Descrição <SortIcon field="description" />
-                  </th>
-                  <th className={thClass} onClick={() => handleSort('category')}>
-                    Categoria <SortIcon field="category" />
-                  </th>
-                  <th className={thClass} onClick={() => handleSort('supplier')}>
-                    Fornecedor <SortIcon field="supplier" />
-                  </th>
-                  <th className={thClass} onClick={() => handleSort('amount')}>
-                    Valor <SortIcon field="amount" />
-                  </th>
+                  <th className={thClass} onClick={() => handleSort('expense_date')}>Data <SortIcon field="expense_date" /></th>
+                  <th className={thClass} onClick={() => handleSort('description')}>Descrição <SortIcon field="description" /></th>
+                  <th className={thClass} onClick={() => handleSort('category')}>Categoria <SortIcon field="category" /></th>
+                  <th className={thClass} onClick={() => handleSort('supplier')}>Fornecedor <SortIcon field="supplier" /></th>
+                  <th className={thClass} onClick={() => handleSort('amount')}>Valor <SortIcon field="amount" /></th>
                   <th className="table-header">Pagamento</th>
                   <th className="table-header">Projeto</th>
                   <th className="table-header">Fatura</th>
