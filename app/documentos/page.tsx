@@ -47,7 +47,7 @@ interface UploadResult {
   duplicate?: any
 }
 
-type SortField = 'tipo' | 'nome' | 'associado' | 'data' | 'valor' | 'despesa' | null
+type SortField = 'tipo' | 'nome' | 'associado' | 'data' | 'valor' | 'despesa' | 'carregado' | null
 type SortDir = 'asc' | 'desc'
 
 const tipoLabels: Record<string, string> = {
@@ -70,6 +70,13 @@ const tipoColors: Record<string, string> = {
   contrato: 'bg-blue-100 text-blue-700',
 }
 
+function formatDateTime(dateStr: string): string {
+  if (!dateStr) return '—'
+  const d = new Date(dateStr)
+  return d.toLocaleDateString('pt-PT', { day: '2-digit', month: '2-digit', year: 'numeric' }) +
+    ' ' + d.toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' })
+}
+
 export default function DocumentosPage() {
   const { isAdmin } = useAuth()
   const [documents, setDocuments] = useState<Document[]>([])
@@ -85,7 +92,7 @@ export default function DocumentosPage() {
   const [filterDespesa, setFilterDespesa] = useState('all')
   const [showFilters, setShowFilters] = useState(false)
 
-  const [sortField, setSortField] = useState<SortField>('data')
+  const [sortField, setSortField] = useState<SortField>('carregado')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
 
   const [showUpload, setShowUpload] = useState(false)
@@ -108,7 +115,7 @@ export default function DocumentosPage() {
 
   async function fetchAll() {
     setLoading(true)
-    const { data: docs } = await supabase.from('documents').select('*').eq('status', 'ativo').order('doc_date', { ascending: false })
+    const { data: docs } = await supabase.from('documents').select('*').eq('status', 'ativo').order('created_at', { ascending: false })
     const { data: leases } = await supabase.from('leases').select('id, contract_file_path, start_date, tenant:tenants(name), space:spaces(ref)').not('contract_file_path', 'is', null)
     setDocuments(docs ?? [])
     setContracts((leases ?? []) as Contrato[])
@@ -128,12 +135,8 @@ export default function DocumentosPage() {
   }
 
   function handleSort(field: SortField) {
-    if (sortField === field) {
-      setSortDir(d => d === 'asc' ? 'desc' : 'asc')
-    } else {
-      setSortField(field)
-      setSortDir('asc')
-    }
+    if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortField(field); setSortDir('asc') }
   }
 
   function SortIcon({ field }: { field: SortField }) {
@@ -280,13 +283,8 @@ export default function DocumentosPage() {
   }
 
   function clearFilters() {
-    setSearch('')
-    setFilterTipo('all')
-    setFilterDateStart('')
-    setFilterDateEnd('')
-    setFilterValueMin('')
-    setFilterValueMax('')
-    setFilterDespesa('all')
+    setSearch(''); setFilterTipo('all'); setFilterDateStart('')
+    setFilterDateEnd(''); setFilterValueMin(''); setFilterValueMax(''); setFilterDespesa('all')
   }
 
   const hasActiveFilters = !!(search || filterTipo !== 'all' || filterDateStart || filterDateEnd || filterValueMin || filterValueMax || filterDespesa !== 'all')
@@ -299,7 +297,7 @@ export default function DocumentosPage() {
       _data: c.start_date, _path: c.contract_file_path ?? '',
       _amount: null as number | null, _expense_id: null,
       _doc: null as Document | null, _contrato: c,
-      _descricao: '',
+      _descricao: '', _created_at: '',
     })),
     ...documents.map(d => ({
       _tipo: d.tipo, _id: d.id,
@@ -309,6 +307,7 @@ export default function DocumentosPage() {
       _amount: d.amount, _expense_id: d.expense_id,
       _doc: d, _contrato: null,
       _descricao: d.items_summary ?? '',
+      _created_at: d.created_at,
     })),
   ]
 
@@ -331,16 +330,17 @@ export default function DocumentosPage() {
     if (sortField === 'nome') return dir * a._nome.localeCompare(b._nome)
     if (sortField === 'associado') return dir * a._associado.localeCompare(b._associado)
     if (sortField === 'data') {
-      if (!a._data) return 1
-      if (!b._data) return -1
+      if (!a._data) return 1; if (!b._data) return -1
       return dir * a._data.localeCompare(b._data)
     }
     if (sortField === 'valor') return dir * ((a._amount ?? 0) - (b._amount ?? 0))
     if (sortField === 'despesa') return dir * ((a._expense_id ? 1 : 0) - (b._expense_id ? 1 : 0))
-    // default: data desc
-    if (!a._data) return 1
-    if (!b._data) return -1
-    return b._data.localeCompare(a._data)
+    if (sortField === 'carregado') {
+      if (!a._created_at) return 1; if (!b._created_at) return -1
+      return dir * a._created_at.localeCompare(b._created_at)
+    }
+    if (!a._created_at) return 1; if (!b._created_at) return -1
+    return b._created_at.localeCompare(a._created_at)
   })
 
   const countByTipo = (tipo: string) => allDocs.filter(d => d._tipo === tipo).length
@@ -371,11 +371,10 @@ export default function DocumentosPage() {
           )}
         </div>
 
-        {/* Cards de tipo — compactos numa linha */}
+        {/* Cards de tipo */}
         <div className="flex gap-2 mb-6 flex-wrap">
           {tipoCards.map(({ tipo, emoji, label, color }) => (
-            <button key={tipo}
-              onClick={() => setFilterTipo(tipo)}
+            <button key={tipo} onClick={() => setFilterTipo(tipo)}
               className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${filterTipo === tipo ? 'border-emerald-400 bg-emerald-50 text-emerald-700' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'}`}>
               <span>{emoji}</span>
               <span>{label}</span>
@@ -394,8 +393,7 @@ export default function DocumentosPage() {
               <input className="input pl-9 w-full" placeholder="Pesquisar por nome, fornecedor ou descrição..."
                 value={search} onChange={e => setSearch(e.target.value)} />
             </div>
-            <button
-              onClick={() => setShowFilters(!showFilters)}
+            <button onClick={() => setShowFilters(!showFilters)}
               className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-colors flex-shrink-0 ${showFilters || filterDateStart || filterDateEnd || filterValueMin || filterValueMax || filterDespesa !== 'all' ? 'bg-blue-50 border-blue-200 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
               <Filter className="w-4 h-4" />
               Filtros
@@ -411,14 +409,12 @@ export default function DocumentosPage() {
           {showFilters && (
             <div className="mt-4 pt-4 border-t border-gray-100 grid grid-cols-3 gap-4">
               <div>
-                <label className="text-xs font-medium text-gray-500 block mb-1.5">Data — de</label>
-                <input type="date" className="input text-sm w-full"
-                  value={filterDateStart} onChange={e => setFilterDateStart(e.target.value)} />
+                <label className="text-xs font-medium text-gray-500 block mb-1.5">Data do documento — de</label>
+                <input type="date" className="input text-sm w-full" value={filterDateStart} onChange={e => setFilterDateStart(e.target.value)} />
               </div>
               <div>
-                <label className="text-xs font-medium text-gray-500 block mb-1.5">Data — até</label>
-                <input type="date" className="input text-sm w-full"
-                  value={filterDateEnd} onChange={e => setFilterDateEnd(e.target.value)} />
+                <label className="text-xs font-medium text-gray-500 block mb-1.5">Data do documento — até</label>
+                <input type="date" className="input text-sm w-full" value={filterDateEnd} onChange={e => setFilterDateEnd(e.target.value)} />
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-500 block mb-1.5">Despesa associada</label>
@@ -478,7 +474,10 @@ export default function DocumentosPage() {
                     Associado a <SortIcon field="associado" />
                   </th>
                   <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('data')}>
-                    Data <SortIcon field="data" />
+                    Data doc. <SortIcon field="data" />
+                  </th>
+                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('carregado')}>
+                    Carregado em <SortIcon field="carregado" />
                   </th>
                   <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('valor')}>
                     Valor <SortIcon field="valor" />
@@ -502,14 +501,17 @@ export default function DocumentosPage() {
                         <FileText className="w-4 h-4 text-gray-400 flex-shrink-0" />
                         <div>
                           <span className="text-sm text-gray-700 truncate max-w-xs block">{doc._nome}</span>
-                          {doc._descricao && (
-                            <span className="text-xs text-gray-400 truncate max-w-xs block">{doc._descricao}</span>
-                          )}
+                          {doc._descricao && <span className="text-xs text-gray-400 truncate max-w-xs block">{doc._descricao}</span>}
                         </div>
                       </div>
                     </td>
                     <td className="table-cell text-sm text-gray-600">{doc._associado}</td>
                     <td className="table-cell text-sm text-gray-500">{doc._data ? formatDate(doc._data) : '—'}</td>
+                    <td className="table-cell">
+                      {doc._created_at ? (
+                        <span className="text-xs text-gray-500">{formatDateTime(doc._created_at)}</span>
+                      ) : <span className="text-gray-300 text-xs">—</span>}
+                    </td>
                     <td className="table-cell text-sm font-medium text-red-600">{doc._amount ? formatCurrency(doc._amount) : '—'}</td>
                     <td className="table-cell">
                       {doc._expense_id ? (
@@ -527,8 +529,7 @@ export default function DocumentosPage() {
                           <Eye className="w-3.5 h-3.5" /> Abrir
                         </button>
                         {isAdmin && doc._doc && (
-                          <button onClick={() => openEditModal(doc._doc!)}
-                            className="text-gray-400 hover:text-blue-500 transition-colors">
+                          <button onClick={() => openEditModal(doc._doc!)} className="text-gray-400 hover:text-blue-500 transition-colors">
                             <Edit2 className="w-3.5 h-3.5" />
                           </button>
                         )}
@@ -718,9 +719,7 @@ export default function DocumentosPage() {
                     </button>
                   </div>
                 </div>
-                <p className="text-xs text-gray-400 text-center">
-                  {remainingFiles.current.length} ficheiro(s) por processar
-                </p>
+                <p className="text-xs text-gray-400 text-center">{remainingFiles.current.length} ficheiro(s) por processar</p>
               </div>
             )}
             {(uploading || uploadDone) && !forceDuplicate && (
