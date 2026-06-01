@@ -4,7 +4,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency, getMonthLabel, getCurrentMonth } from '@/lib/utils'
-import { Plus, ChevronLeft, ChevronRight, CheckCircle, Clock, Banknote, Building, AlertTriangle } from 'lucide-react'
+import { Plus, ChevronLeft, ChevronRight, CheckCircle, Clock, Banknote, Building, AlertTriangle, Search, SlidersHorizontal, X, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react'
 import PaymentModal from './PaymentModal'
 import { useAuth } from '@/lib/auth-context'
 
@@ -32,6 +32,9 @@ const tipoLabels: Record<string, string> = {
   luz: '⚡ Luz',
 }
 
+type SortField = 'space' | 'tenant' | 'rent' | 'state' | 'balance' | 'debt' | null
+type SortDir = 'asc' | 'desc'
+
 export default function PagamentosPage() {
   const { isAdmin } = useAuth()
   const [leases, setLeases] = useState<LeaseWithDetails[]>([])
@@ -41,14 +44,28 @@ export default function PagamentosPage() {
   const [selectedLease, setSelectedLease] = useState<LeaseWithDetails | null>(null)
   const [summary, setSummary] = useState({ expected: 0, received: 0, pending: 0, inCash: 0, inBank: 0, totalDebt: 0 })
 
+  // Filtros
+  const [showFilters, setShowFilters] = useState(false)
+  const [filterTenant, setFilterTenant] = useState('')
+  const [filterSpace, setFilterSpace] = useState('')
+  const [filterState, setFilterState] = useState<'all' | 'pago' | 'parcial' | 'pendente'>('all')
+  const [filterDebtMin, setFilterDebtMin] = useState('')
+  const [filterDebtMax, setFilterDebtMax] = useState('')
+
+  // Ordenação
+  const [sortField, setSortField] = useState<SortField>(null)
+  const [sortDir, setSortDir] = useState<SortDir>('asc')
+
+  // Lista de espaços para dropdown
+  const [allSpaceRefs, setAllSpaceRefs] = useState<string[]>([])
+
   useEffect(() => { fetchData() }, [currentMonth])
 
   async function fetchData() {
     setLoading(true)
     const nextMonth = getNextMonth(currentMonth)
-    const mayStart = '2026-05-01'
+    const mayStart = new Date('2026-05-01')
     const today = new Date(); today.setDate(1)
-    const todayStr = today.toISOString().slice(0, 10)
 
     const { data: leasesData } = await supabase
       .from('leases')
@@ -61,12 +78,10 @@ export default function PagamentosPage() {
       .gte('reference_month', currentMonth)
       .lt('reference_month', nextMonth)
 
-    // Todos os pagamentos para calcular dívidas acumuladas
     const { data: allPayments } = await supabase
       .from('rent_payments')
       .select('lease_id, amount, payment_date, reference_month, tipo')
 
-    // Dívidas manuais
     const { data: debtsData } = await supabase
       .from('debts')
       .select('id, tenant_id, original_amount')
@@ -75,21 +90,22 @@ export default function PagamentosPage() {
       .from('debt_payments')
       .select('debt_id, amount')
 
-    // Cobranças de eletricidade por pagar
     const { data: elecCharges } = await supabase
       .from('electricity_charges')
       .select('lease_id, amount')
       .eq('paid', false)
 
+    const refs = [...new Set((leasesData ?? []).map(l => l.space?.ref).filter(Boolean))].sort()
+    setAllSpaceRefs(refs)
+
     const mapped: LeaseWithDetails[] = (leasesData ?? []).map(l => {
       const paymentsThisMonth = (paymentsData ?? []).filter(p => p.lease_id === l.id)
       const totalPaid = paymentsThisMonth.filter(p => p.tipo === 'renda' || !p.tipo).reduce((s, p) => s + p.amount, 0)
 
-      // Calcular dívida acumulada de rendas
       let rentDebt = 0
       if (l.start_date) {
         const contractStart = new Date(l.start_date); contractStart.setDate(1)
-        const start = new Date(Math.max(contractStart.getTime(), new Date(mayStart).getTime()))
+        const start = new Date(Math.max(contractStart.getTime(), mayStart.getTime()))
         const cursor = new Date(start)
         while (cursor <= today) {
           const monthStr = cursor.toISOString().slice(0, 7)
@@ -104,16 +120,13 @@ export default function PagamentosPage() {
         }
       }
 
-      // Dívidas manuais
       const tenantDebts = (debtsData ?? []).filter(d => d.tenant_id === l.tenant?.id)
       const manualDebt = tenantDebts.reduce((sum, d) => {
         const paid = (debtPaymentsData ?? []).filter(p => p.debt_id === d.id).reduce((s, p) => s + p.amount, 0)
         return sum + Math.max(0, d.original_amount - paid)
       }, 0)
 
-      // Eletricidade por pagar
       const elecDebt = (elecCharges ?? []).filter(c => c.lease_id === l.id).reduce((s, c) => s + c.amount, 0)
-
       const total_debt = rentDebt + manualDebt + elecDebt
 
       return {
@@ -127,13 +140,6 @@ export default function PagamentosPage() {
       }
     })
 
-    mapped.sort((a, b) => {
-      const aPaid = a.payments_this_month.length > 0
-      const bPaid = b.payments_this_month.length > 0
-      if (aPaid !== bPaid) return aPaid ? 1 : -1
-      return a.space?.ref?.localeCompare(b.space?.ref ?? '') ?? 0
-    })
-
     setLeases(mapped)
 
     const expected = mapped.reduce((s, l) => s + l.monthly_rent, 0)
@@ -143,7 +149,6 @@ export default function PagamentosPage() {
     const inBank = rentaPayments.filter(p => p.payment_method !== 'dinheiro').reduce((s, p) => s + p.amount, 0)
     const totalDebt = mapped.reduce((s, l) => s + l.total_debt, 0)
     setSummary({ expected, received, pending: expected - received, inCash, inBank, totalDebt })
-
     setLoading(false)
   }
 
@@ -153,62 +158,144 @@ export default function PagamentosPage() {
     setCurrentMonth(d.toISOString().slice(0, 10))
   }
 
+  function handleSort(field: SortField) {
+    if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortField(field); setSortDir('asc') }
+  }
+
+  function SortIcon({ field }: { field: SortField }) {
+    if (sortField !== field) return <ArrowUpDown className="w-3 h-3 text-gray-300 ml-1 inline" />
+    return sortDir === 'asc'
+      ? <ArrowUp className="w-3 h-3 text-emerald-600 ml-1 inline" />
+      : <ArrowDown className="w-3 h-3 text-emerald-600 ml-1 inline" />
+  }
+
+  function resetFilters() {
+    setFilterTenant(''); setFilterSpace(''); setFilterState('all')
+    setFilterDebtMin(''); setFilterDebtMax('')
+  }
+
+  const hasFilters = filterTenant || filterSpace || filterState !== 'all' || filterDebtMin || filterDebtMax
+
+  const filtered = leases.filter(l => {
+    const paid = l.payments_this_month.reduce((s, p) => s + p.amount, 0)
+    const isPaid = paid >= l.monthly_rent
+    const isPartial = paid > 0 && !isPaid
+
+    if (filterTenant && !l.tenant?.name?.toLowerCase().includes(filterTenant.toLowerCase())) return false
+    if (filterSpace && l.space?.ref !== filterSpace) return false
+    if (filterState === 'pago' && !isPaid) return false
+    if (filterState === 'parcial' && !isPartial) return false
+    if (filterState === 'pendente' && (isPaid || isPartial)) return false
+    if (filterDebtMin && l.total_debt < parseFloat(filterDebtMin)) return false
+    if (filterDebtMax && l.total_debt > parseFloat(filterDebtMax)) return false
+    return true
+  }).sort((a, b) => {
+    if (!sortField) {
+      const aPaid = a.payments_this_month.length > 0
+      const bPaid = b.payments_this_month.length > 0
+      if (aPaid !== bPaid) return aPaid ? 1 : -1
+      return a.space?.ref?.localeCompare(b.space?.ref ?? '') ?? 0
+    }
+    const dir = sortDir === 'asc' ? 1 : -1
+    if (sortField === 'space') return dir * (a.space?.ref ?? '').localeCompare(b.space?.ref ?? '')
+    if (sortField === 'tenant') return dir * (a.tenant?.name ?? '').localeCompare(b.tenant?.name ?? '')
+    if (sortField === 'rent') return dir * (a.monthly_rent - b.monthly_rent)
+    if (sortField === 'balance') return dir * (a.balance - b.balance)
+    if (sortField === 'debt') return dir * (a.total_debt - b.total_debt)
+    if (sortField === 'state') {
+      const getState = (l: LeaseWithDetails) => {
+        const paid = l.payments_this_month.reduce((s, p) => s + p.amount, 0)
+        if (paid >= l.monthly_rent) return 0
+        if (paid > 0) return 1
+        return 2
+      }
+      return dir * (getState(a) - getState(b))
+    }
+    return 0
+  })
+
   return (
     <AppLayout>
       <div className="p-8">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">Rendas & Pagamentos</h1>
-          </div>
-          <div className="flex items-center gap-3 bg-white border border-gray-200 rounded-lg px-4 py-2">
+        <div className="flex items-center justify-between mb-4">
+          <h1 className="text-2xl font-bold text-gray-900">Rendas & Pagamentos</h1>
+          <div className="flex items-center gap-3 bg-white border border-gray-200 rounded-lg px-3 py-1.5">
             <button onClick={() => changeMonth(-1)} className="text-gray-500 hover:text-gray-700">
               <ChevronLeft className="w-4 h-4" />
             </button>
-            <span className="font-medium text-gray-800 min-w-[160px] text-center">{getMonthLabel(currentMonth)}</span>
+            <span className="font-medium text-gray-800 min-w-[140px] text-center text-sm">{getMonthLabel(currentMonth)}</span>
             <button onClick={() => changeMonth(1)} className="text-gray-500 hover:text-gray-700">
               <ChevronRight className="w-4 h-4" />
             </button>
           </div>
         </div>
 
-        <div className="grid grid-cols-6 gap-4 mb-6">
-          <div className="card text-center py-4">
-            <p className="text-xs text-gray-500 mb-1">Esperado</p>
-            <p className="text-lg font-bold text-gray-900">{formatCurrency(summary.expected)}</p>
-          </div>
-          <div className="card text-center py-4">
-            <p className="text-xs text-gray-500 mb-1">Recebido</p>
-            <p className="text-lg font-bold text-emerald-600">{formatCurrency(summary.received)}</p>
-          </div>
-          <div className="card text-center py-4">
-            <p className="text-xs text-gray-500 mb-1">Pendente mês</p>
-            <p className={`text-lg font-bold ${summary.pending > 0 ? 'text-red-600' : 'text-gray-400'}`}>
-              {formatCurrency(summary.pending)}
-            </p>
-          </div>
-          <div className="card text-center py-4 border-l-4 border-l-red-400">
-            <div className="flex items-center justify-center gap-1 mb-1">
-              <AlertTriangle className="w-3 h-3 text-red-500" />
-              <p className="text-xs text-gray-500">Total em Dívida</p>
+        {/* Resumo compacto */}
+        <div className="grid grid-cols-6 gap-3 mb-4">
+          {[
+            { label: 'Esperado', value: formatCurrency(summary.expected), color: 'text-gray-900' },
+            { label: 'Recebido', value: formatCurrency(summary.received), color: 'text-emerald-600' },
+            { label: 'Pendente mês', value: formatCurrency(summary.pending), color: summary.pending > 0 ? 'text-red-600' : 'text-gray-400' },
+            { label: 'Total em Dívida', value: formatCurrency(summary.totalDebt), color: summary.totalDebt > 0 ? 'text-red-600' : 'text-emerald-600', highlight: true },
+            { label: '💵 Dinheiro', value: formatCurrency(summary.inCash), color: 'text-gray-700' },
+            { label: '🏦 Via Banco', value: formatCurrency(summary.inBank), color: 'text-gray-700' },
+          ].map((item, i) => (
+            <div key={i} className={`bg-white rounded-lg border px-3 py-2.5 text-center ${item.highlight ? 'border-l-4 border-l-red-400 border-gray-100' : 'border-gray-100'}`}>
+              <p className="text-xs text-gray-500 mb-0.5">{item.label}</p>
+              <p className={`text-base font-bold ${item.color}`}>{item.value}</p>
             </div>
-            <p className={`text-lg font-bold ${summary.totalDebt > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
-              {formatCurrency(summary.totalDebt)}
-            </p>
-          </div>
-          <div className="card text-center py-4">
-            <div className="flex items-center justify-center gap-1 mb-1">
-              <Banknote className="w-3 h-3 text-gray-500" />
-              <p className="text-xs text-gray-500">Em Dinheiro</p>
+          ))}
+        </div>
+
+        {/* Filtros */}
+        <div className="bg-white border border-gray-100 rounded-xl shadow-sm p-3 mb-4">
+          <div className="flex gap-3 items-center">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input className="input pl-9 w-full text-sm" placeholder="Pesquisar inquilino..."
+                value={filterTenant} onChange={e => setFilterTenant(e.target.value)} />
             </div>
-            <p className="text-lg font-bold text-gray-700">{formatCurrency(summary.inCash)}</p>
+            <select className="input text-sm w-40" value={filterSpace} onChange={e => setFilterSpace(e.target.value)}>
+              <option value="">Todos os espaços</option>
+              {allSpaceRefs.map(ref => <option key={ref} value={ref}>{ref}</option>)}
+            </select>
+            <select className="input text-sm w-36" value={filterState} onChange={e => setFilterState(e.target.value as any)}>
+              <option value="all">Todos estados</option>
+              <option value="pago">✅ Pago</option>
+              <option value="parcial">🟡 Parcial</option>
+              <option value="pendente">🔴 Pendente</option>
+            </select>
+            <button onClick={() => setShowFilters(v => !v)}
+              className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-colors flex-shrink-0 ${showFilters ? 'bg-blue-50 border-blue-200 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+              <SlidersHorizontal className="w-4 h-4" />
+              Mais filtros
+            </button>
+            {hasFilters && (
+              <button onClick={resetFilters} className="flex items-center gap-1 text-xs text-red-500 hover:underline flex-shrink-0">
+                <X className="w-3.5 h-3.5" /> Limpar
+              </button>
+            )}
           </div>
-          <div className="card text-center py-4">
-            <div className="flex items-center justify-center gap-1 mb-1">
-              <Building className="w-3 h-3 text-gray-500" />
-              <p className="text-xs text-gray-500">Via Banco</p>
+
+          {showFilters && (
+            <div className="mt-3 pt-3 border-t border-gray-100 grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-medium text-gray-500 block mb-1">Dívida mínima (€)</label>
+                <input type="number" step="0.01" min="0" className="input text-sm w-full" placeholder="ex: 100"
+                  value={filterDebtMin} onChange={e => setFilterDebtMin(e.target.value)} />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 block mb-1">Dívida máxima (€)</label>
+                <input type="number" step="0.01" min="0" className="input text-sm w-full" placeholder="ex: 1000"
+                  value={filterDebtMax} onChange={e => setFilterDebtMax(e.target.value)} />
+              </div>
             </div>
-            <p className="text-lg font-bold text-gray-700">{formatCurrency(summary.inBank)}</p>
-          </div>
+          )}
+
+          {hasFilters && (
+            <p className="text-xs text-gray-500 mt-2">{filtered.length} resultado(s) de {leases.length}</p>
+          )}
         </div>
 
         {loading ? (
@@ -220,19 +307,31 @@ export default function PagamentosPage() {
             <table className="w-full">
               <thead className="bg-gray-50 border-b border-gray-100">
                 <tr>
-                  <th className="table-header">Espaço</th>
-                  <th className="table-header">Inquilino</th>
-                  <th className="table-header">Renda</th>
-                  <th className="table-header">Estado</th>
+                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('space')}>
+                    Espaço <SortIcon field="space" />
+                  </th>
+                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('tenant')}>
+                    Inquilino <SortIcon field="tenant" />
+                  </th>
+                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('rent')}>
+                    Renda <SortIcon field="rent" />
+                  </th>
+                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('state')}>
+                    Estado <SortIcon field="state" />
+                  </th>
                   <th className="table-header">Pago</th>
                   <th className="table-header">Método</th>
-                  <th className="table-header">Saldo mês</th>
-                  <th className="table-header">Total dívida</th>
+                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('balance')}>
+                    Saldo mês <SortIcon field="balance" />
+                  </th>
+                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('debt')}>
+                    Total dívida <SortIcon field="debt" />
+                  </th>
                   {isAdmin && <th className="table-header"></th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {leases.map(lease => {
+                {filtered.map(lease => {
                   const paid = lease.payments_this_month.reduce((s, p) => s + p.amount, 0)
                   const isPaid = paid >= lease.monthly_rent
                   const isPartial = paid > 0 && !isPaid
@@ -299,8 +398,7 @@ export default function PagamentosPage() {
                       </td>
                       {isAdmin && (
                         <td className="table-cell">
-                          <button
-                            onClick={() => { setSelectedLease(lease); setShowModal(true) }}
+                          <button onClick={() => { setSelectedLease(lease); setShowModal(true) }}
                             className="btn-primary text-xs py-1.5 px-3">
                             <Plus className="w-3 h-3" /> Registar
                           </button>
@@ -309,6 +407,13 @@ export default function PagamentosPage() {
                     </tr>
                   )
                 })}
+                {filtered.length === 0 && (
+                  <tr>
+                    <td colSpan={isAdmin ? 9 : 8} className="py-12 text-center text-gray-400 text-sm">
+                      Nenhum resultado encontrado
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
