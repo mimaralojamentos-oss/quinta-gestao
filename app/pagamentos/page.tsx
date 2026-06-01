@@ -1,10 +1,10 @@
 'use client'
 
 import AppLayout from '@/components/layout/AppLayout'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency, getMonthLabel, getCurrentMonth } from '@/lib/utils'
-import { Plus, ChevronLeft, ChevronRight, CheckCircle, Clock, Banknote, Building, AlertTriangle, Search, SlidersHorizontal, X, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react'
+import { Plus, ChevronLeft, ChevronRight, CheckCircle, Clock, Banknote, Building, AlertTriangle, Search, SlidersHorizontal, X, ArrowUpDown, ArrowUp, ArrowDown, ChevronDown } from 'lucide-react'
 import PaymentModal from './PaymentModal'
 import { useAuth } from '@/lib/auth-context'
 
@@ -47,7 +47,9 @@ export default function PagamentosPage() {
   // Filtros
   const [showFilters, setShowFilters] = useState(false)
   const [filterTenant, setFilterTenant] = useState('')
-  const [filterSpace, setFilterSpace] = useState('')
+  const [filterSpaces, setFilterSpaces] = useState<string[]>([])
+  const [showSpaceDropdown, setShowSpaceDropdown] = useState(false)
+  const spaceDropdownRef = useRef<HTMLDivElement>(null)
   const [filterState, setFilterState] = useState<'all' | 'pago' | 'parcial' | 'pendente'>('all')
   const [filterDebtMin, setFilterDebtMin] = useState('')
   const [filterDebtMax, setFilterDebtMax] = useState('')
@@ -56,8 +58,18 @@ export default function PagamentosPage() {
   const [sortField, setSortField] = useState<SortField>(null)
   const [sortDir, setSortDir] = useState<SortDir>('asc')
 
-  // Lista de espaços para dropdown
   const [allSpaceRefs, setAllSpaceRefs] = useState<string[]>([])
+
+  // Fechar dropdown ao clicar fora
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (spaceDropdownRef.current && !spaceDropdownRef.current.contains(e.target as Node)) {
+        setShowSpaceDropdown(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   useEffect(() => { fetchData() }, [currentMonth])
 
@@ -170,12 +182,16 @@ export default function PagamentosPage() {
       : <ArrowDown className="w-3 h-3 text-emerald-600 ml-1 inline" />
   }
 
+  function toggleSpace(ref: string) {
+    setFilterSpaces(prev => prev.includes(ref) ? prev.filter(r => r !== ref) : [...prev, ref])
+  }
+
   function resetFilters() {
-    setFilterTenant(''); setFilterSpace(''); setFilterState('all')
+    setFilterTenant(''); setFilterSpaces([]); setFilterState('all')
     setFilterDebtMin(''); setFilterDebtMax('')
   }
 
-  const hasFilters = filterTenant || filterSpace || filterState !== 'all' || filterDebtMin || filterDebtMax
+  const hasFilters = filterTenant || filterSpaces.length > 0 || filterState !== 'all' || filterDebtMin || filterDebtMax
 
   const filtered = leases.filter(l => {
     const paid = l.payments_this_month.reduce((s, p) => s + p.amount, 0)
@@ -183,7 +199,7 @@ export default function PagamentosPage() {
     const isPartial = paid > 0 && !isPaid
 
     if (filterTenant && !l.tenant?.name?.toLowerCase().includes(filterTenant.toLowerCase())) return false
-    if (filterSpace && l.space?.ref !== filterSpace) return false
+    if (filterSpaces.length > 0 && !filterSpaces.includes(l.space?.ref)) return false
     if (filterState === 'pago' && !isPaid) return false
     if (filterState === 'parcial' && !isPartial) return false
     if (filterState === 'pendente' && (isPaid || isPartial)) return false
@@ -251,21 +267,52 @@ export default function PagamentosPage() {
         {/* Filtros */}
         <div className="bg-white border border-gray-100 rounded-xl shadow-sm p-3 mb-4">
           <div className="flex gap-3 items-center">
+            {/* Pesquisa inquilino */}
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input className="input pl-9 w-full text-sm" placeholder="Pesquisar inquilino..."
                 value={filterTenant} onChange={e => setFilterTenant(e.target.value)} />
             </div>
-            <select className="input text-sm w-40" value={filterSpace} onChange={e => setFilterSpace(e.target.value)}>
-              <option value="">Todos os espaços</option>
-              {allSpaceRefs.map(ref => <option key={ref} value={ref}>{ref}</option>)}
-            </select>
+
+            {/* Dropdown espaços múltiplos */}
+            <div className="relative w-48" ref={spaceDropdownRef}>
+              <button
+                onClick={() => setShowSpaceDropdown(!showSpaceDropdown)}
+                className={`input w-full flex items-center justify-between text-left text-sm ${filterSpaces.length > 0 ? 'border-emerald-400 text-emerald-700' : 'text-gray-600'}`}>
+                <span className="truncate">
+                  {filterSpaces.length === 0 ? 'Todos os espaços' : filterSpaces.length === 1 ? filterSpaces[0] : `${filterSpaces.length} espaços`}
+                </span>
+                <ChevronDown className="w-4 h-4 flex-shrink-0 ml-2" />
+              </button>
+              {showSpaceDropdown && (
+                <div className="absolute z-20 top-full mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-64 overflow-y-auto">
+                  <div className="p-2 border-b border-gray-100">
+                    <button onClick={() => setFilterSpaces([])} className="text-xs text-gray-500 hover:text-emerald-600 hover:underline">
+                      Limpar seleção
+                    </button>
+                  </div>
+                  <div className="p-2 grid grid-cols-3 gap-1">
+                    {allSpaceRefs.map(ref => (
+                      <label key={ref} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-50 cursor-pointer">
+                        <input type="checkbox" checked={filterSpaces.includes(ref)} onChange={() => toggleSpace(ref)}
+                          className="accent-emerald-600 w-3.5 h-3.5" />
+                        <span className="text-sm text-gray-700">{ref}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Estado */}
             <select className="input text-sm w-36" value={filterState} onChange={e => setFilterState(e.target.value as any)}>
               <option value="all">Todos estados</option>
               <option value="pago">✅ Pago</option>
               <option value="parcial">🟡 Parcial</option>
               <option value="pendente">🔴 Pendente</option>
             </select>
+
+            {/* Mais filtros */}
             <button onClick={() => setShowFilters(v => !v)}
               className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-colors flex-shrink-0 ${showFilters ? 'bg-blue-50 border-blue-200 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
               <SlidersHorizontal className="w-4 h-4" />
