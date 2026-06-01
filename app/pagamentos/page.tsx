@@ -4,7 +4,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency, getMonthLabel, getCurrentMonth } from '@/lib/utils'
-import { Plus, ChevronLeft, ChevronRight, CheckCircle, Clock, Banknote, Building } from 'lucide-react'
+import { Plus, ChevronLeft, ChevronRight, CheckCircle, Clock, Banknote, Building, AlertTriangle } from 'lucide-react'
 import PaymentModal from './PaymentModal'
 import { useAuth } from '@/lib/auth-context'
 
@@ -12,7 +12,7 @@ interface LeaseWithDetails {
   id: string
   monthly_rent: number
   space: { ref: string; type: string }
-  tenant: { name: string; phone: string }
+  tenant: { id: string; name: string; phone: string }
   payments_this_month: {
     id: string
     amount: number
@@ -22,6 +22,7 @@ interface LeaseWithDetails {
     notes: string
   }[]
   balance: number
+  total_debt: number
 }
 
 const tipoLabels: Record<string, string> = {
@@ -38,13 +39,16 @@ export default function PagamentosPage() {
   const [currentMonth, setCurrentMonth] = useState(getCurrentMonth())
   const [showModal, setShowModal] = useState(false)
   const [selectedLease, setSelectedLease] = useState<LeaseWithDetails | null>(null)
-  const [summary, setSummary] = useState({ expected: 0, received: 0, pending: 0, inCash: 0, inBank: 0 })
+  const [summary, setSummary] = useState({ expected: 0, received: 0, pending: 0, inCash: 0, inBank: 0, totalDebt: 0 })
 
   useEffect(() => { fetchData() }, [currentMonth])
 
   async function fetchData() {
     setLoading(true)
     const nextMonth = getNextMonth(currentMonth)
+    const mayStart = '2026-05-01'
+    const today = new Date(); today.setDate(1)
+    const todayStr = today.toISOString().slice(0, 10)
 
     const { data: leasesData } = await supabase
       .from('leases')
@@ -57,16 +61,69 @@ export default function PagamentosPage() {
       .gte('reference_month', currentMonth)
       .lt('reference_month', nextMonth)
 
+    // Todos os pagamentos para calcular dívidas acumuladas
+    const { data: allPayments } = await supabase
+      .from('rent_payments')
+      .select('lease_id, amount, payment_date, reference_month, tipo')
+
+    // Dívidas manuais
+    const { data: debtsData } = await supabase
+      .from('debts')
+      .select('id, tenant_id, original_amount')
+
+    const { data: debtPaymentsData } = await supabase
+      .from('debt_payments')
+      .select('debt_id, amount')
+
+    // Cobranças de eletricidade por pagar
+    const { data: elecCharges } = await supabase
+      .from('electricity_charges')
+      .select('lease_id, amount')
+      .eq('paid', false)
+
     const mapped: LeaseWithDetails[] = (leasesData ?? []).map(l => {
-      const payments = (paymentsData ?? []).filter(p => p.lease_id === l.id)
-      const totalPaid = payments.filter(p => p.tipo === 'renda' || !p.tipo).reduce((s, p) => s + p.amount, 0)
+      const paymentsThisMonth = (paymentsData ?? []).filter(p => p.lease_id === l.id)
+      const totalPaid = paymentsThisMonth.filter(p => p.tipo === 'renda' || !p.tipo).reduce((s, p) => s + p.amount, 0)
+
+      // Calcular dívida acumulada de rendas
+      let rentDebt = 0
+      if (l.start_date) {
+        const contractStart = new Date(l.start_date); contractStart.setDate(1)
+        const start = new Date(Math.max(contractStart.getTime(), new Date(mayStart).getTime()))
+        const cursor = new Date(start)
+        while (cursor <= today) {
+          const monthStr = cursor.toISOString().slice(0, 7)
+          const hasPayment = (allPayments ?? []).some(p =>
+            p.lease_id === l.id &&
+            p.reference_month?.slice(0, 7) === monthStr &&
+            p.payment_date &&
+            (p.tipo === 'renda' || !p.tipo)
+          )
+          if (!hasPayment) rentDebt += l.monthly_rent
+          cursor.setMonth(cursor.getMonth() + 1)
+        }
+      }
+
+      // Dívidas manuais
+      const tenantDebts = (debtsData ?? []).filter(d => d.tenant_id === l.tenant?.id)
+      const manualDebt = tenantDebts.reduce((sum, d) => {
+        const paid = (debtPaymentsData ?? []).filter(p => p.debt_id === d.id).reduce((s, p) => s + p.amount, 0)
+        return sum + Math.max(0, d.original_amount - paid)
+      }, 0)
+
+      // Eletricidade por pagar
+      const elecDebt = (elecCharges ?? []).filter(c => c.lease_id === l.id).reduce((s, c) => s + c.amount, 0)
+
+      const total_debt = rentDebt + manualDebt + elecDebt
+
       return {
         id: l.id,
         monthly_rent: l.monthly_rent,
         space: l.space,
         tenant: l.tenant,
-        payments_this_month: payments,
+        payments_this_month: paymentsThisMonth,
         balance: totalPaid - l.monthly_rent,
+        total_debt,
       }
     })
 
@@ -84,7 +141,8 @@ export default function PagamentosPage() {
     const received = rentaPayments.reduce((s, p) => s + p.amount, 0)
     const inCash = rentaPayments.filter(p => p.payment_method === 'dinheiro').reduce((s, p) => s + p.amount, 0)
     const inBank = rentaPayments.filter(p => p.payment_method !== 'dinheiro').reduce((s, p) => s + p.amount, 0)
-    setSummary({ expected, received, pending: expected - received, inCash, inBank })
+    const totalDebt = mapped.reduce((s, l) => s + l.total_debt, 0)
+    setSummary({ expected, received, pending: expected - received, inCash, inBank, totalDebt })
 
     setLoading(false)
   }
@@ -113,7 +171,7 @@ export default function PagamentosPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-5 gap-4 mb-6">
+        <div className="grid grid-cols-6 gap-4 mb-6">
           <div className="card text-center py-4">
             <p className="text-xs text-gray-500 mb-1">Esperado</p>
             <p className="text-lg font-bold text-gray-900">{formatCurrency(summary.expected)}</p>
@@ -123,9 +181,18 @@ export default function PagamentosPage() {
             <p className="text-lg font-bold text-emerald-600">{formatCurrency(summary.received)}</p>
           </div>
           <div className="card text-center py-4">
-            <p className="text-xs text-gray-500 mb-1">Pendente</p>
+            <p className="text-xs text-gray-500 mb-1">Pendente mês</p>
             <p className={`text-lg font-bold ${summary.pending > 0 ? 'text-red-600' : 'text-gray-400'}`}>
               {formatCurrency(summary.pending)}
+            </p>
+          </div>
+          <div className="card text-center py-4 border-l-4 border-l-red-400">
+            <div className="flex items-center justify-center gap-1 mb-1">
+              <AlertTriangle className="w-3 h-3 text-red-500" />
+              <p className="text-xs text-gray-500">Total em Dívida</p>
+            </div>
+            <p className={`text-lg font-bold ${summary.totalDebt > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+              {formatCurrency(summary.totalDebt)}
             </p>
           </div>
           <div className="card text-center py-4">
@@ -159,7 +226,8 @@ export default function PagamentosPage() {
                   <th className="table-header">Estado</th>
                   <th className="table-header">Pago</th>
                   <th className="table-header">Método</th>
-                  <th className="table-header">Saldo</th>
+                  <th className="table-header">Saldo mês</th>
+                  <th className="table-header">Total dívida</th>
                   {isAdmin && <th className="table-header"></th>}
                 </tr>
               </thead>
@@ -220,14 +288,21 @@ export default function PagamentosPage() {
                           {lease.balance >= 0 ? '+' : ''}{formatCurrency(lease.balance)}
                         </span>
                       </td>
+                      <td className="table-cell">
+                        {lease.total_debt > 0 ? (
+                          <span className="text-sm font-semibold text-red-600 bg-red-50 px-2 py-0.5 rounded-full">
+                            {formatCurrency(lease.total_debt)}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-emerald-600 font-medium">✓</span>
+                        )}
+                      </td>
                       {isAdmin && (
                         <td className="table-cell">
                           <button
                             onClick={() => { setSelectedLease(lease); setShowModal(true) }}
-                            className="btn-primary text-xs py-1.5 px-3"
-                          >
-                            <Plus className="w-3 h-3" />
-                            Registar
+                            className="btn-primary text-xs py-1.5 px-3">
+                            <Plus className="w-3 h-3" /> Registar
                           </button>
                         </td>
                       )}
@@ -257,3 +332,5 @@ function getNextMonth(dateString: string): string {
   d.setMonth(d.getMonth() + 1)
   return d.toISOString().slice(0, 10)
 }
+
+// https://quinta-gestao.vercel.app/pagamentos
