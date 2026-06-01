@@ -68,7 +68,6 @@ export default function InquilinosPage() {
   const [newDebt, setNewDebt] = useState({ description: '', original_amount: '', reference_date: new Date().toISOString().slice(0, 10) })
   const [newPayment, setNewPayment] = useState({ payment_date: new Date().toISOString().slice(0, 10), amount: '', payment_method: 'dinheiro', notes: '' })
 
-  // Fechar dropdown ao clicar fora
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       if (spaceDropdownRef.current && !spaceDropdownRef.current.contains(e.target as Node)) {
@@ -90,6 +89,12 @@ export default function InquilinosPage() {
     const { data: debtsData } = await supabase.from('debts').select('id, tenant_id, original_amount')
     const { data: debtPaymentsData } = await supabase.from('debt_payments').select('debt_id, amount')
 
+    // Cobranças de eletricidade por pagar
+    const { data: elecChargesData } = await supabase
+      .from('electricity_charges')
+      .select('lease_id, amount')
+      .eq('paid', false)
+
     const mayStart = new Date('2026-05-01')
     const today = new Date()
     today.setDate(1)
@@ -100,7 +105,11 @@ export default function InquilinosPage() {
       const leases = (leasesData ?? []).filter(l => l.tenant_id === t.id)
       const spaces = (spacesData ?? []).filter(s => s.tenant_id === t.id)
       const leaseIds = leases.map(l => l.id)
-      const explicitDebt = (paymentsData ?? []).filter(p => leaseIds.includes(p.lease_id) && !p.payment_date).reduce((sum, p) => sum + (p.amount ?? 0), 0)
+
+      const explicitDebt = (paymentsData ?? [])
+        .filter(p => leaseIds.includes(p.lease_id) && !p.payment_date)
+        .reduce((sum, p) => sum + (p.amount ?? 0), 0)
+
       let missingDebt = 0
       for (const lease of leases.filter(l => l.status === 'ativo')) {
         if (!lease.start_date) continue
@@ -110,17 +119,31 @@ export default function InquilinosPage() {
         const cursor = new Date(start)
         while (cursor <= today) {
           const monthStr = cursor.toISOString().slice(0, 7)
-          const hasPayment = (paymentsData ?? []).some(p => p.lease_id === lease.id && p.reference_month?.slice(0, 7) === monthStr && (p.tipo === 'renda' || !p.tipo))
+          const hasPayment = (paymentsData ?? []).some(p =>
+            p.lease_id === lease.id &&
+            p.reference_month?.slice(0, 7) === monthStr &&
+            (p.tipo === 'renda' || !p.tipo)
+          )
           if (!hasPayment) missingDebt += lease.monthly_rent
           cursor.setMonth(cursor.getMonth() + 1)
         }
       }
+
+      // Dívidas manuais pendentes
       const tenantDebts = (debtsData ?? []).filter(d => d.tenant_id === t.id)
       const manualDebt = tenantDebts.reduce((sum, d) => {
-        const paid = (debtPaymentsData ?? []).filter(p => p.debt_id === d.id).reduce((s, p) => s + p.amount, 0)
+        const paid = (debtPaymentsData ?? [])
+          .filter(p => p.debt_id === d.id)
+          .reduce((s, p) => s + p.amount, 0)
         return sum + Math.max(0, d.original_amount - paid)
       }, 0)
-      return { ...t, leases, spaces, debt: explicitDebt + missingDebt + manualDebt }
+
+      // Cobranças de eletricidade por pagar
+      const elecDebt = (elecChargesData ?? [])
+        .filter(c => leaseIds.includes(c.lease_id))
+        .reduce((sum, c) => sum + (c.amount ?? 0), 0)
+
+      return { ...t, leases, spaces, debt: explicitDebt + missingDebt + manualDebt + elecDebt }
     })
     setTenants(tenantsWithData)
     setLoading(false)
@@ -204,12 +227,8 @@ export default function InquilinosPage() {
   }
 
   function handleSort(field: SortField) {
-    if (sortField === field) {
-      setSortDir(d => d === 'asc' ? 'desc' : 'asc')
-    } else {
-      setSortField(field)
-      setSortDir('asc')
-    }
+    if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortField(field); setSortDir('asc') }
   }
 
   function SortIcon({ field }: { field: SortField }) {
@@ -220,9 +239,7 @@ export default function InquilinosPage() {
   }
 
   function toggleSpace(ref: string) {
-    setFilterSpaces(prev =>
-      prev.includes(ref) ? prev.filter(r => r !== ref) : [...prev, ref]
-    )
+    setFilterSpaces(prev => prev.includes(ref) ? prev.filter(r => r !== ref) : [...prev, ref])
   }
 
   const today = new Date()
@@ -296,8 +313,6 @@ export default function InquilinosPage() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input className="input pl-9 w-full" placeholder="Nome, telefone, email..." value={search} onChange={e => setSearch(e.target.value)} />
           </div>
-
-          {/* Dropdown espaços múltiplos */}
           <div className="relative" ref={spaceDropdownRef}>
             <button
               onClick={() => setShowSpaceDropdown(!showSpaceDropdown)}
@@ -310,20 +325,14 @@ export default function InquilinosPage() {
             {showSpaceDropdown && (
               <div className="absolute z-20 top-full mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-64 overflow-y-auto">
                 <div className="p-2 border-b border-gray-100">
-                  <button onClick={() => setFilterSpaces([])}
-                    className="text-xs text-gray-500 hover:text-emerald-600 hover:underline">
+                  <button onClick={() => setFilterSpaces([])} className="text-xs text-gray-500 hover:text-emerald-600 hover:underline">
                     Limpar seleção
                   </button>
                 </div>
                 <div className="p-2 grid grid-cols-3 gap-1">
                   {allSpaceRefs.map(ref => (
                     <label key={ref} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-50 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={filterSpaces.includes(ref)}
-                        onChange={() => toggleSpace(ref)}
-                        className="accent-emerald-600 w-3.5 h-3.5"
-                      />
+                      <input type="checkbox" checked={filterSpaces.includes(ref)} onChange={() => toggleSpace(ref)} className="accent-emerald-600 w-3.5 h-3.5" />
                       <span className="text-sm text-gray-700">{ref}</span>
                     </label>
                   ))}
@@ -331,7 +340,6 @@ export default function InquilinosPage() {
               </div>
             )}
           </div>
-
           <select className="input" value={filterSpaceType} onChange={e => setFilterSpaceType(e.target.value as any)}>
             <option value="all">Todos os tipos</option>
             <option value="pavilhao">🏭 Pavilhões</option>
