@@ -3,6 +3,8 @@ import { NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { createHash } from 'crypto'
 
+const CASH_FUND_START_DATE = '2026-06-01'
+
 export async function POST(request: Request) {
   try {
     const formData = await request.formData()
@@ -34,6 +36,15 @@ export async function POST(request: Request) {
       if (existing) {
         return NextResponse.json({ duplicate: true, existing, message: 'Este ficheiro já foi carregado anteriormente' })
       }
+    }
+
+    // Detetar método de pagamento pelo nome do ficheiro
+    // (D) = dinheiro, (B) = banco, default = banco
+    function detectPaymentMethod(fileName: string): string {
+      const upper = fileName.toUpperCase()
+      if (upper.includes('(D)') || upper.includes('(D).PDF')) return 'dinheiro'
+      if (upper.includes('(B)') || upper.includes('(B).PDF')) return 'banco'
+      return 'banco'
     }
 
     // OCR com Claude AI
@@ -150,7 +161,6 @@ export async function POST(request: Request) {
         .single()
 
       if (meter && extracted.edp_reading_date) {
-        // Verificar se já existe leitura para esta data neste quadro
         const { data: existingReading } = await supabase
           .from('meter_readings')
           .select('id')
@@ -178,6 +188,9 @@ export async function POST(request: Request) {
     let expenseId = null
 
     if (isFatura && doc && extracted.amount && extracted.doc_date) {
+      // Detetar método de pagamento pelo nome do ficheiro
+      const paymentMethod = detectPaymentMethod(file.name)
+
       const dateFrom = new Date(extracted.doc_date)
       dateFrom.setDate(dateFrom.getDate() - 1)
       const dateTo = new Date(extracted.doc_date)
@@ -192,6 +205,10 @@ export async function POST(request: Request) {
         .limit(1).single()
 
       if (existingExpense) {
+        // Atualizar método de pagamento da despesa existente
+        await supabase.from('expenses')
+          .update({ payment_method: paymentMethod })
+          .eq('id', existingExpense.id)
         await supabase.from('documents').update({ expense_id: existingExpense.id }).eq('id', doc.id)
         expenseId = existingExpense.id
       } else {
@@ -201,7 +218,7 @@ export async function POST(request: Request) {
           type: 'pontual',
           description: extracted.items_summary ?? extracted.supplier_name ?? 'Fatura',
           amount: extracted.amount,
-          payment_method: 'banco',
+          payment_method: paymentMethod,
           supplier: extracted.supplier_name ?? null,
           notes: `Criado automaticamente a partir do documento ${extracted.doc_number ?? ''}`.trim(),
         }).select().single()
@@ -210,6 +227,20 @@ export async function POST(request: Request) {
           await supabase.from('documents').update({ expense_id: newExpense.id }).eq('id', doc.id)
           expenseId = newExpense.id
           autoExpense = true
+
+          // Criar movimento no Fundo de Maneio se:
+          // - pagamento a dinheiro
+          // - data >= 01/06/2026
+          if (paymentMethod === 'dinheiro' && extracted.doc_date >= CASH_FUND_START_DATE) {
+            await supabase.from('cash_fund_movements').insert({
+              movement_date: extracted.doc_date,
+              description: `💸 ${extracted.items_summary ?? extracted.supplier_name ?? 'Fatura'}`,
+              amount: -Math.abs(extracted.amount),
+              type: 'saida',
+              source: 'despesa',
+              source_id: newExpense.id,
+            })
+          }
         }
       }
     }
@@ -221,3 +252,5 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: e.message }, { status: 500 })
   }
 }
+
+// https://quinta-gestao.vercel.app/documentos
