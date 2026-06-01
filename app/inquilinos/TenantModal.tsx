@@ -16,6 +16,7 @@ const tipoConfig = {
   caucao: { label: '🔒 Caução' },
   extra:  { label: '➕ Extra' },
   luz:    { label: '⚡ Luz' },
+  divida: { label: '⚠️ Dívida' },
 }
 
 interface PaymentRow {
@@ -29,16 +30,16 @@ interface PaymentRow {
   notes?: string | null
   lease?: any
   isMissing?: boolean
+  isManualDebt?: boolean
+  remainingAmount?: number
 }
 
 export default function TenantModal({ tenant, onClose, onSaved }: Props) {
   const isNew = !tenant
 
-  // Modo de criação: 'escolha' | 'manual' | 'ocr'
   const [createMode, setCreateMode] = useState<'escolha' | 'manual' | 'ocr'>('escolha')
   const [step, setStep] = useState<1 | 2>(1)
   const [newTenantId, setNewTenantId] = useState<string | null>(null)
-
   const [tab, setTab] = useState<'dados' | 'espacos' | 'conta'>('dados')
 
   const [form, setForm] = useState({
@@ -51,47 +52,31 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
-  // OCR
   const [contractFile, setContractFile] = useState<File | null>(null)
   const [processingOCR, setProcessingOCR] = useState(false)
   const [ocrDone, setOcrDone] = useState(false)
   const [ocrError, setOcrError] = useState('')
 
-  // Contrato
   const [spaces, setSpaces] = useState<any[]>([])
   const [contractForm, setContractForm] = useState({
-    space_id: '',
-    monthly_rent: '',
-    deposit: '',
-    start_date: '',
-    end_date: '',
-    notes: '',
-    status: 'ativo',
-    skip: false,
+    space_id: '', monthly_rent: '', deposit: '', start_date: '', end_date: '', notes: '', status: 'ativo', skip: false,
   })
   const [savingContract, setSavingContract] = useState(false)
   const [contractError, setContractError] = useState('')
 
-  // Espaços (edição)
   const [allSpaces, setAllSpaces] = useState<any[]>([])
   const [assignedSpaces, setAssignedSpaces] = useState<string[]>([])
   const [savingSpaces, setSavingSpaces] = useState(false)
 
-  // Conta corrente (edição)
   const [payments, setPayments] = useState<PaymentRow[]>([])
   const [leases, setLeases] = useState<any[]>([])
   const [loadingPayments, setLoadingPayments] = useState(false)
   const [showPaymentForm, setShowPaymentForm] = useState(false)
   const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null)
   const [paymentForm, setPaymentForm] = useState({
-    lease_id: '',
-    reference_month: new Date().toISOString().slice(0, 7),
-    amount: '',
-    payment_date: new Date().toISOString().slice(0, 10),
-    payment_method: 'dinheiro',
-    tipo: 'renda',
-    notes: '',
-    is_debt: false,
+    lease_id: '', reference_month: new Date().toISOString().slice(0, 7), amount: '',
+    payment_date: new Date().toISOString().slice(0, 10), payment_method: 'dinheiro',
+    tipo: 'renda', notes: '', is_debt: false,
   })
   const [savingPayment, setSavingPayment] = useState(false)
   const [paymentError, setPaymentError] = useState('')
@@ -103,10 +88,7 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
       setAllSpaces(data ?? [])
     }
     loadSpaces()
-    if (tenant) {
-      fetchSpaces()
-      fetchPayments()
-    }
+    if (tenant) { fetchSpaces(); fetchPayments() }
   }, [tenant])
 
   async function fetchSpaces() {
@@ -120,20 +102,28 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
     if (!tenant) return
     setLoadingPayments(true)
     const { data: leasesData } = await supabase
-      .from('leases')
-      .select('id, space:spaces(ref), monthly_rent, status, start_date')
+      .from('leases').select('id, space:spaces(ref), monthly_rent, status, start_date')
       .eq('tenant_id', tenant.id)
     setLeases(leasesData ?? [])
-    if (!leasesData || leasesData.length === 0) { setPayments([]); setLoadingPayments(false); return }
-    const activeLease = leasesData.find(l => l.status === 'ativo')
+
+    const leaseIds = (leasesData ?? []).map(l => l.id)
+    const activeLease = (leasesData ?? []).find(l => l.status === 'ativo')
     if (activeLease) setPaymentForm(f => ({ ...f, lease_id: activeLease.id, amount: String(activeLease.monthly_rent) }))
-    const leaseIds = leasesData.map(l => l.id)
-    const { data: pays } = await supabase.from('rent_payments').select('*').in('lease_id', leaseIds).order('reference_month', { ascending: false })
-    const enriched: PaymentRow[] = (pays ?? []).map(p => ({ ...p, lease: leasesData.find(l => l.id === p.lease_id), isMissing: false }))
+
+    // Pagamentos normais
+    const { data: pays } = leaseIds.length > 0
+      ? await supabase.from('rent_payments').select('*').in('lease_id', leaseIds).order('reference_month', { ascending: false })
+      : { data: [] }
+
+    const enriched: PaymentRow[] = (pays ?? []).map(p => ({
+      ...p, lease: (leasesData ?? []).find(l => l.id === p.lease_id), isMissing: false, isManualDebt: false
+    }))
+
+    // Rendas em falta
     const missingRows: PaymentRow[] = []
     const mayStart = new Date('2026-05-01')
     const today = new Date(); today.setDate(1)
-    for (const lease of leasesData.filter(l => l.status === 'ativo')) {
+    for (const lease of (leasesData ?? []).filter(l => l.status === 'ativo')) {
       if (!lease.start_date) continue
       const contractStart = new Date(lease.start_date); contractStart.setDate(1)
       const start = contractStart > mayStart ? contractStart : mayStart
@@ -141,19 +131,42 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
       while (cursor <= today) {
         const monthStr = cursor.toISOString().slice(0, 7)
         const hasPayment = enriched.some(p => p.lease_id === lease.id && p.reference_month?.slice(0, 7) === monthStr && (p.tipo === 'renda' || !p.tipo))
-        if (!hasPayment) missingRows.push({ reference_month: monthStr + '-01', amount: lease.monthly_rent, payment_date: null, payment_method: null, tipo: 'renda', lease, isMissing: true })
+        if (!hasPayment) missingRows.push({
+          reference_month: monthStr + '-01', amount: lease.monthly_rent,
+          payment_date: null, payment_method: null, tipo: 'renda', lease, isMissing: true, isManualDebt: false
+        })
         cursor.setMonth(cursor.getMonth() + 1)
       }
     }
-    setPayments([...enriched, ...missingRows].sort((a, b) => b.reference_month.localeCompare(a.reference_month)))
+
+    // Dívidas manuais
+    const { data: debtsData } = await supabase.from('debts').select('*, payments:debt_payments(*)').eq('tenant_id', tenant.id).order('reference_date', { ascending: false })
+    const manualDebtRows: PaymentRow[] = (debtsData ?? []).map(d => {
+      const paid = (d.payments ?? []).reduce((s: number, p: any) => s + p.amount, 0)
+      const remaining = Math.max(0, d.original_amount - paid)
+      return {
+        id: d.id,
+        reference_month: d.reference_date,
+        amount: d.original_amount,
+        remainingAmount: remaining,
+        payment_date: remaining === 0 ? 'liquidada' : null,
+        payment_method: null,
+        tipo: 'divida',
+        notes: d.description,
+        isMissing: false,
+        isManualDebt: true,
+      }
+    })
+
+    const allRows = [...enriched, ...missingRows, ...manualDebtRows]
+      .sort((a, b) => b.reference_month.localeCompare(a.reference_month))
+
+    setPayments(allRows)
     setLoadingPayments(false)
   }
 
   async function handleOCR(file: File) {
-    setContractFile(file)
-    setOcrDone(false)
-    setOcrError('')
-    setProcessingOCR(true)
+    setContractFile(file); setOcrDone(false); setOcrError(''); setProcessingOCR(true)
     try {
       const formData = new FormData()
       formData.append('file', file)
@@ -161,28 +174,10 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
       const result = await res.json()
       if (result.error) { setOcrError('Erro no OCR: ' + result.error); setProcessingOCR(false); return }
       const d = result.data
-      // Preencher dados do inquilino
-      setForm(f => ({
-        ...f,
-        name: d.tenant_name ?? f.name,
-        nif: d.tenant_nif ?? f.nif,
-        phone: d.tenant_phone ?? f.phone,
-        email: d.tenant_email ?? f.email,
-      }))
-      // Preencher dados do contrato
-      setContractForm(f => ({
-        ...f,
-        monthly_rent: d.monthly_rent ? String(d.monthly_rent) : f.monthly_rent,
-        deposit: d.deposit ? String(d.deposit) : f.deposit,
-        start_date: d.start_date ?? f.start_date,
-        end_date: d.end_date ?? f.end_date,
-        notes: d.notes ?? f.notes,
-      }))
-      setOcrDone(true)
-      setStep(2) // avançar automaticamente para o passo 2
-    } catch (e: any) {
-      setOcrError('Erro: ' + e.message)
-    }
+      setForm(f => ({ ...f, name: d.tenant_name ?? f.name, nif: d.tenant_nif ?? f.nif, phone: d.tenant_phone ?? f.phone, email: d.tenant_email ?? f.email }))
+      setContractForm(f => ({ ...f, monthly_rent: d.monthly_rent ? String(d.monthly_rent) : f.monthly_rent, deposit: d.deposit ? String(d.deposit) : f.deposit, start_date: d.start_date ?? f.start_date, end_date: d.end_date ?? f.end_date, notes: d.notes ?? f.notes }))
+      setOcrDone(true); setStep(2)
+    } catch (e: any) { setOcrError('Erro: ' + e.message) }
     setProcessingOCR(false)
   }
 
@@ -194,8 +189,7 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
       const { data, error: err } = await supabase.from('tenants').insert(payload).select().single()
       setSaving(false)
       if (err) { setError(err.message); return }
-      setNewTenantId(data.id)
-      setStep(2)
+      setNewTenantId(data.id); setStep(2)
     } else {
       const { error: err } = await supabase.from('tenants').update(payload).eq('id', tenant!.id)
       setSaving(false)
@@ -210,8 +204,6 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
     setSavingContract(true); setContractError('')
     const tenantId = newTenantId!
     let contractPath = null
-
-    // Upload do PDF se veio do OCR
     if (contractFile) {
       const cleanName = contractFile.name.replace(/[^a-zA-Z0-9._-]/g, '_')
       const filename = `contracts/${tenantId}/${Date.now()}_${cleanName}`
@@ -219,21 +211,14 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
       await supabase.storage.from('documents').upload(filename, bytes, { contentType: 'application/pdf' })
       contractPath = filename
     }
-
     const { error: err } = await supabase.from('leases').insert({
-      space_id: contractForm.space_id,
-      tenant_id: tenantId,
+      space_id: contractForm.space_id, tenant_id: tenantId,
       monthly_rent: parseFloat(contractForm.monthly_rent),
       deposit: contractForm.deposit ? parseFloat(contractForm.deposit) : null,
-      start_date: contractForm.start_date,
-      end_date: contractForm.end_date || null,
-      notes: contractForm.notes || null,
-      status: contractForm.status,
-      contract_file_path: contractPath,
+      start_date: contractForm.start_date, end_date: contractForm.end_date || null,
+      notes: contractForm.notes || null, status: contractForm.status, contract_file_path: contractPath,
     })
-    if (!err) {
-      await supabase.from('spaces').update({ status: 'arrendado', tenant_id: tenantId }).eq('id', contractForm.space_id)
-    }
+    if (!err) await supabase.from('spaces').update({ status: 'arrendado', tenant_id: tenantId }).eq('id', contractForm.space_id)
     setSavingContract(false)
     if (err) { setContractError(err.message); return }
     onSaved()
@@ -291,9 +276,11 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
     await fetchPayments()
   }
 
-  const totalDebt = payments.filter(p => !p.payment_date).reduce((sum, p) => sum + (p.amount ?? 0), 0)
+  const totalDebt = payments
+    .filter(p => !p.payment_date || p.payment_date === null)
+    .filter(p => p.payment_date !== 'liquidada')
+    .reduce((sum, p) => sum + (p.isManualDebt ? (p.remainingAmount ?? 0) : (p.amount ?? 0)), 0)
 
-  // Título dinâmico
   const getTitle = () => {
     if (!isNew) return tenant!.name
     if (createMode === 'escolha') return 'Novo Inquilino'
@@ -304,19 +291,14 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6 max-h-[90vh] flex flex-col">
-
-        {/* Header */}
         <div className="flex items-center justify-between mb-4">
           <div>
             <h2 className="font-semibold text-lg text-gray-900">{getTitle()}</h2>
-            {isNew && createMode !== 'escolha' && (
-              <p className="text-xs text-gray-400 mt-0.5">Passo {step} de 2</p>
-            )}
+            {isNew && createMode !== 'escolha' && <p className="text-xs text-gray-400 mt-0.5">Passo {step} de 2</p>}
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
         </div>
 
-        {/* Barra de progresso (novo inquilino) */}
         {isNew && createMode !== 'escolha' && (
           <div className="flex gap-2 mb-5">
             <div className={`flex-1 h-1.5 rounded-full ${step >= 1 ? 'bg-emerald-500' : 'bg-gray-200'}`} />
@@ -324,7 +306,6 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
           </div>
         )}
 
-        {/* Tabs (edição) */}
         {!isNew && (
           <div className="flex gap-1 mb-5 bg-gray-100 rounded-lg p-1">
             <button onClick={() => setTab('dados')} className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-md text-sm font-medium transition-colors ${tab === 'dados' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
@@ -342,14 +323,11 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
 
         <div className="flex-1 overflow-y-auto">
 
-          {/* NOVO — ESCOLHA DO MODO */}
           {isNew && createMode === 'escolha' && (
             <div className="space-y-4 py-4">
               <p className="text-sm text-gray-500 text-center mb-6">Como queres adicionar o novo inquilino?</p>
-              <button
-                onClick={() => setCreateMode('manual')}
-                className="w-full flex items-start gap-4 p-5 border-2 border-gray-200 rounded-xl hover:border-emerald-400 hover:bg-emerald-50 transition-all text-left"
-              >
+              <button onClick={() => setCreateMode('manual')}
+                className="w-full flex items-start gap-4 p-5 border-2 border-gray-200 rounded-xl hover:border-emerald-400 hover:bg-emerald-50 transition-all text-left">
                 <div className="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center flex-shrink-0">
                   <User className="w-5 h-5 text-emerald-600" />
                 </div>
@@ -358,10 +336,8 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
                   <p className="text-sm text-gray-500 mt-0.5">Preenches os dados do inquilino e do contrato um a um</p>
                 </div>
               </button>
-              <button
-                onClick={() => setCreateMode('ocr')}
-                className="w-full flex items-start gap-4 p-5 border-2 border-gray-200 rounded-xl hover:border-blue-400 hover:bg-blue-50 transition-all text-left"
-              >
+              <button onClick={() => setCreateMode('ocr')}
+                className="w-full flex items-start gap-4 p-5 border-2 border-gray-200 rounded-xl hover:border-blue-400 hover:bg-blue-50 transition-all text-left">
                 <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
                   <Sparkles className="w-5 h-5 text-blue-600" />
                 </div>
@@ -373,20 +349,12 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
             </div>
           )}
 
-          {/* NOVO VIA OCR — PASSO 1: Upload PDF */}
           {isNew && createMode === 'ocr' && step === 1 && (
             <div className="space-y-4">
-              <label className={`flex items-center gap-3 border-2 border-dashed rounded-lg p-6 cursor-pointer transition-colors ${
-                processingOCR ? 'border-blue-300 bg-blue-50' :
-                ocrDone ? 'border-emerald-400 bg-emerald-50' :
-                'border-gray-200 hover:border-blue-400'
-              }`}>
-                {processingOCR
-                  ? <Loader2 className="w-6 h-6 text-blue-500 animate-spin flex-shrink-0" />
-                  : ocrDone
-                  ? <Sparkles className="w-6 h-6 text-emerald-500 flex-shrink-0" />
-                  : <Upload className="w-6 h-6 text-gray-400 flex-shrink-0" />
-                }
+              <label className={`flex items-center gap-3 border-2 border-dashed rounded-lg p-6 cursor-pointer transition-colors ${processingOCR ? 'border-blue-300 bg-blue-50' : ocrDone ? 'border-emerald-400 bg-emerald-50' : 'border-gray-200 hover:border-blue-400'}`}>
+                {processingOCR ? <Loader2 className="w-6 h-6 text-blue-500 animate-spin flex-shrink-0" />
+                  : ocrDone ? <Sparkles className="w-6 h-6 text-emerald-500 flex-shrink-0" />
+                  : <Upload className="w-6 h-6 text-gray-400 flex-shrink-0" />}
                 <div>
                   {processingOCR && <p className="font-medium text-blue-600">A ler contrato com IA...</p>}
                   {ocrDone && <p className="font-medium text-emerald-600">✓ Dados extraídos! A avançar...</p>}
@@ -397,42 +365,27 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
                     </>
                   )}
                 </div>
-                <input type="file" accept=".pdf" className="hidden"
-                  onChange={e => { const f = e.target.files?.[0]; if (f) handleOCR(f) }} />
+                <input type="file" accept=".pdf" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleOCR(f) }} />
               </label>
               {ocrError && <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg">{ocrError}</p>}
             </div>
           )}
 
-          {/* NOVO VIA OCR — PASSO 2: Confirmar dados extraídos + espaço */}
           {isNew && createMode === 'ocr' && step === 2 && (
             <div className="space-y-4">
               <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-2 mb-2">
                 <p className="text-xs text-blue-600 font-medium">✨ Dados extraídos pelo OCR — confirma e corrige se necessário</p>
               </div>
-
-              {/* Dados do inquilino */}
               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Dados do Inquilino</p>
               <div>
                 <label className="label">Nome completo *</label>
                 <input className="input" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="label">Telefone</label>
-                  <input className="input" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} />
-                </div>
-                <div>
-                  <label className="label">NIF</label>
-                  <input className="input" value={form.nif} onChange={e => setForm(f => ({ ...f, nif: e.target.value }))} />
-                </div>
+                <div><label className="label">Telefone</label><input className="input" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} /></div>
+                <div><label className="label">NIF</label><input className="input" value={form.nif} onChange={e => setForm(f => ({ ...f, nif: e.target.value }))} /></div>
               </div>
-              <div>
-                <label className="label">Email</label>
-                <input className="input" type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
-              </div>
-
-              {/* Dados do contrato */}
+              <div><label className="label">Email</label><input className="input" type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} /></div>
               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mt-2">Dados do Contrato</p>
               <div>
                 <label className="label">Espaço *</label>
@@ -442,64 +395,32 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
                 </select>
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="label">Renda Mensal (€) *</label>
-                  <input className="input" type="number" value={contractForm.monthly_rent} onChange={e => setContractForm(f => ({ ...f, monthly_rent: e.target.value }))} />
-                </div>
-                <div>
-                  <label className="label">Caução (€)</label>
-                  <input className="input" type="number" value={contractForm.deposit} onChange={e => setContractForm(f => ({ ...f, deposit: e.target.value }))} />
-                </div>
+                <div><label className="label">Renda Mensal (€) *</label><input className="input" type="number" value={contractForm.monthly_rent} onChange={e => setContractForm(f => ({ ...f, monthly_rent: e.target.value }))} /></div>
+                <div><label className="label">Caução (€)</label><input className="input" type="number" value={contractForm.deposit} onChange={e => setContractForm(f => ({ ...f, deposit: e.target.value }))} /></div>
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="label">Data de Início *</label>
-                  <input className="input" type="date" value={contractForm.start_date} onChange={e => setContractForm(f => ({ ...f, start_date: e.target.value }))} />
-                </div>
-                <div>
-                  <label className="label">Data de Fim</label>
-                  <input className="input" type="date" value={contractForm.end_date} onChange={e => setContractForm(f => ({ ...f, end_date: e.target.value }))} />
-                </div>
+                <div><label className="label">Data de Início *</label><input className="input" type="date" value={contractForm.start_date} onChange={e => setContractForm(f => ({ ...f, start_date: e.target.value }))} /></div>
+                <div><label className="label">Data de Fim</label><input className="input" type="date" value={contractForm.end_date} onChange={e => setContractForm(f => ({ ...f, end_date: e.target.value }))} /></div>
               </div>
-              <div>
-                <label className="label">Notas do contrato</label>
-                <textarea className="input" rows={2} value={contractForm.notes} onChange={e => setContractForm(f => ({ ...f, notes: e.target.value }))} />
-              </div>
+              <div><label className="label">Notas do contrato</label><textarea className="input" rows={2} value={contractForm.notes} onChange={e => setContractForm(f => ({ ...f, notes: e.target.value }))} /></div>
               {error && <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg">{error}</p>}
               {contractError && <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg">{contractError}</p>}
             </div>
           )}
 
-          {/* NOVO MANUAL — PASSO 1: Dados */}
           {isNew && createMode === 'manual' && step === 1 && (
             <div className="space-y-4">
-              <div>
-                <label className="label">Nome completo *</label>
-                <input className="input" placeholder="Nome do inquilino" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
-              </div>
+              <div><label className="label">Nome completo *</label><input className="input" placeholder="Nome do inquilino" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
               <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="label">Telefone</label>
-                  <input className="input" placeholder="9XX XXX XXX" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} />
-                </div>
-                <div>
-                  <label className="label">NIF</label>
-                  <input className="input" placeholder="XXX XXX XXX" value={form.nif} onChange={e => setForm(f => ({ ...f, nif: e.target.value }))} />
-                </div>
+                <div><label className="label">Telefone</label><input className="input" placeholder="9XX XXX XXX" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} /></div>
+                <div><label className="label">NIF</label><input className="input" placeholder="XXX XXX XXX" value={form.nif} onChange={e => setForm(f => ({ ...f, nif: e.target.value }))} /></div>
               </div>
-              <div>
-                <label className="label">Email</label>
-                <input className="input" type="email" placeholder="email@exemplo.com" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
-              </div>
-              <div>
-                <label className="label">Notas</label>
-                <textarea className="input" rows={3} placeholder="Observações..." value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
-              </div>
+              <div><label className="label">Email</label><input className="input" type="email" placeholder="email@exemplo.com" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} /></div>
+              <div><label className="label">Notas</label><textarea className="input" rows={3} placeholder="Observações..." value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} /></div>
               {error && <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg">{error}</p>}
             </div>
           )}
 
-          {/* NOVO MANUAL — PASSO 2: Contrato */}
           {isNew && createMode === 'manual' && step === 2 && (
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-3 mb-2">
@@ -522,65 +443,33 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
                     </select>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="label">Renda Mensal (€) *</label>
-                      <input className="input" type="number" placeholder="0.00" value={contractForm.monthly_rent} onChange={e => setContractForm(f => ({ ...f, monthly_rent: e.target.value }))} />
-                    </div>
-                    <div>
-                      <label className="label">Caução (€)</label>
-                      <input className="input" type="number" placeholder="0.00" value={contractForm.deposit} onChange={e => setContractForm(f => ({ ...f, deposit: e.target.value }))} />
-                    </div>
+                    <div><label className="label">Renda Mensal (€) *</label><input className="input" type="number" placeholder="0.00" value={contractForm.monthly_rent} onChange={e => setContractForm(f => ({ ...f, monthly_rent: e.target.value }))} /></div>
+                    <div><label className="label">Caução (€)</label><input className="input" type="number" placeholder="0.00" value={contractForm.deposit} onChange={e => setContractForm(f => ({ ...f, deposit: e.target.value }))} /></div>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="label">Data de Início *</label>
-                      <input className="input" type="date" value={contractForm.start_date} onChange={e => setContractForm(f => ({ ...f, start_date: e.target.value }))} />
-                    </div>
-                    <div>
-                      <label className="label">Data de Fim</label>
-                      <input className="input" type="date" value={contractForm.end_date} onChange={e => setContractForm(f => ({ ...f, end_date: e.target.value }))} />
-                    </div>
+                    <div><label className="label">Data de Início *</label><input className="input" type="date" value={contractForm.start_date} onChange={e => setContractForm(f => ({ ...f, start_date: e.target.value }))} /></div>
+                    <div><label className="label">Data de Fim</label><input className="input" type="date" value={contractForm.end_date} onChange={e => setContractForm(f => ({ ...f, end_date: e.target.value }))} /></div>
                   </div>
-                  <div>
-                    <label className="label">Notas do contrato</label>
-                    <textarea className="input" rows={2} value={contractForm.notes} onChange={e => setContractForm(f => ({ ...f, notes: e.target.value }))} />
-                  </div>
+                  <div><label className="label">Notas do contrato</label><textarea className="input" rows={2} value={contractForm.notes} onChange={e => setContractForm(f => ({ ...f, notes: e.target.value }))} /></div>
                   {contractError && <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg">{contractError}</p>}
                 </>
               )}
             </div>
           )}
 
-          {/* EDIÇÃO — TAB: DADOS */}
           {!isNew && tab === 'dados' && (
             <div className="space-y-4">
-              <div>
-                <label className="label">Nome completo *</label>
-                <input className="input" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
-              </div>
+              <div><label className="label">Nome completo *</label><input className="input" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
               <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="label">Telefone</label>
-                  <input className="input" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} />
-                </div>
-                <div>
-                  <label className="label">NIF</label>
-                  <input className="input" value={form.nif} onChange={e => setForm(f => ({ ...f, nif: e.target.value }))} />
-                </div>
+                <div><label className="label">Telefone</label><input className="input" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} /></div>
+                <div><label className="label">NIF</label><input className="input" value={form.nif} onChange={e => setForm(f => ({ ...f, nif: e.target.value }))} /></div>
               </div>
-              <div>
-                <label className="label">Email</label>
-                <input className="input" type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
-              </div>
-              <div>
-                <label className="label">Notas</label>
-                <textarea className="input" rows={3} value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
-              </div>
+              <div><label className="label">Email</label><input className="input" type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} /></div>
+              <div><label className="label">Notas</label><textarea className="input" rows={3} value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} /></div>
               {error && <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg">{error}</p>}
             </div>
           )}
 
-          {/* EDIÇÃO — TAB: ESPAÇOS */}
           {!isNew && tab === 'espacos' && (
             <div>
               <p className="text-sm text-gray-500 mb-4">Clica num espaço para associar ou desassociar.</p>
@@ -602,13 +491,12 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
             </div>
           )}
 
-          {/* EDIÇÃO — TAB: CONTA CORRENTE */}
           {!isNew && tab === 'conta' && (
             <div>
               <div className="grid grid-cols-3 gap-3 mb-4">
                 <div className="bg-gray-50 rounded-lg p-3 text-center">
                   <p className="text-xs text-gray-500 mb-1">Total pago</p>
-                  <p className="font-semibold text-gray-900">{formatCurrency(payments.filter(p => p.payment_date).reduce((s, p) => s + p.amount, 0))}</p>
+                  <p className="font-semibold text-gray-900">{formatCurrency(payments.filter(p => p.payment_date && p.payment_date !== 'liquidada').reduce((s, p) => s + p.amount, 0))}</p>
                 </div>
                 <div className="bg-red-50 rounded-lg p-3 text-center">
                   <p className="text-xs text-gray-500 mb-1">Em dívida</p>
@@ -640,7 +528,7 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
                     <div>
                       <label className="label">Tipo</label>
                       <div className="grid grid-cols-4 gap-2">
-                        {Object.entries(tipoConfig).map(([key, cfg]) => (
+                        {Object.entries(tipoConfig).filter(([k]) => k !== 'divida').map(([key, cfg]) => (
                           <button key={key} onClick={() => setPaymentForm(f => ({ ...f, tipo: key }))}
                             className={`py-2 rounded-lg border text-xs font-medium transition-colors ${paymentForm.tipo === key ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
                             {cfg.label}
@@ -649,14 +537,8 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="label">Mês de referência</label>
-                        <input className="input" type="month" value={paymentForm.reference_month} onChange={e => setPaymentForm(f => ({ ...f, reference_month: e.target.value }))} />
-                      </div>
-                      <div>
-                        <label className="label">Valor (€)</label>
-                        <input className="input" type="number" step="0.01" value={paymentForm.amount} onChange={e => setPaymentForm(f => ({ ...f, amount: e.target.value }))} />
-                      </div>
+                      <div><label className="label">Mês de referência</label><input className="input" type="month" value={paymentForm.reference_month} onChange={e => setPaymentForm(f => ({ ...f, reference_month: e.target.value }))} /></div>
+                      <div><label className="label">Valor (€)</label><input className="input" type="number" step="0.01" value={paymentForm.amount} onChange={e => setPaymentForm(f => ({ ...f, amount: e.target.value }))} /></div>
                     </div>
                     <div>
                       <label className="label">Estado</label>
@@ -673,10 +555,7 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
                     </div>
                     {!paymentForm.is_debt && (
                       <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <label className="label">Data do pagamento</label>
-                          <input className="input" type="date" value={paymentForm.payment_date} onChange={e => setPaymentForm(f => ({ ...f, payment_date: e.target.value }))} />
-                        </div>
+                        <div><label className="label">Data do pagamento</label><input className="input" type="date" value={paymentForm.payment_date} onChange={e => setPaymentForm(f => ({ ...f, payment_date: e.target.value }))} /></div>
                         <div>
                           <label className="label">Método</label>
                           <div className="grid grid-cols-2 gap-2">
@@ -690,10 +569,7 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
                         </div>
                       </div>
                     )}
-                    <div>
-                      <label className="label">Notas (opcional)</label>
-                      <input className="input" placeholder="ex: pagamento parcial" value={paymentForm.notes} onChange={e => setPaymentForm(f => ({ ...f, notes: e.target.value }))} />
-                    </div>
+                    <div><label className="label">Notas (opcional)</label><input className="input" placeholder="ex: pagamento parcial" value={paymentForm.notes} onChange={e => setPaymentForm(f => ({ ...f, notes: e.target.value }))} /></div>
                     {paymentError && <p className="text-sm text-red-600 bg-red-100 px-3 py-2 rounded-lg">{paymentError}</p>}
                     <div className="flex gap-2 pt-1">
                       <button className="btn-secondary flex-1" onClick={() => { setShowPaymentForm(false); setEditingPaymentId(null) }}>Cancelar</button>
@@ -710,39 +586,65 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
                 <p className="text-center text-gray-400 text-sm py-8">Sem registos de pagamentos</p>
               ) : (
                 <div className="space-y-2">
-                  {payments.map((p, i) => (
-                    <div key={p.id ?? `missing-${i}`}
-                      className={`flex items-center justify-between p-3 rounded-lg border ${p.payment_date ? 'border-gray-100 bg-white' : p.isMissing ? 'border-orange-200 bg-orange-50' : 'border-red-100 bg-red-50'}`}>
-                      <div>
-                        <p className="text-sm font-medium text-gray-800">
-                          {p.reference_month?.slice(0, 7)} — {p.lease?.space?.ref ?? '—'}
-                          <span className={`ml-2 text-xs px-2 py-0.5 rounded-full ${p.tipo === 'caucao' ? 'bg-blue-100 text-blue-700' : p.tipo === 'extra' ? 'bg-orange-100 text-orange-700' : p.tipo === 'luz' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-600'}`}>
-                            {tipoConfig[p.tipo as keyof typeof tipoConfig]?.label ?? '🏠 Renda'}
+                  {payments.map((p, i) => {
+                    const isLiquidada = p.isManualDebt && p.payment_date === 'liquidada'
+                    const isPago = !p.isManualDebt && p.payment_date
+                    return (
+                      <div key={p.id ?? `row-${i}`}
+                        className={`flex items-center justify-between p-3 rounded-lg border ${
+                          isPago || isLiquidada ? 'border-gray-100 bg-white'
+                          : p.isMissing ? 'border-orange-200 bg-orange-50'
+                          : p.isManualDebt ? 'border-red-200 bg-red-50'
+                          : 'border-red-100 bg-red-50'
+                        }`}>
+                        <div>
+                          <p className="text-sm font-medium text-gray-800">
+                            {p.reference_month?.slice(0, 7)} — {p.isManualDebt ? '📋' : (p.lease?.space?.ref ?? '—')}
+                            <span className={`ml-2 text-xs px-2 py-0.5 rounded-full ${
+                              p.tipo === 'caucao' ? 'bg-blue-100 text-blue-700'
+                              : p.tipo === 'extra' ? 'bg-orange-100 text-orange-700'
+                              : p.tipo === 'luz' ? 'bg-yellow-100 text-yellow-700'
+                              : p.tipo === 'divida' ? 'bg-red-100 text-red-700'
+                              : 'bg-gray-100 text-gray-600'
+                            }`}>
+                              {tipoConfig[p.tipo as keyof typeof tipoConfig]?.label ?? '🏠 Renda'}
+                            </span>
+                          </p>
+                          {p.isManualDebt ? (
+                            <p className="text-xs text-gray-600">{p.notes}</p>
+                          ) : p.payment_date ? (
+                            <p className="text-xs text-gray-500">Pago em {formatDate(p.payment_date)} · {p.payment_method}</p>
+                          ) : p.isMissing ? (
+                            <p className="text-xs text-orange-600 font-medium">⚠ Sem registo de pagamento</p>
+                          ) : (
+                            <p className="text-xs text-red-500 font-medium">⚠ Por pagar</p>
+                          )}
+                          {p.isManualDebt && (
+                            <p className={`text-xs font-medium mt-0.5 ${isLiquidada ? 'text-emerald-600' : 'text-red-600'}`}>
+                              {isLiquidada ? '✓ Liquidada' : `Em dívida: ${formatCurrency(p.remainingAmount ?? p.amount)}`}
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className={`font-semibold text-sm ${isPago || isLiquidada ? 'text-gray-900' : 'text-red-600'}`}>
+                            {formatCurrency(p.amount)}
                           </span>
-                        </p>
-                        {p.payment_date ? <p className="text-xs text-gray-500">Pago em {formatDate(p.payment_date)} · {p.payment_method}</p>
-                          : p.isMissing ? <p className="text-xs text-orange-600 font-medium">⚠ Sem registo de pagamento</p>
-                          : <p className="text-xs text-red-500 font-medium">⚠ Por pagar</p>}
-                        {p.notes && <p className="text-xs text-gray-400 mt-0.5">{p.notes}</p>}
+                          {!p.isMissing && !p.isManualDebt && p.id && (
+                            <>
+                              <button onClick={() => handleEditPayment(p)} className="text-gray-300 hover:text-blue-500 transition-colors" title="Editar"><Pencil className="w-4 h-4" /></button>
+                              <button onClick={() => handleDeletePayment(p.id!)} className="text-gray-300 hover:text-red-500 transition-colors" title="Apagar"><Trash2 className="w-4 h-4" /></button>
+                            </>
+                          )}
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <span className={`font-semibold text-sm ${p.payment_date ? 'text-gray-900' : 'text-red-600'}`}>{formatCurrency(p.amount)}</span>
-                        {!p.isMissing && p.id && (
-                          <>
-                            <button onClick={() => handleEditPayment(p)} className="text-gray-300 hover:text-blue-500 transition-colors" title="Editar"><Pencil className="w-4 h-4" /></button>
-                            <button onClick={() => handleDeletePayment(p.id!)} className="text-gray-300 hover:text-red-500 transition-colors" title="Apagar"><Trash2 className="w-4 h-4" /></button>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               )}
             </div>
           )}
         </div>
 
-        {/* Footer */}
         {isNew && createMode === 'escolha' && (
           <div className="flex justify-end mt-6 pt-4 border-t border-gray-100">
             <button className="btn-secondary" onClick={onClose}>Cancelar</button>
@@ -750,16 +652,12 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
         )}
         {isNew && createMode === 'ocr' && step === 1 && (
           <div className="flex justify-between mt-6 pt-4 border-t border-gray-100">
-            <button className="btn-secondary" onClick={() => setCreateMode('escolha')}>
-              <ChevronLeft className="w-4 h-4" /> Voltar
-            </button>
+            <button className="btn-secondary" onClick={() => setCreateMode('escolha')}><ChevronLeft className="w-4 h-4" /> Voltar</button>
           </div>
         )}
         {isNew && createMode === 'ocr' && step === 2 && (
           <div className="flex justify-between gap-3 mt-6 pt-4 border-t border-gray-100">
-            <button className="btn-secondary flex items-center gap-1" onClick={() => setStep(1)}>
-              <ChevronLeft className="w-4 h-4" /> Voltar
-            </button>
+            <button className="btn-secondary flex items-center gap-1" onClick={() => setStep(1)}><ChevronLeft className="w-4 h-4" /> Voltar</button>
             <button className="btn-primary" onClick={async () => { await handleSaveStep1(); if (newTenantId || form.name) await handleSaveContract() }} disabled={savingContract || saving}>
               {savingContract || saving ? 'A guardar...' : 'Guardar tudo'}
             </button>
@@ -775,9 +673,7 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
         )}
         {isNew && createMode === 'manual' && step === 2 && (
           <div className="flex justify-between gap-3 mt-6 pt-4 border-t border-gray-100">
-            <button className="btn-secondary flex items-center gap-1" onClick={() => setStep(1)}>
-              <ChevronLeft className="w-4 h-4" /> Voltar
-            </button>
+            <button className="btn-secondary flex items-center gap-1" onClick={() => setStep(1)}><ChevronLeft className="w-4 h-4" /> Voltar</button>
             <button className="btn-primary" onClick={handleSaveContract} disabled={savingContract}>
               {savingContract ? 'A guardar...' : contractForm.skip ? 'Concluir sem contrato' : 'Guardar tudo'}
             </button>
@@ -786,9 +682,7 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
         {!isNew && tab === 'dados' && (
           <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-100">
             <button className="btn-secondary" onClick={onClose}>Cancelar</button>
-            <button className="btn-primary" onClick={handleSaveStep1} disabled={saving}>
-              {saving ? 'A guardar...' : 'Guardar'}
-            </button>
+            <button className="btn-primary" onClick={handleSaveStep1} disabled={saving}>{saving ? 'A guardar...' : 'Guardar'}</button>
           </div>
         )}
         {!isNew && (tab === 'espacos' || tab === 'conta') && (
