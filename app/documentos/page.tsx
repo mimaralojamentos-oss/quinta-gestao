@@ -45,6 +45,7 @@ interface UploadResult {
   error?: string
   autoExpense?: boolean
   duplicate?: any
+  detectedTipo?: string
 }
 
 type SortField = 'tipo' | 'nome' | 'associado' | 'data' | 'valor' | 'despesa' | 'carregado' | null
@@ -96,7 +97,7 @@ export default function DocumentosPage() {
   const [sortDir, setSortDir] = useState<SortDir>('desc')
 
   const [showUpload, setShowUpload] = useState(false)
-  const [uploadTipo, setUploadTipo] = useState('fatura')
+  const [uploadTipo, setUploadTipo] = useState('automatico')
   const [uploadTipoCustom, setUploadTipoCustom] = useState('')
   const [files, setFiles] = useState<File[]>([])
   const [uploading, setUploading] = useState(false)
@@ -194,7 +195,7 @@ export default function DocumentosPage() {
     if (data.error) {
       setUploadResults(prev => prev.map((r, i) => i === index ? { ...r, status: 'error', error: data.error } : r))
     } else {
-      setUploadResults(prev => prev.map((r, i) => i === index ? { ...r, status: 'success', autoExpense: data.autoExpense } : r))
+      setUploadResults(prev => prev.map((r, i) => i === index ? { ...r, status: 'success', autoExpense: data.autoExpense, detectedTipo: data.detectedTipo } : r))
     }
     return 'done'
   }
@@ -371,7 +372,6 @@ export default function DocumentosPage() {
           )}
         </div>
 
-        {/* Cards de tipo */}
         <div className="flex gap-2 mb-6 flex-wrap">
           {tipoCards.map(({ tipo, emoji, label, color }) => (
             <button key={tipo} onClick={() => setFilterTipo(tipo)}
@@ -385,7 +385,6 @@ export default function DocumentosPage() {
           ))}
         </div>
 
-        {/* Barra de filtros */}
         <div className="bg-white border border-gray-100 rounded-xl shadow-sm p-4 mb-6">
           <div className="flex gap-3 items-center">
             <div className="relative flex-1 min-w-0">
@@ -442,11 +441,6 @@ export default function DocumentosPage() {
               <span className="text-xs text-gray-500">{filtered.length} resultado(s)</span>
               {search && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">"{search}"</span>}
               {filterTipo !== 'all' && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">{tipoLabels[filterTipo] ?? filterTipo}</span>}
-              {filterDateStart && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">De: {filterDateStart}</span>}
-              {filterDateEnd && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">Até: {filterDateEnd}</span>}
-              {filterValueMin && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">Min: {filterValueMin}€</span>}
-              {filterValueMax && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">Max: {filterValueMax}€</span>}
-              {filterDespesa !== 'all' && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">{filterDespesa === 'sim' ? 'Com despesa' : 'Sem despesa'}</span>}
             </div>
           )}
         </div>
@@ -464,27 +458,13 @@ export default function DocumentosPage() {
             <table className="w-full">
               <thead className="bg-gray-50 border-b border-gray-100">
                 <tr>
-                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('tipo')}>
-                    Tipo <SortIcon field="tipo" />
-                  </th>
-                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('nome')}>
-                    Ficheiro <SortIcon field="nome" />
-                  </th>
-                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('associado')}>
-                    Associado a <SortIcon field="associado" />
-                  </th>
-                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('data')}>
-                    Data doc. <SortIcon field="data" />
-                  </th>
-                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('carregado')}>
-                    Carregado em <SortIcon field="carregado" />
-                  </th>
-                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('valor')}>
-                    Valor <SortIcon field="valor" />
-                  </th>
-                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('despesa')}>
-                    Despesa <SortIcon field="despesa" />
-                  </th>
+                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('tipo')}>Tipo <SortIcon field="tipo" /></th>
+                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('nome')}>Ficheiro <SortIcon field="nome" /></th>
+                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('associado')}>Associado a <SortIcon field="associado" /></th>
+                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('data')}>Data doc. <SortIcon field="data" /></th>
+                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('carregado')}>Carregado em <SortIcon field="carregado" /></th>
+                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('valor')}>Valor <SortIcon field="valor" /></th>
+                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('despesa')}>Despesa <SortIcon field="despesa" /></th>
                   <th className="table-header"></th>
                 </tr>
               </thead>
@@ -508,19 +488,13 @@ export default function DocumentosPage() {
                     <td className="table-cell text-sm text-gray-600">{doc._associado}</td>
                     <td className="table-cell text-sm text-gray-500">{doc._data ? formatDate(doc._data) : '—'}</td>
                     <td className="table-cell">
-                      {doc._created_at ? (
-                        <span className="text-xs text-gray-500">{formatDateTime(doc._created_at)}</span>
-                      ) : <span className="text-gray-300 text-xs">—</span>}
+                      {doc._created_at ? <span className="text-xs text-gray-500">{formatDateTime(doc._created_at)}</span> : <span className="text-gray-300 text-xs">—</span>}
                     </td>
                     <td className="table-cell text-sm font-medium text-red-600">{doc._amount ? formatCurrency(doc._amount) : '—'}</td>
                     <td className="table-cell">
-                      {doc._expense_id ? (
-                        <span className="text-xs text-emerald-600 font-medium">✅ Sim</span>
-                      ) : doc._tipo === 'contrato' ? (
-                        <span className="text-xs text-gray-400">—</span>
-                      ) : (
-                        <span className="text-xs text-yellow-600">⚠ Não</span>
-                      )}
+                      {doc._expense_id ? <span className="text-xs text-emerald-600 font-medium">✅ Sim</span>
+                        : doc._tipo === 'contrato' ? <span className="text-xs text-gray-400">—</span>
+                        : <span className="text-xs text-yellow-600">⚠ Não</span>}
                     </td>
                     <td className="table-cell">
                       <div className="flex items-center gap-2">
@@ -534,11 +508,7 @@ export default function DocumentosPage() {
                           </button>
                         )}
                         {isAdmin && (
-                          <button
-                            onClick={() => doc._contrato
-                              ? deleteContract(doc._contrato)
-                              : setDeleteConfirm({ doc: doc._doc!, hasExpense: !!doc._expense_id })
-                            }
+                          <button onClick={() => doc._contrato ? deleteContract(doc._contrato) : setDeleteConfirm({ doc: doc._doc!, hasExpense: !!doc._expense_id })}
                             className="text-gray-300 hover:text-red-500 transition-colors">
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -553,7 +523,7 @@ export default function DocumentosPage() {
         )}
       </div>
 
-      {/* Modal Editar Documento */}
+      {/* Modal Editar */}
       {editDoc && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
@@ -644,6 +614,7 @@ export default function DocumentosPage() {
                 <div>
                   <label className="label">Tipo de Documento *</label>
                   <select className="input" value={uploadTipo} onChange={e => setUploadTipo(e.target.value)}>
+                    <option value="automatico">🤖 Automático (detetado pela IA)</option>
                     <option value="fatura">🧾 Fatura</option>
                     <option value="fatura_luz">⚡ Fatura da Luz</option>
                     <option value="fatura_agua">💧 Fatura da Água</option>
@@ -651,6 +622,9 @@ export default function DocumentosPage() {
                     <option value="carta">✉️ Carta</option>
                     <option value="outro">📦 Outro</option>
                   </select>
+                  {uploadTipo === 'automatico' && (
+                    <p className="text-xs text-blue-600 mt-1.5">✨ A IA vai identificar automaticamente se é fatura, fatura de luz, água, etc.</p>
+                  )}
                 </div>
                 {uploadTipo === 'outro' && (
                   <div>
@@ -693,7 +667,7 @@ export default function DocumentosPage() {
                   <div className="space-y-1 max-h-40 overflow-y-auto mb-2">
                     {uploadResults.map((r, i) => (
                       r.status !== 'pending' && (
-                        <div key={i} className={`flex items-center gap-2 p-2 rounded-lg text-xs ${r.status === 'success' ? 'bg-emerald-50' : r.status === 'error' ? 'bg-red-50' : r.status === 'skipped' ? 'bg-gray-50' : r.status === 'duplicate' ? 'bg-yellow-50' : 'bg-blue-50'}`}>
+                        <div key={i} className={`flex items-center gap-2 p-2 rounded-lg text-xs ${r.status === 'success' ? 'bg-emerald-50' : r.status === 'error' ? 'bg-red-50' : r.status === 'skipped' ? 'bg-gray-50' : 'bg-yellow-50'}`}>
                           {r.status === 'success' && <CheckCircle className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />}
                           {r.status === 'error' && <AlertCircle className="w-3.5 h-3.5 text-red-600 flex-shrink-0" />}
                           {r.status === 'skipped' && <span className="text-gray-400 flex-shrink-0">—</span>}
@@ -707,19 +681,15 @@ export default function DocumentosPage() {
                 <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 space-y-3">
                   <p className="text-sm text-yellow-800 font-medium">⚠ Este ficheiro já foi carregado anteriormente!</p>
                   <p className="text-xs text-yellow-700">Ficheiro: <strong>{forceDuplicate.file.name}</strong></p>
-                  <p className="text-sm text-yellow-700">Queres carregar mesmo assim?</p>
                   <div className="flex gap-2">
-                    <button onClick={handleForceDuplicate}
-                      className="flex-1 py-2 rounded-lg bg-yellow-500 text-white text-sm font-medium hover:bg-yellow-600">
+                    <button onClick={handleForceDuplicate} className="flex-1 py-2 rounded-lg bg-yellow-500 text-white text-sm font-medium hover:bg-yellow-600">
                       Sim, carregar na mesma
                     </button>
-                    <button onClick={handleSkipDuplicate}
-                      className="flex-1 py-2 rounded-lg border border-gray-200 text-gray-600 text-sm font-medium hover:bg-gray-50">
+                    <button onClick={handleSkipDuplicate} className="flex-1 py-2 rounded-lg border border-gray-200 text-gray-600 text-sm font-medium hover:bg-gray-50">
                       Saltar este ficheiro
                     </button>
                   </div>
                 </div>
-                <p className="text-xs text-gray-400 text-center">{remainingFiles.current.length} ficheiro(s) por processar</p>
               </div>
             )}
             {(uploading || uploadDone) && !forceDuplicate && (
@@ -736,9 +706,11 @@ export default function DocumentosPage() {
                     {r.status === 'pending' && <div className="w-4 h-4 rounded-full border-2 border-gray-300 flex-shrink-0" />}
                     <div className="min-w-0">
                       <p className="text-xs font-medium text-gray-800 truncate">{r.fileName}</p>
+                      {r.status === 'success' && r.detectedTipo && uploadTipo === 'automatico' && (
+                        <p className="text-xs text-blue-600">🤖 Detetado: {tipoLabels[r.detectedTipo] ?? r.detectedTipo}</p>
+                      )}
                       {r.status === 'success' && r.autoExpense && <p className="text-xs text-emerald-600">✓ Despesa criada automaticamente</p>}
-                      {r.status === 'success' && !r.autoExpense && <p className="text-xs text-gray-500">✓ Documento guardado</p>}
-                      {r.status === 'duplicate' && <p className="text-xs text-yellow-700">⚠ Carregado na mesma</p>}
+                      {r.status === 'success' && !r.autoExpense && !r.detectedTipo && <p className="text-xs text-gray-500">✓ Documento guardado</p>}
                       {r.status === 'skipped' && <p className="text-xs text-gray-500">Saltado</p>}
                       {r.error && <p className="text-xs text-red-600">{r.error}</p>}
                     </div>
