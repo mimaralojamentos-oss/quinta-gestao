@@ -9,7 +9,7 @@ export async function POST(request: Request) {
   try {
     const formData = await request.formData()
     const file = formData.get('file') as File
-    const tipo = formData.get('tipo') as string ?? 'fatura'
+    let tipo = formData.get('tipo') as string ?? 'fatura'
     const tipoCustom = formData.get('tipo_custom') as string ?? null
     const force = formData.get('force') === 'true'
 
@@ -17,7 +17,6 @@ export async function POST(request: Request) {
 
     const bytes = await file.arrayBuffer()
     const buffer = Buffer.from(bytes)
-
     const fileHash = createHash('sha256').update(buffer).digest('hex')
 
     const supabase = createClient(
@@ -39,7 +38,6 @@ export async function POST(request: Request) {
     }
 
     // Detetar método de pagamento pelo nome do ficheiro
-    // (D) = dinheiro, (B) = banco, default = banco
     function detectPaymentMethod(fileName: string): string {
       const upper = fileName.toUpperCase()
       if (upper.includes('(D)') || upper.includes('(D).PDF')) return 'dinheiro'
@@ -51,14 +49,34 @@ export async function POST(request: Request) {
     let extracted: any = {}
     const isPdf = file.type === 'application/pdf'
     const isImage = file.type.startsWith('image/')
+    const isAutomatic = tipo === 'automatico'
 
     if (isPdf || isImage) {
       try {
         const base64 = buffer.toString('base64')
         const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
 
-        const isEdp = tipo === 'fatura_luz'
-        const prompt = isEdp ? `Extrai os seguintes dados desta fatura EDP em JSON (sem markdown, só JSON puro):
+        const promptAuto = `Analisa este documento e extrai os dados em JSON (sem markdown, só JSON puro).
+Primeiro identifica o tipo de documento e depois extrai os campos correspondentes.
+
+{
+  "doc_type": "um de: fatura, fatura_luz, fatura_agua, registo_predial, carta, outro",
+  "doc_number": "número do documento/fatura se existir",
+  "supplier_name": "nome do fornecedor/entidade emissora",
+  "supplier_nif": "NIF do fornecedor (só números, null se não existir)",
+  "buyer_name": "nome do comprador/destinatário",
+  "buyer_nif": "NIF do comprador (só números, null se não existir)",
+  "amount": valor numérico total sem símbolo (null se não existir),
+  "doc_date": "data no formato YYYY-MM-DD (null se não existir)",
+  "items_summary": "resumo do conteúdo em português, máximo 200 caracteres",
+  "category": "uma de: obras, edp, pessoal, contabilidade, manutencao, outros",
+  "edp_contract_number": "código de contrato EDP se for fatura de luz (ex: 160807307528), null caso contrário",
+  "edp_reading_value": valor numérico da leitura do contador se for fatura de luz (null caso contrário),
+  "edp_reading_date": "data da leitura se for fatura de luz no formato YYYY-MM-DD (null caso contrário)",
+  "edp_kwh_consumed": número de kWh consumidos se for fatura de luz (null caso contrário)
+}`
+
+        const promptEdp = `Extrai os seguintes dados desta fatura EDP em JSON (sem markdown, só JSON puro):
 {
   "doc_number": "número da fatura",
   "supplier_name": "nome do fornecedor",
@@ -71,11 +89,13 @@ export async function POST(request: Request) {
   "category": "edp",
   "edp_contract_number": "código de contrato EDP (ex: 160807307528)",
   "edp_cpe": "CPE (ex: PT0002000003480097WQ)",
-  "edp_meter_number": "número do contador (ex: 16802460082814)",
-  "edp_reading_value": valor numérico da leitura actual do contador (soma de vazio+ponta+cheias se existir, ou valor simples),
+  "edp_meter_number": "número do contador",
+  "edp_reading_value": valor numérico da leitura actual do contador,
   "edp_reading_date": "data da leitura no formato YYYY-MM-DD",
   "edp_kwh_consumed": número total de kWh consumidos faturados
-}` : `Extrai os seguintes dados deste documento em JSON (sem markdown, só JSON puro):
+}`
+
+        const promptNormal = `Extrai os seguintes dados deste documento em JSON (sem markdown, só JSON puro):
 {
   "doc_number": "número do documento/fatura se existir",
   "supplier_name": "nome do fornecedor/entidade emissora",
@@ -87,6 +107,8 @@ export async function POST(request: Request) {
   "items_summary": "resumo do conteúdo em português, máximo 200 caracteres",
   "category": "uma de: obras, edp, pessoal, contabilidade, manutencao, outros"
 }`
+
+        const prompt = isAutomatic ? promptAuto : (tipo === 'fatura_luz' ? promptEdp : promptNormal)
 
         const response = await anthropic.messages.create({
           model: 'claude-sonnet-4-5',
@@ -109,10 +131,19 @@ export async function POST(request: Request) {
         const text = response.content[0].type === 'text' ? response.content[0].text : ''
         const clean = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
         extracted = JSON.parse(clean)
+
+        // Se for automático, usar o tipo detetado pela IA
+        if (isAutomatic && extracted.doc_type) {
+          tipo = extracted.doc_type
+        }
+
       } catch (e) {
         console.error('OCR falhou:', e)
         extracted = {}
+        if (isAutomatic) tipo = 'fatura'
       }
+    } else {
+      if (isAutomatic) tipo = 'fatura'
     }
 
     // Procurar proprietário pelo NIF
@@ -154,20 +185,9 @@ export async function POST(request: Request) {
     // ── FATURA LUZ: criar leitura no quadro correspondente ──
     let meterReadingCreated = false
     if (tipo === 'fatura_luz' && extracted.edp_contract_number) {
-      const { data: meter } = await supabase
-        .from('meters')
-        .select('id, name')
-        .eq('contract_number', extracted.edp_contract_number)
-        .single()
-
+      const { data: meter } = await supabase.from('meters').select('id, name').eq('contract_number', extracted.edp_contract_number).single()
       if (meter && extracted.edp_reading_date) {
-        const { data: existingReading } = await supabase
-          .from('meter_readings')
-          .select('id')
-          .eq('meter_id', meter.id)
-          .eq('reading_date', extracted.edp_reading_date)
-          .single()
-
+        const { data: existingReading } = await supabase.from('meter_readings').select('id').eq('meter_id', meter.id).eq('reading_date', extracted.edp_reading_date).single()
         if (!existingReading) {
           await supabase.from('meter_readings').insert({
             meter_id: meter.id,
@@ -188,16 +208,12 @@ export async function POST(request: Request) {
     let expenseId = null
 
     if (isFatura && doc && extracted.amount && extracted.doc_date) {
-      // Detetar método de pagamento pelo nome do ficheiro
       const paymentMethod = detectPaymentMethod(file.name)
 
-      const dateFrom = new Date(extracted.doc_date)
-      dateFrom.setDate(dateFrom.getDate() - 1)
-      const dateTo = new Date(extracted.doc_date)
-      dateTo.setDate(dateTo.getDate() + 1)
+      const dateFrom = new Date(extracted.doc_date); dateFrom.setDate(dateFrom.getDate() - 1)
+      const dateTo = new Date(extracted.doc_date); dateTo.setDate(dateTo.getDate() + 1)
 
-      const { data: existingExpense } = await supabase
-        .from('expenses').select('id')
+      const { data: existingExpense } = await supabase.from('expenses').select('id')
         .eq('amount', extracted.amount)
         .gte('expense_date', dateFrom.toISOString().slice(0, 10))
         .lte('expense_date', dateTo.toISOString().slice(0, 10))
@@ -205,10 +221,7 @@ export async function POST(request: Request) {
         .limit(1).single()
 
       if (existingExpense) {
-        // Atualizar método de pagamento da despesa existente
-        await supabase.from('expenses')
-          .update({ payment_method: paymentMethod })
-          .eq('id', existingExpense.id)
+        await supabase.from('expenses').update({ payment_method: paymentMethod }).eq('id', existingExpense.id)
         await supabase.from('documents').update({ expense_id: existingExpense.id }).eq('id', doc.id)
         expenseId = existingExpense.id
       } else {
@@ -228,9 +241,6 @@ export async function POST(request: Request) {
           expenseId = newExpense.id
           autoExpense = true
 
-          // Criar movimento no Fundo de Maneio se:
-          // - pagamento a dinheiro
-          // - data >= 01/06/2026
           if (paymentMethod === 'dinheiro' && extracted.doc_date >= CASH_FUND_START_DATE) {
             await supabase.from('cash_fund_movements').insert({
               movement_date: extracted.doc_date,
@@ -245,7 +255,7 @@ export async function POST(request: Request) {
       }
     }
 
-    return NextResponse.json({ success: true, document: doc, autoExpense, duplicate: false, expenseId, meterReadingCreated })
+    return NextResponse.json({ success: true, document: doc, autoExpense, duplicate: false, expenseId, meterReadingCreated, detectedTipo: tipo })
 
   } catch (e: any) {
     console.error(e)
