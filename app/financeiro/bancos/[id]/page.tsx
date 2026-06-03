@@ -66,7 +66,12 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
   const [importing, setImporting] = useState(false)
   const [validatingAll, setValidatingAll] = useState(false)
   const [showImport, setShowImport] = useState(false)
-  const [filterStatus, setFilterStatus] = useState<'all' | 'por_validar' | 'validado' | 'ignorado' | 'confianca_alta' | 'confianca_media' | 'confianca_baixa' | 'identificadas' | 'nao_identificadas'>('all')
+
+  // 3 grupos de filtros independentes
+  const [filterStatus, setFilterStatus] = useState<'all' | 'por_validar' | 'validado' | 'ignorado'>('all')
+  const [filterConfidence, setFilterConfidence] = useState<'all' | 'high' | 'medium' | 'low'>('all')
+  const [filterIdentification, setFilterIdentification] = useState<'all' | 'identificadas' | 'nao_identificadas'>('all')
+
   const [importStep, setImportStep] = useState<'upload' | 'mapping' | 'preview'>('upload')
   const [parsedHeaders, setParsedHeaders] = useState<string[]>([])
   const [parsedRows, setParsedRows] = useState<any[][]>([])
@@ -355,41 +360,50 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
   function resetFilters() {
     setSearch(''); setFilterDateFrom(''); setFilterDateTo('')
     setFilterAmountMin(''); setFilterAmountMax(''); setFilterDirection('all')
+    setFilterStatus('all'); setFilterConfidence('all'); setFilterIdentification('all')
   }
 
   const hasActiveFilters = search || filterDateFrom || filterDateTo || filterAmountMin || filterAmountMax || filterDirection !== 'all'
+  const hasActiveGroupFilters = filterStatus !== 'all' || filterConfidence !== 'all' || filterIdentification !== 'all'
 
-  // Contagens para os badges dos filtros
+  // Contagens
   const countPorValidar = transactions.filter(t => t.status === 'por_validar').length
   const countValidado = transactions.filter(t => t.status === 'validado').length
   const countIgnorado = transactions.filter(t => t.status === 'ignorado').length
   const countAlt = transactions.filter(t => !t.confirmed_type && txMatches[t.id]?.[0]?.confidence === 'high').length
   const countMed = transactions.filter(t => !t.confirmed_type && txMatches[t.id]?.[0]?.confidence === 'medium').length
   const countBai = transactions.filter(t => !t.confirmed_type && txMatches[t.id]?.[0]?.confidence === 'low').length
-  const countIdentificadas = transactions.filter(t => t.confirmed_type || txMatches[t.id]?.length > 0).length
+  const countIdentificadas = transactions.filter(t => t.confirmed_type || (txMatches[t.id]?.length > 0)).length
   const countNaoIdentificadas = transactions.filter(t => !t.confirmed_type && (!txMatches[t.id] || txMatches[t.id].length === 0)).length
 
   const filtered = transactions.filter(t => {
     const autoMatches = txMatches[t.id]
     const bestConfidence = autoMatches?.[0]?.confidence
 
-    let matchStatus = true
-    if (filterStatus === 'por_validar') matchStatus = t.status === 'por_validar'
-    else if (filterStatus === 'validado') matchStatus = t.status === 'validado'
-    else if (filterStatus === 'ignorado') matchStatus = t.status === 'ignorado'
-    else if (filterStatus === 'confianca_alta') matchStatus = !t.confirmed_type && bestConfidence === 'high'
-    else if (filterStatus === 'confianca_media') matchStatus = !t.confirmed_type && bestConfidence === 'medium'
-    else if (filterStatus === 'confianca_baixa') matchStatus = !t.confirmed_type && bestConfidence === 'low'
-    else if (filterStatus === 'identificadas') matchStatus = !!(t.confirmed_type || (autoMatches && autoMatches.length > 0))
-    else if (filterStatus === 'nao_identificadas') matchStatus = !t.confirmed_type && (!autoMatches || autoMatches.length === 0)
+    // Grupo 1: Estado
+    if (filterStatus === 'por_validar' && t.status !== 'por_validar') return false
+    if (filterStatus === 'validado' && t.status !== 'validado') return false
+    if (filterStatus === 'ignorado' && t.status !== 'ignorado') return false
 
-    const matchSearch = !search || t.description.toLowerCase().includes(search.toLowerCase())
-    const matchDateFrom = !filterDateFrom || t.transaction_date >= filterDateFrom
-    const matchDateTo = !filterDateTo || t.transaction_date <= filterDateTo
-    const matchAmountMin = !filterAmountMin || Math.abs(t.amount) >= parseFloat(filterAmountMin)
-    const matchAmountMax = !filterAmountMax || Math.abs(t.amount) <= parseFloat(filterAmountMax)
-    const matchDirection = filterDirection === 'all' || (filterDirection === 'entrada' && t.amount > 0) || (filterDirection === 'saida' && t.amount < 0)
-    return matchStatus && matchSearch && matchDateFrom && matchDateTo && matchAmountMin && matchAmountMax && matchDirection
+    // Grupo 2: Confiança
+    if (filterConfidence === 'high' && (t.confirmed_type || bestConfidence !== 'high')) return false
+    if (filterConfidence === 'medium' && (t.confirmed_type || bestConfidence !== 'medium')) return false
+    if (filterConfidence === 'low' && (t.confirmed_type || bestConfidence !== 'low')) return false
+
+    // Grupo 3: Identificação
+    if (filterIdentification === 'identificadas' && !(t.confirmed_type || (autoMatches && autoMatches.length > 0))) return false
+    if (filterIdentification === 'nao_identificadas' && (t.confirmed_type || (autoMatches && autoMatches.length > 0))) return false
+
+    // Filtros avançados
+    if (search && !t.description.toLowerCase().includes(search.toLowerCase())) return false
+    if (filterDateFrom && t.transaction_date < filterDateFrom) return false
+    if (filterDateTo && t.transaction_date > filterDateTo) return false
+    if (filterAmountMin && Math.abs(t.amount) < parseFloat(filterAmountMin)) return false
+    if (filterAmountMax && Math.abs(t.amount) > parseFloat(filterAmountMax)) return false
+    if (filterDirection === 'entrada' && t.amount <= 0) return false
+    if (filterDirection === 'saida' && t.amount >= 0) return false
+
+    return true
   })
 
   const totalIn = transactions.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0)
@@ -399,20 +413,15 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
   const headers = parsedRows[headerRowIndex]?.map((h: any) => String(h ?? '').trim()) ?? []
   const previewRows = parsedRows.slice(headerRowIndex + 1).slice(0, 5).filter(r => r && r.length > 0)
 
-  // Botões de filtro: linha 1 = estado, linha 2 = identificação
-  const filterButtons1 = [
-    { key: 'all', label: 'Todas', count: transactions.length },
-    { key: 'por_validar', label: 'Por Validar', count: countPorValidar },
-    { key: 'validado', label: 'Validadas', count: countValidado },
-    { key: 'ignorado', label: 'Ignoradas', count: countIgnorado },
-  ]
-  const filterButtons2 = [
-    { key: 'confianca_alta', label: '🟢 Confiança Alta', count: countAlt },
-    { key: 'confianca_media', label: '🟡 Confiança Média', count: countMed },
-    { key: 'confianca_baixa', label: '🔴 Confiança Baixa', count: countBai },
-    { key: 'identificadas', label: '🔗 Identificadas', count: countIdentificadas },
-    { key: 'nao_identificadas', label: '❓ Não identificadas', count: countNaoIdentificadas },
-  ]
+  function toggleStatus(val: 'por_validar' | 'validado' | 'ignorado') {
+    setFilterStatus(prev => prev === val ? 'all' : val)
+  }
+  function toggleConfidence(val: 'high' | 'medium' | 'low') {
+    setFilterConfidence(prev => prev === val ? 'all' : val)
+  }
+  function toggleIdentification(val: 'identificadas' | 'nao_identificadas') {
+    setFilterIdentification(prev => prev === val ? 'all' : val)
+  }
 
   return (
     <AppLayout>
@@ -469,28 +478,59 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
           </div>
         </div>
 
-        {/* Linha 1: Estado */}
+        {/* Grupo 1: Estado */}
         <div className="flex flex-wrap gap-2 mb-2">
-          {filterButtons1.map(btn => (
-            <button key={btn.key} onClick={() => setFilterStatus(btn.key as any)}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 ${filterStatus === btn.key ? 'bg-emerald-600 text-white' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'}`}>
+          <span className="text-xs font-medium text-gray-400 self-center w-16">Estado</span>
+          {([
+            { key: 'por_validar', label: 'Por Validar', count: countPorValidar, color: 'yellow' },
+            { key: 'validado', label: 'Validadas', count: countValidado, color: 'green' },
+            { key: 'ignorado', label: 'Ignoradas', count: countIgnorado, color: 'gray' },
+          ] as const).map(btn => (
+            <button key={btn.key} onClick={() => toggleStatus(btn.key)}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 ${
+                filterStatus === btn.key ? 'bg-emerald-600 text-white' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
+              }`}>
               {btn.label}
-              {btn.key !== 'all' && (
-                <span className={`px-1.5 py-0.5 rounded-full text-xs ${filterStatus === btn.key ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-500'}`}>
-                  {btn.count}
-                </span>
-              )}
+              <span className={`px-1.5 py-0.5 rounded-full text-xs ${filterStatus === btn.key ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-500'}`}>
+                {btn.count}
+              </span>
             </button>
           ))}
         </div>
 
-        {/* Linha 2: Identificação */}
-        <div className="flex flex-wrap gap-2 mb-4">
-          {filterButtons2.map(btn => (
-            <button key={btn.key} onClick={() => setFilterStatus(btn.key as any)}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 ${filterStatus === btn.key ? 'bg-emerald-600 text-white' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'}`}>
+        {/* Grupo 2: Confiança */}
+        <div className="flex flex-wrap gap-2 mb-2">
+          <span className="text-xs font-medium text-gray-400 self-center w-16">Confiança</span>
+          {([
+            { key: 'high', label: '🟢 Alta', count: countAlt },
+            { key: 'medium', label: '🟡 Média', count: countMed },
+            { key: 'low', label: '🔴 Baixa', count: countBai },
+          ] as const).map(btn => (
+            <button key={btn.key} onClick={() => toggleConfidence(btn.key)}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 ${
+                filterConfidence === btn.key ? 'bg-emerald-600 text-white' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
+              }`}>
               {btn.label}
-              <span className={`px-1.5 py-0.5 rounded-full text-xs ${filterStatus === btn.key ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-500'}`}>
+              <span className={`px-1.5 py-0.5 rounded-full text-xs ${filterConfidence === btn.key ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-500'}`}>
+                {btn.count}
+              </span>
+            </button>
+          ))}
+        </div>
+
+        {/* Grupo 3: Identificação */}
+        <div className="flex flex-wrap gap-2 mb-4">
+          <span className="text-xs font-medium text-gray-400 self-center w-16">Identif.</span>
+          {([
+            { key: 'identificadas', label: '🔗 Identificadas', count: countIdentificadas },
+            { key: 'nao_identificadas', label: '❓ Não identificadas', count: countNaoIdentificadas },
+          ] as const).map(btn => (
+            <button key={btn.key} onClick={() => toggleIdentification(btn.key)}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 ${
+                filterIdentification === btn.key ? 'bg-emerald-600 text-white' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
+              }`}>
+              {btn.label}
+              <span className={`px-1.5 py-0.5 rounded-full text-xs ${filterIdentification === btn.key ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-500'}`}>
                 {btn.count}
               </span>
             </button>
@@ -509,10 +549,10 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
             }`}>
             <SlidersHorizontal className="w-4 h-4" /> Filtros
           </button>
-          {hasActiveFilters && (
+          {(hasActiveFilters || hasActiveGroupFilters) && (
             <button onClick={resetFilters}
               className="flex items-center gap-1 px-3 py-2 rounded-lg border border-red-200 text-red-600 text-sm hover:bg-red-50 transition-colors">
-              <X className="w-3.5 h-3.5" /> Limpar
+              <X className="w-3.5 h-3.5" /> Limpar tudo
             </button>
           )}
         </div>
@@ -552,7 +592,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
           </div>
         )}
 
-        {(hasActiveFilters || filterStatus !== 'all') && (
+        {(hasActiveFilters || hasActiveGroupFilters) && (
           <p className="text-sm text-gray-500 mb-3">
             A mostrar <strong>{filtered.length}</strong> de {transactions.length} transações
           </p>
