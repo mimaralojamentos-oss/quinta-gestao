@@ -132,6 +132,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     finally { setLoading(false) }
   }
 
+  // CORRIGIDO: janela alargada de ±5 para ±15 dias
   function findAutoMatches(tx: Transaction, leasesData: any[], expensesData: any[], tenantsData: any[], rentData: any[]): AutoMatch[] {
     const results: AutoMatch[] = []
     const txDate = new Date(tx.transaction_date)
@@ -163,14 +164,15 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
 
     if (tx.amount < 0) {
       const amt = Math.abs(tx.amount)
-      const dateFrom = new Date(txDate); dateFrom.setDate(dateFrom.getDate() - 5)
-      const dateTo = new Date(txDate); dateTo.setDate(dateTo.getDate() + 5)
+      // CORRIGIDO: ±15 dias em vez de ±5 dias
+      const dateFrom = new Date(txDate); dateFrom.setDate(dateFrom.getDate() - 15)
+      const dateTo = new Date(txDate); dateTo.setDate(dateTo.getDate() + 15)
       const exactMatches = expensesData.filter(e => {
         const eDate = new Date(e.expense_date)
         return Math.abs(e.amount - amt) <= 0.02 && eDate >= dateFrom && eDate <= dateTo
       })
       for (const exp of exactMatches) {
-        results.push({ type: 'despesa', confidence: 'high', reason: `Valor exato ${formatCurrency(amt)} e data próxima`, expense: exp })
+        results.push({ type: 'despesa', confidence: 'high', reason: `Valor exato ${formatCurrency(amt)} e data próxima (±15 dias)`, expense: exp })
       }
       const supplierMatches = expensesData.filter(e => {
         if (!e.supplier) return false
@@ -514,7 +516,6 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
                     <tr key={tx.id} className={`hover:bg-gray-50 ${tx.status === 'ignorado' ? 'opacity-50' : ''}`}>
                       <td className="table-cell text-sm whitespace-nowrap">{formatDate(tx.transaction_date)}</td>
                       <td className="table-cell" style={{ maxWidth: '280px' }}>
-                        {/* Descrição com wrap — a linha expande se necessário */}
                         <p className="text-sm text-gray-800 break-words">{tx.description}</p>
                       </td>
                       <td className="table-cell whitespace-nowrap">
@@ -723,6 +724,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
   )
 }
 
+// CORRIGIDO: lista de despesas ordenada por proximidade de data da transação, limite aumentado para 200
 function MatchModalComponent({ tx, tenants, leases, expenses, autoMatches, onSave, onClose }: {
   tx: Transaction
   tenants: any[]
@@ -739,7 +741,16 @@ function MatchModalComponent({ tx, tenants, leases, expenses, autoMatches, onSav
   const [searchExpense, setSearchExpense] = useState('')
   const [searchTenant, setSearchTenant] = useState('')
 
-  const filteredExpenses = expenses.filter(e =>
+  // CORRIGIDO: ordenar despesas por proximidade de data em relação à transação bancária
+  const txDate = new Date(tx.transaction_date)
+
+  const sortedExpenses = [...expenses].sort((a, b) => {
+    const diffA = Math.abs(new Date(a.expense_date).getTime() - txDate.getTime())
+    const diffB = Math.abs(new Date(b.expense_date).getTime() - txDate.getTime())
+    return diffA - diffB
+  })
+
+  const filteredExpenses = sortedExpenses.filter(e =>
     !searchExpense ||
     e.description.toLowerCase().includes(searchExpense.toLowerCase()) ||
     e.supplier?.toLowerCase().includes(searchExpense.toLowerCase()) ||
@@ -749,6 +760,12 @@ function MatchModalComponent({ tx, tenants, leases, expenses, autoMatches, onSav
   const filteredTenants = tenants.filter(t =>
     !searchTenant || t.name.toLowerCase().includes(searchTenant.toLowerCase())
   )
+
+  // Calcular quantas despesas estão dentro de ±15 dias
+  const expensesNearby = sortedExpenses.filter(e => {
+    const diff = Math.abs(new Date(e.expense_date).getTime() - txDate.getTime())
+    return diff <= 15 * 24 * 60 * 60 * 1000
+  }).length
 
   function applyAutoMatch(match: any) {
     if (match.type === 'renda') { setType('renda'); setTenantId(match.tenant?.id ?? '') }
@@ -763,7 +780,7 @@ function MatchModalComponent({ tx, tenants, leases, expenses, autoMatches, onSav
           <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
         </div>
 
-        {/* Info da transação: Data + Valor + Descrição */}
+        {/* Info da transação */}
         <div className="bg-gray-50 rounded-lg p-4 mb-4">
           <div className="flex items-center gap-4 mb-3">
             <div>
@@ -851,33 +868,52 @@ function MatchModalComponent({ tx, tenants, leases, expenses, autoMatches, onSav
           {type === 'despesa' && (
             <div>
               <label className="label">Despesa associada</label>
+              {/* NOVO: indicador de despesas próximas */}
+              {expensesNearby > 0 && (
+                <p className="text-xs text-emerald-600 mb-2">
+                  📅 {expensesNearby} despesa(s) dentro de ±15 dias aparecem primeiro
+                </p>
+              )}
               <div className="relative mb-2">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
                 <input className="input pl-8 text-sm" placeholder="Pesquisar por descrição, fornecedor ou valor..."
                   value={searchExpense} onChange={e => setSearchExpense(e.target.value)} />
               </div>
-              {/* Lista de despesas com Data + Valor + Descrição */}
+              {/* CORRIGIDO: limite aumentado para 200, ordenado por proximidade de data */}
               <div className="border border-gray-200 rounded-lg overflow-hidden max-h-56 overflow-y-auto">
                 {filteredExpenses.length === 0 ? (
                   <p className="text-sm text-gray-400 text-center py-4">Nenhuma despesa encontrada</p>
                 ) : (
-                  filteredExpenses.slice(0, 50).map(e => (
-                    <div
-                      key={e.id}
-                      onClick={() => setExpenseId(e.id)}
-                      className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors ${expenseId === e.id ? 'bg-emerald-50 border-l-4 border-l-emerald-500' : ''}`}>
-                      {/* Data */}
-                      <span className="text-xs text-gray-400 whitespace-nowrap flex-shrink-0 w-20">{formatDate(e.expense_date)}</span>
-                      {/* Valor */}
-                      <span className="text-sm font-semibold text-red-600 whitespace-nowrap flex-shrink-0 w-20">{formatCurrency(e.amount)}</span>
-                      {/* Descrição */}
-                      <span className="text-xs text-gray-700 truncate">{e.description}</span>
-                      {expenseId === e.id && <CheckCircle className="w-4 h-4 text-emerald-500 flex-shrink-0 ml-auto" />}
-                    </div>
-                  ))
+                  filteredExpenses.slice(0, 200).map(e => {
+                    const diffDays = Math.round(Math.abs(new Date(e.expense_date).getTime() - txDate.getTime()) / (1000 * 60 * 60 * 24))
+                    const isNearby = diffDays <= 15
+                    return (
+                      <div
+                        key={e.id}
+                        onClick={() => setExpenseId(e.id)}
+                        className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors ${expenseId === e.id ? 'bg-emerald-50 border-l-4 border-l-emerald-500' : ''}`}>
+                        {/* Data */}
+                        <span className="text-xs text-gray-400 whitespace-nowrap flex-shrink-0 w-20">{formatDate(e.expense_date)}</span>
+                        {/* Valor */}
+                        <span className="text-sm font-semibold text-red-600 whitespace-nowrap flex-shrink-0 w-20">{formatCurrency(e.amount)}</span>
+                        {/* Descrição */}
+                        <span className="text-xs text-gray-700 truncate flex-1">{e.description}</span>
+                        {/* Badge de proximidade */}
+                        {isNearby && (
+                          <span className="text-xs px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 flex-shrink-0 font-medium">
+                            {diffDays === 0 ? 'hoje' : `${diffDays}d`}
+                          </span>
+                        )}
+                        {expenseId === e.id && <CheckCircle className="w-4 h-4 text-emerald-500 flex-shrink-0 ml-1" />}
+                      </div>
+                    )
+                  })
                 )}
               </div>
-              {filteredExpenses.length > 50 && <p className="text-xs text-gray-400 mt-1">A mostrar 50 de {filteredExpenses.length} — pesquisa para filtrar</p>}
+              {filteredExpenses.length > 200 && <p className="text-xs text-gray-400 mt-1">A mostrar 200 de {filteredExpenses.length} — pesquisa para filtrar</p>}
+              {filteredExpenses.length > 0 && filteredExpenses.length <= 200 && (
+                <p className="text-xs text-gray-400 mt-1">A mostrar {filteredExpenses.length} despesa(s) — ordenadas por proximidade de data</p>
+              )}
             </div>
           )}
 
