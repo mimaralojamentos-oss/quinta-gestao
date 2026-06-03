@@ -6,7 +6,7 @@ import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import {
   Upload, CheckCircle, Clock, XCircle, ArrowUpRight,
-  ArrowDownRight, ChevronLeft, Loader2, X, ArrowRight, Link2, Edit2, Search, SlidersHorizontal
+  ArrowDownRight, ChevronLeft, Loader2, X, ArrowRight, Link2, Edit2, Search, SlidersHorizontal, Sparkles
 } from 'lucide-react'
 import Link from 'next/link'
 import * as XLSX from 'xlsx'
@@ -43,8 +43,13 @@ interface ColumnMapping {
   type: string
 }
 
-interface MatchModal {
-  tx: Transaction
+interface AutoMatch {
+  type: 'renda' | 'despesa'
+  confidence: 'high' | 'medium' | 'low'
+  reason: string
+  tenant?: any
+  lease?: any
+  expense?: any
 }
 
 function parsePortugueseNumber(raw: any): number {
@@ -68,14 +73,14 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
   const [headerRowIndex, setHeaderRowIndex] = useState(0)
   const [mapping, setMapping] = useState<ColumnMapping>({ date: '', description: '', amount: '', balance: '', type: '' })
   const [importFile, setImportFile] = useState<File | null>(null)
-  const [matchModal, setMatchModal] = useState<MatchModal | null>(null)
+  const [matchModal, setMatchModal] = useState<Transaction | null>(null)
   const [tenants, setTenants] = useState<any[]>([])
   const [expenses, setExpenses] = useState<any[]>([])
   const [leases, setLeases] = useState<any[]>([])
-  const [txMatches, setTxMatches] = useState<Record<string, any>>({})
+  const [rentPayments, setRentPayments] = useState<any[]>([])
+  const [txMatches, setTxMatches] = useState<Record<string, AutoMatch[]>>({})
   const [showFilters, setShowFilters] = useState(false)
 
-  // Filtros avançados
   const [search, setSearch] = useState('')
   const [filterDateFrom, setFilterDateFrom] = useState('')
   const [filterDateTo, setFilterDateTo] = useState('')
@@ -103,13 +108,23 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
         .from('leases').select('id, monthly_rent, tenant:tenants(id, name), space:spaces(ref)').eq('status', 'ativo')
       setLeases(leasesData ?? [])
       const { data: expensesData } = await supabase
-        .from('expenses').select('id, expense_date, description, amount, supplier').order('expense_date', { ascending: false })
+        .from('expenses').select('id, expense_date, description, amount, supplier, payment_method')
+        .eq('payment_method', 'banco')
+        .order('expense_date', { ascending: false })
       setExpenses(expensesData ?? [])
+      const { data: rentData } = await supabase
+        .from('rent_payments').select('id, reference_month, amount, payment_date, payment_method, lease_id, lease:leases(id, space:spaces(ref), tenant:tenants(name))')
+        .eq('payment_method', 'banco')
+        .order('payment_date', { ascending: false })
+      setRentPayments(rentData ?? [])
+
       if (txData && leasesData && expensesData && tenantsData) {
-        const matches: Record<string, any> = {}
+        const matches: Record<string, AutoMatch[]> = {}
         for (const tx of txData) {
-          const match = findAutoMatch(tx, leasesData, expensesData, tenantsData)
-          if (match) matches[tx.id] = match
+          if (!tx.confirmed_type) {
+            const found = findAutoMatches(tx, leasesData, expensesData, tenantsData, rentData ?? [])
+            if (found.length > 0) matches[tx.id] = found
+          }
         }
         setTxMatches(matches)
       }
@@ -117,30 +132,80 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     finally { setLoading(false) }
   }
 
-  function findAutoMatch(tx: Transaction, leasesData: any[], expensesData: any[], tenantsData: any[]) {
-    if (tx.confirmed_type) return null
+  function findAutoMatches(tx: Transaction, leasesData: any[], expensesData: any[], tenantsData: any[], rentData: any[]): AutoMatch[] {
+    const results: AutoMatch[] = []
     const txDate = new Date(tx.transaction_date)
+
     if (tx.amount > 0) {
+      // 1. Correspondência por referência bancária do inquilino
       for (const tenant of tenantsData) {
         if (tenant.bank_reference && tx.description.toLowerCase().includes(tenant.bank_reference.toLowerCase())) {
           const lease = leasesData.find(l => (l.tenant as any)?.id === tenant.id)
-          return { type: 'renda', tenant, lease, confidence: 'high' }
+          results.push({ type: 'renda', confidence: 'high', reason: `Referência bancária "${tenant.bank_reference}" encontrada`, tenant, lease })
         }
       }
-      const leaseMatch = leasesData.find(l => Math.abs(l.monthly_rent - tx.amount) <= 5)
-      if (leaseMatch) return { type: 'renda', tenant: leaseMatch.tenant, lease: leaseMatch, confidence: 'medium' }
+      // 2. Correspondência por nome do inquilino na descrição
+      for (const tenant of tenantsData) {
+        const nameParts = tenant.name.split(' ')
+        const lastName = nameParts[nameParts.length - 1]
+        if (lastName.length > 3 && tx.description.toLowerCase().includes(lastName.toLowerCase())) {
+          const lease = leasesData.find(l => (l.tenant as any)?.id === tenant.id)
+          if (!results.find(r => r.tenant?.id === tenant.id)) {
+            results.push({ type: 'renda', confidence: 'medium', reason: `Nome "${lastName}" encontrado na descrição`, tenant, lease })
+          }
+        }
+      }
+      // 3. Correspondência por valor exato da renda
+      const rentMatches = leasesData.filter(l => Math.abs(l.monthly_rent - tx.amount) <= 1)
+      for (const lease of rentMatches) {
+        if (!results.find(r => r.lease?.id === lease.id)) {
+          results.push({ type: 'renda', confidence: 'medium', reason: `Valor ${formatCurrency(tx.amount)} coincide com renda mensal`, tenant: lease.tenant, lease })
+        }
+      }
     }
+
     if (tx.amount < 0) {
       const amt = Math.abs(tx.amount)
-      const dateFrom = new Date(txDate); dateFrom.setDate(dateFrom.getDate() - 3)
-      const dateTo = new Date(txDate); dateTo.setDate(dateTo.getDate() + 3)
-      const expMatch = expensesData.find(e => {
+      const dateFrom = new Date(txDate); dateFrom.setDate(dateFrom.getDate() - 5)
+      const dateTo = new Date(txDate); dateTo.setDate(dateTo.getDate() + 5)
+
+      // 1. Correspondência por valor exato e data próxima
+      const exactMatches = expensesData.filter(e => {
         const eDate = new Date(e.expense_date)
         return Math.abs(e.amount - amt) <= 0.02 && eDate >= dateFrom && eDate <= dateTo
       })
-      if (expMatch) return { type: 'despesa', expense: expMatch, confidence: 'high' }
+      for (const exp of exactMatches) {
+        results.push({ type: 'despesa', confidence: 'high', reason: `Valor exato ${formatCurrency(amt)} e data próxima`, expense: exp })
+      }
+
+      // 2. Correspondência por fornecedor na descrição
+      const supplierMatches = expensesData.filter(e => {
+        if (!e.supplier) return false
+        const supplierWords = e.supplier.split(' ').filter((w: string) => w.length > 4)
+        return supplierWords.some((w: string) => tx.description.toLowerCase().includes(w.toLowerCase()))
+      })
+      for (const exp of supplierMatches.slice(0, 2)) {
+        if (!results.find(r => r.expense?.id === exp.id)) {
+          results.push({ type: 'despesa', confidence: 'medium', reason: `Fornecedor "${exp.supplier}" encontrado na descrição`, expense: exp })
+        }
+      }
+
+      // 3. Correspondência por valor aproximado (±5%)
+      if (results.length === 0) {
+        const approxMatches = expensesData.filter(e => Math.abs(e.amount - amt) / amt <= 0.05)
+        for (const exp of approxMatches.slice(0, 2)) {
+          results.push({ type: 'despesa', confidence: 'low', reason: `Valor aproximado (${formatCurrency(exp.amount)} vs ${formatCurrency(amt)})`, expense: exp })
+        }
+      }
     }
-    return null
+
+    return results.slice(0, 3)
+  }
+
+  function getConfidenceBadge(confidence: string) {
+    if (confidence === 'high') return <span className="text-xs bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full font-medium">Alta</span>
+    if (confidence === 'medium') return <span className="text-xs bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded-full font-medium">Média</span>
+    return <span className="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded-full font-medium">Baixa</span>
   }
 
   function getMatchLabel(tx: Transaction) {
@@ -156,30 +221,31 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     if (tx.confirmed_type === 'outro') {
       return { label: `📝 ${tx.notes ?? 'Outro'}`, color: 'text-gray-600', confirmed: true }
     }
-    const auto = txMatches[tx.id]
-    if (auto) {
-      if (auto.type === 'renda') {
-        const conf = auto.confidence === 'high' ? '✓' : '~'
-        return { label: `${conf} 🏠 ${auto.tenant?.name ?? '—'}${auto.lease?.space ? ` · ${(auto.lease.space as any).ref}` : ''}`, color: 'text-emerald-500', confirmed: false }
+    const autoMatches = txMatches[tx.id]
+    if (autoMatches && autoMatches.length > 0) {
+      const best = autoMatches[0]
+      if (best.type === 'renda') {
+        return { label: `~ 🏠 ${best.tenant?.name ?? '—'}${best.lease?.space ? ` · ${(best.lease.space as any).ref}` : ''}`, color: 'text-emerald-400', confirmed: false, confidence: best.confidence }
       }
-      if (auto.type === 'despesa') {
-        return { label: `~ 💸 ${auto.expense?.description ?? '—'}`, color: 'text-red-400', confirmed: false }
+      if (best.type === 'despesa') {
+        return { label: `~ 💸 ${best.expense?.description ?? '—'}`, color: 'text-red-400', confirmed: false, confidence: best.confidence }
       }
     }
     return null
   }
 
   async function confirmAutoMatch(tx: Transaction) {
-    const auto = txMatches[tx.id]
-    if (!auto) return
-    if (auto.type === 'renda') {
+    const autoMatches = txMatches[tx.id]
+    if (!autoMatches || autoMatches.length === 0) return
+    const best = autoMatches[0]
+    if (best.type === 'renda') {
       await supabase.from('bank_transactions').update({
-        confirmed_type: 'renda', confirmed_tenant_id: auto.tenant?.id ?? null,
-        confirmed_lease_id: auto.lease?.id ?? null, status: 'validado',
+        confirmed_type: 'renda', confirmed_tenant_id: best.tenant?.id ?? null,
+        confirmed_lease_id: best.lease?.id ?? null, status: 'validado',
       }).eq('id', tx.id)
-    } else if (auto.type === 'despesa') {
+    } else if (best.type === 'despesa') {
       await supabase.from('bank_transactions').update({
-        confirmed_type: 'despesa', confirmed_expense_id: auto.expense?.id ?? null, status: 'validado',
+        confirmed_type: 'despesa', confirmed_expense_id: best.expense?.id ?? null, status: 'validado',
       }).eq('id', tx.id)
     }
     fetchData()
@@ -364,7 +430,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
           </div>
           <div className="card">
             <div className="flex items-center gap-2 mb-1"><Link2 className="w-4 h-4 text-blue-500" /><p className="text-sm text-gray-500">Identificadas</p></div>
-            <p className="text-xl font-bold text-blue-600">{identified}</p>
+            <p className="text-xl font-bold text-blue-600">{identified} / {transactions.length}</p>
           </div>
         </div>
 
@@ -379,7 +445,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
           ))}
         </div>
 
-        {/* Barra de pesquisa + filtros avançados */}
+        {/* Pesquisa + filtros */}
         <div className="flex gap-3 mb-3">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -392,11 +458,6 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
             }`}>
             <SlidersHorizontal className="w-4 h-4" />
             Filtros
-            {hasActiveFilters && (
-              <span className="bg-white text-emerald-600 text-xs font-bold px-1.5 py-0.5 rounded-full">
-                {[filterDateFrom, filterDateTo, filterAmountMin, filterAmountMax, filterDirection !== 'all' ? '1' : ''].filter(Boolean).length}
-              </span>
-            )}
           </button>
           {hasActiveFilters && (
             <button onClick={resetFilters}
@@ -406,7 +467,6 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
           )}
         </div>
 
-        {/* Painel de filtros avançados */}
         {showFilters && (
           <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-4 space-y-3">
             <div className="grid grid-cols-3 gap-3">
@@ -442,7 +502,6 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
           </div>
         )}
 
-        {/* Contador de resultados */}
         {(hasActiveFilters || filterStatus !== 'all') && (
           <p className="text-sm text-gray-500 mb-3">
             A mostrar <strong>{filtered.length}</strong> de {transactions.length} transações
@@ -468,7 +527,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
               <tbody className="divide-y divide-gray-50">
                 {filtered.map(tx => {
                   const matchInfo = getMatchLabel(tx)
-                  const autoMatch = txMatches[tx.id]
+                  const autoMatches = txMatches[tx.id]
                   return (
                     <tr key={tx.id} className={`hover:bg-gray-50 ${tx.status === 'ignorado' ? 'opacity-50' : ''}`}>
                       <td className="table-cell text-sm">{formatDate(tx.transaction_date)}</td>
@@ -483,23 +542,39 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
                       <td className="table-cell text-sm text-gray-500">
                         {tx.balance != null ? formatCurrency(tx.balance) : '—'}
                       </td>
-                      <td className="table-cell min-w-[200px]">
+                      <td className="table-cell min-w-[220px]">
                         {matchInfo ? (
-                          <div className="flex items-center gap-2">
-                            <span className={`text-xs font-medium ${matchInfo.color} truncate max-w-[160px]`}>{matchInfo.label}</span>
-                            {!matchInfo.confirmed && autoMatch && (
-                              <button onClick={() => confirmAutoMatch(tx)} className="text-xs text-emerald-600 hover:underline whitespace-nowrap">✓ Confirmar</button>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className={`text-xs font-medium ${matchInfo.color} truncate max-w-[150px]`}>{matchInfo.label}</span>
+                              {!matchInfo.confirmed && (matchInfo as any).confidence && (
+                                <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
+                                  (matchInfo as any).confidence === 'high' ? 'bg-emerald-100 text-emerald-700' :
+                                  (matchInfo as any).confidence === 'medium' ? 'bg-yellow-100 text-yellow-700' :
+                                  'bg-gray-100 text-gray-600'
+                                }`}>
+                                  {(matchInfo as any).confidence === 'high' ? 'Alta' : (matchInfo as any).confidence === 'medium' ? 'Média' : 'Baixa'}
+                                </span>
+                              )}
+                            </div>
+                            {!matchInfo.confirmed && autoMatches && autoMatches.length > 0 && (
+                              <div className="flex items-center gap-2 mt-1">
+                                <button onClick={() => confirmAutoMatch(tx)} className="text-xs text-emerald-600 hover:underline font-medium">✓ Confirmar</button>
+                                {autoMatches.length > 1 && (
+                                  <span className="text-xs text-gray-400">+{autoMatches.length - 1} sugestão(ões)</span>
+                                )}
+                              </div>
                             )}
                           </div>
                         ) : (
-                          <button onClick={() => setMatchModal({ tx })}
+                          <button onClick={() => setMatchModal(tx)}
                             className="flex items-center gap-1 text-xs text-gray-400 hover:text-blue-600 transition-colors">
                             <Link2 className="w-3 h-3" /> Identificar
                           </button>
                         )}
                         {matchInfo && (
-                          <button onClick={() => setMatchModal({ tx })} className="text-xs text-gray-400 hover:text-blue-500 transition-colors ml-1">
-                            <Edit2 className="w-3 h-3 inline" />
+                          <button onClick={() => setMatchModal(tx)} className="text-xs text-gray-400 hover:text-blue-500 transition-colors mt-0.5">
+                            <Edit2 className="w-3 h-3 inline" /> {matchInfo.confirmed ? 'Editar' : 'Ver todas'}
                           </button>
                         )}
                       </td>
@@ -533,11 +608,20 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
         )}
       </div>
 
+      {/* Modal de identificação */}
       {matchModal && (
-        <MatchModalComponent tx={matchModal.tx} tenants={tenants} leases={leases} expenses={expenses}
-          onSave={saveManualMatch} onClose={() => setMatchModal(null)} />
+        <MatchModalComponent
+          tx={matchModal}
+          tenants={tenants}
+          leases={leases}
+          expenses={expenses}
+          autoMatches={txMatches[matchModal.id] ?? []}
+          onSave={saveManualMatch}
+          onClose={() => setMatchModal(null)}
+        />
       )}
 
+      {/* Modal de importação */}
       {showImport && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6 max-h-[90vh] overflow-y-auto">
@@ -662,30 +746,93 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
   )
 }
 
-function MatchModalComponent({ tx, tenants, leases, expenses, onSave, onClose }: {
-  tx: Transaction, tenants: any[], leases: any[], expenses: any[],
-  onSave: (tx: Transaction, type: string, tenantId: string, expenseId: string, notes: string) => void,
+function MatchModalComponent({ tx, tenants, leases, expenses, autoMatches, onSave, onClose }: {
+  tx: Transaction
+  tenants: any[]
+  leases: any[]
+  expenses: any[]
+  autoMatches: any[]
+  onSave: (tx: Transaction, type: string, tenantId: string, expenseId: string, notes: string) => void
   onClose: () => void
 }) {
   const [type, setType] = useState(tx.confirmed_type ?? (tx.amount > 0 ? 'renda' : 'despesa'))
   const [tenantId, setTenantId] = useState(tx.confirmed_tenant_id ?? '')
   const [expenseId, setExpenseId] = useState(tx.confirmed_expense_id ?? '')
   const [notes, setNotes] = useState(tx.notes ?? '')
+  const [searchExpense, setSearchExpense] = useState('')
+  const [searchTenant, setSearchTenant] = useState('')
+
+  const filteredExpenses = expenses.filter(e =>
+    !searchExpense ||
+    e.description.toLowerCase().includes(searchExpense.toLowerCase()) ||
+    e.supplier?.toLowerCase().includes(searchExpense.toLowerCase()) ||
+    String(e.amount).includes(searchExpense)
+  )
+
+  const filteredTenants = tenants.filter(t =>
+    !searchTenant || t.name.toLowerCase().includes(searchTenant.toLowerCase())
+  )
+
+  function applyAutoMatch(match: any) {
+    if (match.type === 'renda') {
+      setType('renda')
+      setTenantId(match.tenant?.id ?? '')
+    } else if (match.type === 'despesa') {
+      setType('despesa')
+      setExpenseId(match.expense?.id ?? '')
+    }
+  }
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
           <h2 className="font-semibold text-lg text-gray-900">Identificar Transação</h2>
           <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
         </div>
+
+        {/* Info da transação */}
         <div className="bg-gray-50 rounded-lg p-3 mb-4">
           <p className="text-xs text-gray-500">{formatDate(tx.transaction_date)}</p>
-          <p className="text-sm text-gray-800 font-medium truncate">{tx.description}</p>
+          <p className="text-sm text-gray-800 font-medium">{tx.description}</p>
           <p className={`text-sm font-bold ${tx.amount >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
             {tx.amount >= 0 ? '+' : ''}{formatCurrency(tx.amount)}
           </p>
         </div>
+
+        {/* Sugestões automáticas */}
+        {autoMatches.length > 0 && (
+          <div className="mb-4">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-1">
+              <Sparkles className="w-3.5 h-3.5 text-blue-500" /> Sugestões automáticas
+            </p>
+            <div className="space-y-2">
+              {autoMatches.map((match, i) => (
+                <div key={i} className="flex items-center justify-between bg-blue-50 border border-blue-100 rounded-lg p-2.5">
+                  <div>
+                    <p className="text-xs font-medium text-blue-800">
+                      {match.type === 'renda' ? `🏠 ${match.tenant?.name ?? '—'}${match.lease?.space ? ` · ${match.lease.space.ref}` : ''}` : `💸 ${match.expense?.description ?? '—'}`}
+                    </p>
+                    <p className="text-xs text-blue-600 mt-0.5">{match.reason}</p>
+                    {match.expense && <p className="text-xs text-blue-500">{formatDate(match.expense.expense_date)} · {formatCurrency(match.expense.amount)}</p>}
+                  </div>
+                  <div className="flex items-center gap-2 ml-3">
+                    <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${match.confidence === 'high' ? 'bg-emerald-100 text-emerald-700' : match.confidence === 'medium' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-600'}`}>
+                      {match.confidence === 'high' ? 'Alta' : match.confidence === 'medium' ? 'Média' : 'Baixa'}
+                    </span>
+                    <button onClick={() => applyAutoMatch(match)} className="text-xs bg-blue-600 text-white px-2 py-1 rounded-lg hover:bg-blue-700">
+                      Usar
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="border-t border-gray-100 mt-3 pt-3">
+              <p className="text-xs text-gray-400 mb-2">Ou escolhe manualmente:</p>
+            </div>
+          </div>
+        )}
+
         <div className="space-y-4">
           <div>
             <label className="label">Tipo</label>
@@ -698,29 +845,43 @@ function MatchModalComponent({ tx, tenants, leases, expenses, onSave, onClose }:
               ))}
             </div>
           </div>
+
           {type === 'renda' && (
             <div>
               <label className="label">Inquilino</label>
-              <select className="input" value={tenantId} onChange={e => setTenantId(e.target.value)}>
-                <option value="">— Seleciona o inquilino —</option>
-                {tenants.map(t => {
+              <div className="relative mb-2">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                <input className="input pl-8 text-sm" placeholder="Pesquisar inquilino..."
+                  value={searchTenant} onChange={e => setSearchTenant(e.target.value)} />
+              </div>
+              <select className="input" value={tenantId} onChange={e => setTenantId(e.target.value)} size={5}>
+                <option value="">— Nenhum —</option>
+                {filteredTenants.map(t => {
                   const lease = leases.find(l => (l.tenant as any)?.id === t.id)
                   return <option key={t.id} value={t.id}>{t.name}{lease?.space ? ` · ${(lease.space as any).ref}` : ''}</option>
                 })}
               </select>
             </div>
           )}
+
           {type === 'despesa' && (
             <div>
               <label className="label">Despesa associada</label>
-              <select className="input" value={expenseId} onChange={e => setExpenseId(e.target.value)}>
-                <option value="">— Seleciona a despesa —</option>
-                {expenses.slice(0, 100).map(e => (
+              <div className="relative mb-2">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                <input className="input pl-8 text-sm" placeholder="Pesquisar por descrição, fornecedor ou valor..."
+                  value={searchExpense} onChange={e => setSearchExpense(e.target.value)} />
+              </div>
+              <select className="input" value={expenseId} onChange={e => setExpenseId(e.target.value)} size={5}>
+                <option value="">— Nenhuma —</option>
+                {filteredExpenses.slice(0, 50).map(e => (
                   <option key={e.id} value={e.id}>{formatDate(e.expense_date)} · {e.description} · {formatCurrency(e.amount)}</option>
                 ))}
               </select>
+              {filteredExpenses.length > 50 && <p className="text-xs text-gray-400 mt-1">A mostrar 50 de {filteredExpenses.length} — pesquisa para filtrar</p>}
             </div>
           )}
+
           {type === 'outro' && (
             <div>
               <label className="label">Descrição</label>
@@ -729,6 +890,7 @@ function MatchModalComponent({ tx, tenants, leases, expenses, onSave, onClose }:
             </div>
           )}
         </div>
+
         <div className="flex justify-end gap-3 mt-6">
           <button className="btn-secondary" onClick={onClose}>Cancelar</button>
           <button className="btn-primary" onClick={() => onSave(tx, type, tenantId, expenseId, notes)}>Guardar</button>
