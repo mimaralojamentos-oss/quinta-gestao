@@ -137,14 +137,12 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     const txDate = new Date(tx.transaction_date)
 
     if (tx.amount > 0) {
-      // 1. Correspondência por referência bancária do inquilino
       for (const tenant of tenantsData) {
         if (tenant.bank_reference && tx.description.toLowerCase().includes(tenant.bank_reference.toLowerCase())) {
           const lease = leasesData.find(l => (l.tenant as any)?.id === tenant.id)
           results.push({ type: 'renda', confidence: 'high', reason: `Referência bancária "${tenant.bank_reference}" encontrada`, tenant, lease })
         }
       }
-      // 2. Correspondência por nome do inquilino na descrição
       for (const tenant of tenantsData) {
         const nameParts = tenant.name.split(' ')
         const lastName = nameParts[nameParts.length - 1]
@@ -155,7 +153,6 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
           }
         }
       }
-      // 3. Correspondência por valor exato da renda
       const rentMatches = leasesData.filter(l => Math.abs(l.monthly_rent - tx.amount) <= 1)
       for (const lease of rentMatches) {
         if (!results.find(r => r.lease?.id === lease.id)) {
@@ -168,8 +165,6 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
       const amt = Math.abs(tx.amount)
       const dateFrom = new Date(txDate); dateFrom.setDate(dateFrom.getDate() - 5)
       const dateTo = new Date(txDate); dateTo.setDate(dateTo.getDate() + 5)
-
-      // 1. Correspondência por valor exato e data próxima
       const exactMatches = expensesData.filter(e => {
         const eDate = new Date(e.expense_date)
         return Math.abs(e.amount - amt) <= 0.02 && eDate >= dateFrom && eDate <= dateTo
@@ -177,8 +172,6 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
       for (const exp of exactMatches) {
         results.push({ type: 'despesa', confidence: 'high', reason: `Valor exato ${formatCurrency(amt)} e data próxima`, expense: exp })
       }
-
-      // 2. Correspondência por fornecedor na descrição
       const supplierMatches = expensesData.filter(e => {
         if (!e.supplier) return false
         const supplierWords = e.supplier.split(' ').filter((w: string) => w.length > 4)
@@ -189,8 +182,6 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
           results.push({ type: 'despesa', confidence: 'medium', reason: `Fornecedor "${exp.supplier}" encontrado na descrição`, expense: exp })
         }
       }
-
-      // 3. Correspondência por valor aproximado (±5%)
       if (results.length === 0) {
         const approxMatches = expensesData.filter(e => Math.abs(e.amount - amt) / amt <= 0.05)
         for (const exp of approxMatches.slice(0, 2)) {
@@ -200,12 +191,6 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     }
 
     return results.slice(0, 3)
-  }
-
-  function getConfidenceBadge(confidence: string) {
-    if (confidence === 'high') return <span className="text-xs bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full font-medium">Alta</span>
-    if (confidence === 'medium') return <span className="text-xs bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded-full font-medium">Média</span>
-    return <span className="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded-full font-medium">Baixa</span>
   }
 
   function getMatchLabel(tx: Transaction) {
@@ -434,7 +419,6 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
           </div>
         </div>
 
-        {/* Filtros de estado */}
         <div className="flex gap-2 mb-4">
           {(['all', 'por_validar', 'validado', 'ignorado'] as const).map(s => (
             <button key={s} onClick={() => setFilterStatus(s)}
@@ -445,7 +429,6 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
           ))}
         </div>
 
-        {/* Pesquisa + filtros */}
         <div className="flex gap-3 mb-3">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -456,8 +439,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
             className={`flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-colors ${
               hasActiveFilters ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
             }`}>
-            <SlidersHorizontal className="w-4 h-4" />
-            Filtros
+            <SlidersHorizontal className="w-4 h-4" /> Filtros
           </button>
           {hasActiveFilters && (
             <button onClick={resetFilters}
@@ -511,17 +493,17 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
         {loading ? (
           <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600" /></div>
         ) : (
-          <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-            <table className="w-full">
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-x-auto">
+            <table className="w-full min-w-[900px]">
               <thead className="bg-gray-50 border-b border-gray-100">
                 <tr>
-                  <th className="table-header">Data</th>
+                  <th className="table-header w-28">Data</th>
                   <th className="table-header">Descrição</th>
-                  <th className="table-header">Valor</th>
-                  <th className="table-header">Saldo</th>
-                  <th className="table-header">Identificação</th>
-                  <th className="table-header">Estado</th>
-                  <th className="table-header"></th>
+                  <th className="table-header w-28">Valor</th>
+                  <th className="table-header w-28">Saldo</th>
+                  <th className="table-header w-64">Identificação</th>
+                  <th className="table-header w-28">Estado</th>
+                  <th className="table-header w-32"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
@@ -530,25 +512,25 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
                   const autoMatches = txMatches[tx.id]
                   return (
                     <tr key={tx.id} className={`hover:bg-gray-50 ${tx.status === 'ignorado' ? 'opacity-50' : ''}`}>
-                      <td className="table-cell text-sm">{formatDate(tx.transaction_date)}</td>
-                      <td className="table-cell max-w-xs">
-                        <p className="text-sm text-gray-800 truncate">{tx.description}</p>
-                      </td>
+                      <td className="table-cell text-sm whitespace-nowrap">{formatDate(tx.transaction_date)}</td>
                       <td className="table-cell">
+                        <p className="text-sm text-gray-800">{tx.description}</p>
+                      </td>
+                      <td className="table-cell whitespace-nowrap">
                         <span className={`font-semibold text-sm ${tx.amount >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                           {tx.amount >= 0 ? '+' : ''}{formatCurrency(tx.amount)}
                         </span>
                       </td>
-                      <td className="table-cell text-sm text-gray-500">
+                      <td className="table-cell text-sm text-gray-500 whitespace-nowrap">
                         {tx.balance != null ? formatCurrency(tx.balance) : '—'}
                       </td>
-                      <td className="table-cell min-w-[220px]">
+                      <td className="table-cell">
                         {matchInfo ? (
                           <div>
                             <div className="flex items-center gap-2">
                               <span className={`text-xs font-medium ${matchInfo.color} truncate max-w-[150px]`}>{matchInfo.label}</span>
                               {!matchInfo.confirmed && (matchInfo as any).confidence && (
-                                <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
+                                <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium flex-shrink-0 ${
                                   (matchInfo as any).confidence === 'high' ? 'bg-emerald-100 text-emerald-700' :
                                   (matchInfo as any).confidence === 'medium' ? 'bg-yellow-100 text-yellow-700' :
                                   'bg-gray-100 text-gray-600'
@@ -560,21 +542,17 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
                             {!matchInfo.confirmed && autoMatches && autoMatches.length > 0 && (
                               <div className="flex items-center gap-2 mt-1">
                                 <button onClick={() => confirmAutoMatch(tx)} className="text-xs text-emerald-600 hover:underline font-medium">✓ Confirmar</button>
-                                {autoMatches.length > 1 && (
-                                  <span className="text-xs text-gray-400">+{autoMatches.length - 1} sugestão(ões)</span>
-                                )}
+                                {autoMatches.length > 1 && <span className="text-xs text-gray-400">+{autoMatches.length - 1} sugestão(ões)</span>}
                               </div>
                             )}
+                            <button onClick={() => setMatchModal(tx)} className="text-xs text-gray-400 hover:text-blue-500 transition-colors mt-0.5">
+                              <Edit2 className="w-3 h-3 inline" /> {matchInfo.confirmed ? 'Editar' : 'Ver todas'}
+                            </button>
                           </div>
                         ) : (
                           <button onClick={() => setMatchModal(tx)}
                             className="flex items-center gap-1 text-xs text-gray-400 hover:text-blue-600 transition-colors">
                             <Link2 className="w-3 h-3" /> Identificar
-                          </button>
-                        )}
-                        {matchInfo && (
-                          <button onClick={() => setMatchModal(tx)} className="text-xs text-gray-400 hover:text-blue-500 transition-colors mt-0.5">
-                            <Edit2 className="w-3 h-3 inline" /> {matchInfo.confirmed ? 'Editar' : 'Ver todas'}
                           </button>
                         )}
                       </td>
@@ -608,7 +586,6 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
         )}
       </div>
 
-      {/* Modal de identificação */}
       {matchModal && (
         <MatchModalComponent
           tx={matchModal}
@@ -621,7 +598,6 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
         />
       )}
 
-      {/* Modal de importação */}
       {showImport && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6 max-h-[90vh] overflow-y-auto">
@@ -774,30 +750,39 @@ function MatchModalComponent({ tx, tenants, leases, expenses, autoMatches, onSav
   )
 
   function applyAutoMatch(match: any) {
-    if (match.type === 'renda') {
-      setType('renda')
-      setTenantId(match.tenant?.id ?? '')
-    } else if (match.type === 'despesa') {
-      setType('despesa')
-      setExpenseId(match.expense?.id ?? '')
-    }
+    if (match.type === 'renda') { setType('renda'); setTenantId(match.tenant?.id ?? '') }
+    else if (match.type === 'despesa') { setType('despesa'); setExpenseId(match.expense?.id ?? '') }
   }
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
           <h2 className="font-semibold text-lg text-gray-900">Identificar Transação</h2>
           <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
         </div>
 
-        {/* Info da transação */}
-        <div className="bg-gray-50 rounded-lg p-3 mb-4">
-          <p className="text-xs text-gray-500">{formatDate(tx.transaction_date)}</p>
-          <p className="text-sm text-gray-800 font-medium">{tx.description}</p>
-          <p className={`text-sm font-bold ${tx.amount >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-            {tx.amount >= 0 ? '+' : ''}{formatCurrency(tx.amount)}
-          </p>
+        {/* Info da transação — ordem: Data + Valor + Descrição */}
+        <div className="bg-gray-50 rounded-lg p-4 mb-4">
+          <div className="flex items-center gap-4 mb-2">
+            <div className="text-center">
+              <p className="text-xs text-gray-400 mb-0.5">Data</p>
+              <p className="text-sm font-semibold text-gray-700">{formatDate(tx.transaction_date)}</p>
+            </div>
+            <div className="w-px h-8 bg-gray-200" />
+            <div className="text-center">
+              <p className="text-xs text-gray-400 mb-0.5">Valor</p>
+              <p className={`text-lg font-bold ${tx.amount >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                {tx.amount >= 0 ? '+' : ''}{formatCurrency(tx.amount)}
+              </p>
+            </div>
+          </div>
+          <div>
+            <p className="text-xs text-gray-400 mb-1">Descrição</p>
+            <div className="bg-white border border-gray-200 rounded-lg px-3 py-2 overflow-x-auto">
+              <p className="text-sm text-gray-800 whitespace-nowrap">{tx.description}</p>
+            </div>
+          </div>
         </div>
 
         {/* Sugestões automáticas */}
@@ -809,14 +794,14 @@ function MatchModalComponent({ tx, tenants, leases, expenses, autoMatches, onSav
             <div className="space-y-2">
               {autoMatches.map((match, i) => (
                 <div key={i} className="flex items-center justify-between bg-blue-50 border border-blue-100 rounded-lg p-2.5">
-                  <div>
-                    <p className="text-xs font-medium text-blue-800">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium text-blue-800 truncate">
                       {match.type === 'renda' ? `🏠 ${match.tenant?.name ?? '—'}${match.lease?.space ? ` · ${match.lease.space.ref}` : ''}` : `💸 ${match.expense?.description ?? '—'}`}
                     </p>
                     <p className="text-xs text-blue-600 mt-0.5">{match.reason}</p>
                     {match.expense && <p className="text-xs text-blue-500">{formatDate(match.expense.expense_date)} · {formatCurrency(match.expense.amount)}</p>}
                   </div>
-                  <div className="flex items-center gap-2 ml-3">
+                  <div className="flex items-center gap-2 ml-3 flex-shrink-0">
                     <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${match.confidence === 'high' ? 'bg-emerald-100 text-emerald-700' : match.confidence === 'medium' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-600'}`}>
                       {match.confidence === 'high' ? 'Alta' : match.confidence === 'medium' ? 'Média' : 'Baixa'}
                     </span>
