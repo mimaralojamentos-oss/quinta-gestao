@@ -67,7 +67,6 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
   const [validatingAll, setValidatingAll] = useState(false)
   const [showImport, setShowImport] = useState(false)
 
-  // 3 grupos de filtros independentes
   const [filterStatus, setFilterStatus] = useState<'all' | 'por_validar' | 'validado' | 'ignorado'>('all')
   const [filterConfidence, setFilterConfidence] = useState<'all' | 'high' | 'medium' | 'low'>('all')
   const [filterIdentification, setFilterIdentification] = useState<'all' | 'identificadas' | 'nao_identificadas'>('all')
@@ -207,6 +206,12 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     if (tx.confirmed_type === 'despesa' && tx.confirmed_expense_id) {
       const exp = expenses.find(e => e.id === tx.confirmed_expense_id)
       return { label: `💸 ${exp?.description ?? '—'}`, color: 'text-red-600', confirmed: true }
+    }
+    if (tx.confirmed_type === 'custos_bancarios') {
+      return { label: `🏦 ${tx.notes ?? 'Custos Bancários'}`, color: 'text-blue-600', confirmed: true }
+    }
+    if (tx.confirmed_type === 'impostos') {
+      return { label: `🧾 ${tx.notes ?? 'Impostos'}`, color: 'text-orange-600', confirmed: true }
     }
     if (tx.confirmed_type === 'outro') {
       return { label: `📝 ${tx.notes ?? 'Outro'}`, color: 'text-gray-600', confirmed: true }
@@ -366,7 +371,6 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
   const hasActiveFilters = search || filterDateFrom || filterDateTo || filterAmountMin || filterAmountMax || filterDirection !== 'all'
   const hasActiveGroupFilters = filterStatus !== 'all' || filterConfidence !== 'all' || filterIdentification !== 'all'
 
-  // Contagens
   const countPorValidar = transactions.filter(t => t.status === 'por_validar').length
   const countValidado = transactions.filter(t => t.status === 'validado').length
   const countIgnorado = transactions.filter(t => t.status === 'ignorado').length
@@ -380,21 +384,17 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     const autoMatches = txMatches[t.id]
     const bestConfidence = autoMatches?.[0]?.confidence
 
-    // Grupo 1: Estado
     if (filterStatus === 'por_validar' && t.status !== 'por_validar') return false
     if (filterStatus === 'validado' && t.status !== 'validado') return false
     if (filterStatus === 'ignorado' && t.status !== 'ignorado') return false
 
-    // Grupo 2: Confiança
     if (filterConfidence === 'high' && (t.confirmed_type || bestConfidence !== 'high')) return false
     if (filterConfidence === 'medium' && (t.confirmed_type || bestConfidence !== 'medium')) return false
     if (filterConfidence === 'low' && (t.confirmed_type || bestConfidence !== 'low')) return false
 
-    // Grupo 3: Identificação
     if (filterIdentification === 'identificadas' && !(t.confirmed_type || (autoMatches && autoMatches.length > 0))) return false
     if (filterIdentification === 'nao_identificadas' && (t.confirmed_type || (autoMatches && autoMatches.length > 0))) return false
 
-    // Filtros avançados
     if (search && !t.description.toLowerCase().includes(search.toLowerCase())) return false
     if (filterDateFrom && t.transaction_date < filterDateFrom) return false
     if (filterDateTo && t.transaction_date > filterDateTo) return false
@@ -482,18 +482,14 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
         <div className="flex flex-wrap gap-2 mb-2">
           <span className="text-xs font-medium text-gray-400 self-center w-16">Estado</span>
           {([
-            { key: 'por_validar', label: 'Por Validar', count: countPorValidar, color: 'yellow' },
-            { key: 'validado', label: 'Validadas', count: countValidado, color: 'green' },
-            { key: 'ignorado', label: 'Ignoradas', count: countIgnorado, color: 'gray' },
+            { key: 'por_validar', label: 'Por Validar', count: countPorValidar },
+            { key: 'validado', label: 'Validadas', count: countValidado },
+            { key: 'ignorado', label: 'Ignoradas', count: countIgnorado },
           ] as const).map(btn => (
             <button key={btn.key} onClick={() => toggleStatus(btn.key)}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 ${
-                filterStatus === btn.key ? 'bg-emerald-600 text-white' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
-              }`}>
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 ${filterStatus === btn.key ? 'bg-emerald-600 text-white' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'}`}>
               {btn.label}
-              <span className={`px-1.5 py-0.5 rounded-full text-xs ${filterStatus === btn.key ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-500'}`}>
-                {btn.count}
-              </span>
+              <span className={`px-1.5 py-0.5 rounded-full text-xs ${filterStatus === btn.key ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-500'}`}>{btn.count}</span>
             </button>
           ))}
         </div>
@@ -507,13 +503,9 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
             { key: 'low', label: '🔴 Baixa', count: countBai },
           ] as const).map(btn => (
             <button key={btn.key} onClick={() => toggleConfidence(btn.key)}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 ${
-                filterConfidence === btn.key ? 'bg-emerald-600 text-white' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
-              }`}>
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 ${filterConfidence === btn.key ? 'bg-emerald-600 text-white' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'}`}>
               {btn.label}
-              <span className={`px-1.5 py-0.5 rounded-full text-xs ${filterConfidence === btn.key ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-500'}`}>
-                {btn.count}
-              </span>
+              <span className={`px-1.5 py-0.5 rounded-full text-xs ${filterConfidence === btn.key ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-500'}`}>{btn.count}</span>
             </button>
           ))}
         </div>
@@ -526,13 +518,9 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
             { key: 'nao_identificadas', label: '❓ Não identificadas', count: countNaoIdentificadas },
           ] as const).map(btn => (
             <button key={btn.key} onClick={() => toggleIdentification(btn.key)}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 ${
-                filterIdentification === btn.key ? 'bg-emerald-600 text-white' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
-              }`}>
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 ${filterIdentification === btn.key ? 'bg-emerald-600 text-white' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'}`}>
               {btn.label}
-              <span className={`px-1.5 py-0.5 rounded-full text-xs ${filterIdentification === btn.key ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-500'}`}>
-                {btn.count}
-              </span>
+              <span className={`px-1.5 py-0.5 rounded-full text-xs ${filterIdentification === btn.key ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-500'}`}>{btn.count}</span>
             </button>
           ))}
         </div>
@@ -544,9 +532,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
               value={search} onChange={e => setSearch(e.target.value)} />
           </div>
           <button onClick={() => setShowFilters(v => !v)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-colors ${
-              hasActiveFilters ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
-            }`}>
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-colors ${hasActiveFilters ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
             <SlidersHorizontal className="w-4 h-4" /> Filtros
           </button>
           {(hasActiveFilters || hasActiveGroupFilters) && (
@@ -870,6 +856,8 @@ function MatchModalComponent({ tx, tenants, leases, expenses, autoMatches, onSav
     return diff <= 15 * 24 * 60 * 60 * 1000
   }).length
 
+  const tiposComNotes = ['outro', 'custos_bancarios', 'impostos']
+
   function applyAutoMatch(match: any) {
     if (match.type === 'renda') { setType('renda'); setTenantId(match.tenant?.id ?? '') }
     else if (match.type === 'despesa') { setType('despesa'); setExpenseId(match.expense?.id ?? '') }
@@ -938,8 +926,25 @@ function MatchModalComponent({ tx, tenants, leases, expenses, autoMatches, onSav
         <div className="space-y-4">
           <div>
             <label className="label">Tipo</label>
-            <div className="grid grid-cols-3 gap-2">
-              {[{ value: 'renda', label: '🏠 Renda' }, { value: 'despesa', label: '💸 Despesa' }, { value: 'outro', label: '📝 Outro' }].map(opt => (
+            {/* Linha 1 */}
+            <div className="grid grid-cols-3 gap-2 mb-2">
+              {[
+                { value: 'renda', label: '🏠 Renda' },
+                { value: 'despesa', label: '💸 Despesa' },
+                { value: 'outro', label: '📝 Outro' },
+              ].map(opt => (
+                <button key={opt.value} onClick={() => setType(opt.value)}
+                  className={`py-2 rounded-lg border text-sm font-medium transition-colors ${type === opt.value ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-600 border-gray-200'}`}>
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            {/* Linha 2 */}
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { value: 'custos_bancarios', label: '🏦 Custos Bancários' },
+                { value: 'impostos', label: '🧾 Impostos' },
+              ].map(opt => (
                 <button key={opt.value} onClick={() => setType(opt.value)}
                   className={`py-2 rounded-lg border text-sm font-medium transition-colors ${type === opt.value ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-600 border-gray-200'}`}>
                   {opt.label}
@@ -1010,10 +1015,10 @@ function MatchModalComponent({ tx, tenants, leases, expenses, autoMatches, onSav
             </div>
           )}
 
-          {type === 'outro' && (
+          {tiposComNotes.includes(type) && (
             <div>
               <label className="label">Descrição</label>
-              <input className="input" placeholder="ex: Transferência interna, Comissão bancária..."
+              <input className="input" placeholder="ex: Comissão bancária, IRS, IMI..."
                 value={notes} onChange={e => setNotes(e.target.value)} />
             </div>
           )}
