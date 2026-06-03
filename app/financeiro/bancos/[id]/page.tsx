@@ -66,7 +66,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
   const [importing, setImporting] = useState(false)
   const [validatingAll, setValidatingAll] = useState(false)
   const [showImport, setShowImport] = useState(false)
-  const [filterStatus, setFilterStatus] = useState<'all' | 'por_validar' | 'validado' | 'ignorado'>('all')
+  const [filterStatus, setFilterStatus] = useState<'all' | 'por_validar' | 'validado' | 'ignorado' | 'confianca_alta' | 'confianca_media' | 'confianca_baixa' | 'identificadas' | 'nao_identificadas'>('all')
   const [importStep, setImportStep] = useState<'upload' | 'mapping' | 'preview'>('upload')
   const [parsedHeaders, setParsedHeaders] = useState<string[]>([])
   const [parsedRows, setParsedRows] = useState<any[][]>([])
@@ -132,7 +132,6 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     finally { setLoading(false) }
   }
 
-  // CORRIGIDO: janela alargada de ±5 para ±15 dias
   function findAutoMatches(tx: Transaction, leasesData: any[], expensesData: any[], tenantsData: any[], rentData: any[]): AutoMatch[] {
     const results: AutoMatch[] = []
     const txDate = new Date(tx.transaction_date)
@@ -164,7 +163,6 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
 
     if (tx.amount < 0) {
       const amt = Math.abs(tx.amount)
-      // CORRIGIDO: ±15 dias em vez de ±5 dias
       const dateFrom = new Date(txDate); dateFrom.setDate(dateFrom.getDate() - 15)
       const dateTo = new Date(txDate); dateTo.setDate(dateTo.getDate() + 15)
       const exactMatches = expensesData.filter(e => {
@@ -361,8 +359,30 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
 
   const hasActiveFilters = search || filterDateFrom || filterDateTo || filterAmountMin || filterAmountMax || filterDirection !== 'all'
 
+  // Contagens para os badges dos filtros
+  const countPorValidar = transactions.filter(t => t.status === 'por_validar').length
+  const countValidado = transactions.filter(t => t.status === 'validado').length
+  const countIgnorado = transactions.filter(t => t.status === 'ignorado').length
+  const countAlt = transactions.filter(t => !t.confirmed_type && txMatches[t.id]?.[0]?.confidence === 'high').length
+  const countMed = transactions.filter(t => !t.confirmed_type && txMatches[t.id]?.[0]?.confidence === 'medium').length
+  const countBai = transactions.filter(t => !t.confirmed_type && txMatches[t.id]?.[0]?.confidence === 'low').length
+  const countIdentificadas = transactions.filter(t => t.confirmed_type || txMatches[t.id]?.length > 0).length
+  const countNaoIdentificadas = transactions.filter(t => !t.confirmed_type && (!txMatches[t.id] || txMatches[t.id].length === 0)).length
+
   const filtered = transactions.filter(t => {
-    const matchStatus = filterStatus === 'all' || t.status === filterStatus
+    const autoMatches = txMatches[t.id]
+    const bestConfidence = autoMatches?.[0]?.confidence
+
+    let matchStatus = true
+    if (filterStatus === 'por_validar') matchStatus = t.status === 'por_validar'
+    else if (filterStatus === 'validado') matchStatus = t.status === 'validado'
+    else if (filterStatus === 'ignorado') matchStatus = t.status === 'ignorado'
+    else if (filterStatus === 'confianca_alta') matchStatus = !t.confirmed_type && bestConfidence === 'high'
+    else if (filterStatus === 'confianca_media') matchStatus = !t.confirmed_type && bestConfidence === 'medium'
+    else if (filterStatus === 'confianca_baixa') matchStatus = !t.confirmed_type && bestConfidence === 'low'
+    else if (filterStatus === 'identificadas') matchStatus = !!(t.confirmed_type || (autoMatches && autoMatches.length > 0))
+    else if (filterStatus === 'nao_identificadas') matchStatus = !t.confirmed_type && (!autoMatches || autoMatches.length === 0)
+
     const matchSearch = !search || t.description.toLowerCase().includes(search.toLowerCase())
     const matchDateFrom = !filterDateFrom || t.transaction_date >= filterDateFrom
     const matchDateTo = !filterDateTo || t.transaction_date <= filterDateTo
@@ -378,6 +398,21 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
   const identified = transactions.filter(t => t.confirmed_type || txMatches[t.id]).length
   const headers = parsedRows[headerRowIndex]?.map((h: any) => String(h ?? '').trim()) ?? []
   const previewRows = parsedRows.slice(headerRowIndex + 1).slice(0, 5).filter(r => r && r.length > 0)
+
+  // Botões de filtro: linha 1 = estado, linha 2 = identificação
+  const filterButtons1 = [
+    { key: 'all', label: 'Todas', count: transactions.length },
+    { key: 'por_validar', label: 'Por Validar', count: countPorValidar },
+    { key: 'validado', label: 'Validadas', count: countValidado },
+    { key: 'ignorado', label: 'Ignoradas', count: countIgnorado },
+  ]
+  const filterButtons2 = [
+    { key: 'confianca_alta', label: '🟢 Confiança Alta', count: countAlt },
+    { key: 'confianca_media', label: '🟡 Confiança Média', count: countMed },
+    { key: 'confianca_baixa', label: '🔴 Confiança Baixa', count: countBai },
+    { key: 'identificadas', label: '🔗 Identificadas', count: countIdentificadas },
+    { key: 'nao_identificadas', label: '❓ Não identificadas', count: countNaoIdentificadas },
+  ]
 
   return (
     <AppLayout>
@@ -402,31 +437,62 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
           </div>
         </div>
 
-        <div className="grid grid-cols-4 gap-4 mb-6">
-          <div className="card">
-            <div className="flex items-center gap-2 mb-1"><ArrowUpRight className="w-4 h-4 text-emerald-500" /><p className="text-sm text-gray-500">Total Entradas</p></div>
-            <p className="text-xl font-bold text-emerald-600">{formatCurrency(totalIn)}</p>
+        {/* Cards compactos */}
+        <div className="grid grid-cols-4 gap-3 mb-5">
+          <div className="bg-white border border-gray-100 rounded-lg shadow-sm px-4 py-3 flex items-center gap-3">
+            <ArrowUpRight className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+            <div>
+              <p className="text-xs text-gray-400">Total Entradas</p>
+              <p className="text-base font-bold text-emerald-600">{formatCurrency(totalIn)}</p>
+            </div>
           </div>
-          <div className="card">
-            <div className="flex items-center gap-2 mb-1"><ArrowDownRight className="w-4 h-4 text-red-500" /><p className="text-sm text-gray-500">Total Saídas</p></div>
-            <p className="text-xl font-bold text-red-600">{formatCurrency(totalOut)}</p>
+          <div className="bg-white border border-gray-100 rounded-lg shadow-sm px-4 py-3 flex items-center gap-3">
+            <ArrowDownRight className="w-4 h-4 text-red-500 flex-shrink-0" />
+            <div>
+              <p className="text-xs text-gray-400">Total Saídas</p>
+              <p className="text-base font-bold text-red-600">{formatCurrency(totalOut)}</p>
+            </div>
           </div>
-          <div className="card">
-            <div className="flex items-center gap-2 mb-1"><Clock className="w-4 h-4 text-yellow-500" /><p className="text-sm text-gray-500">Por Validar</p></div>
-            <p className="text-xl font-bold text-yellow-600">{pending}</p>
+          <div className="bg-white border border-gray-100 rounded-lg shadow-sm px-4 py-3 flex items-center gap-3">
+            <Clock className="w-4 h-4 text-yellow-500 flex-shrink-0" />
+            <div>
+              <p className="text-xs text-gray-400">Por Validar</p>
+              <p className="text-base font-bold text-yellow-600">{pending}</p>
+            </div>
           </div>
-          <div className="card">
-            <div className="flex items-center gap-2 mb-1"><Link2 className="w-4 h-4 text-blue-500" /><p className="text-sm text-gray-500">Identificadas</p></div>
-            <p className="text-xl font-bold text-blue-600">{identified} / {transactions.length}</p>
+          <div className="bg-white border border-gray-100 rounded-lg shadow-sm px-4 py-3 flex items-center gap-3">
+            <Link2 className="w-4 h-4 text-blue-500 flex-shrink-0" />
+            <div>
+              <p className="text-xs text-gray-400">Identificadas</p>
+              <p className="text-base font-bold text-blue-600">{identified} / {transactions.length}</p>
+            </div>
           </div>
         </div>
 
-        <div className="flex gap-2 mb-4">
-          {(['all', 'por_validar', 'validado', 'ignorado'] as const).map(s => (
-            <button key={s} onClick={() => setFilterStatus(s)}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${filterStatus === s ? 'bg-emerald-600 text-white' : 'bg-white text-gray-600 border border-gray-200'}`}>
-              {s === 'all' ? 'Todas' : s === 'por_validar' ? 'Por Validar' : s === 'validado' ? 'Validadas' : 'Ignoradas'}
-              {s !== 'all' && <span className="ml-1.5 px-1.5 py-0.5 rounded-full text-xs bg-black/10">{transactions.filter(t => t.status === s).length}</span>}
+        {/* Linha 1: Estado */}
+        <div className="flex flex-wrap gap-2 mb-2">
+          {filterButtons1.map(btn => (
+            <button key={btn.key} onClick={() => setFilterStatus(btn.key as any)}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 ${filterStatus === btn.key ? 'bg-emerald-600 text-white' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'}`}>
+              {btn.label}
+              {btn.key !== 'all' && (
+                <span className={`px-1.5 py-0.5 rounded-full text-xs ${filterStatus === btn.key ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-500'}`}>
+                  {btn.count}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+
+        {/* Linha 2: Identificação */}
+        <div className="flex flex-wrap gap-2 mb-4">
+          {filterButtons2.map(btn => (
+            <button key={btn.key} onClick={() => setFilterStatus(btn.key as any)}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 ${filterStatus === btn.key ? 'bg-emerald-600 text-white' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'}`}>
+              {btn.label}
+              <span className={`px-1.5 py-0.5 rounded-full text-xs ${filterStatus === btn.key ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-500'}`}>
+                {btn.count}
+              </span>
             </button>
           ))}
         </div>
@@ -724,7 +790,6 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
   )
 }
 
-// CORRIGIDO: lista de despesas ordenada por proximidade de data da transação, limite aumentado para 200
 function MatchModalComponent({ tx, tenants, leases, expenses, autoMatches, onSave, onClose }: {
   tx: Transaction
   tenants: any[]
@@ -741,7 +806,6 @@ function MatchModalComponent({ tx, tenants, leases, expenses, autoMatches, onSav
   const [searchExpense, setSearchExpense] = useState('')
   const [searchTenant, setSearchTenant] = useState('')
 
-  // CORRIGIDO: ordenar despesas por proximidade de data em relação à transação bancária
   const txDate = new Date(tx.transaction_date)
 
   const sortedExpenses = [...expenses].sort((a, b) => {
@@ -761,7 +825,6 @@ function MatchModalComponent({ tx, tenants, leases, expenses, autoMatches, onSav
     !searchTenant || t.name.toLowerCase().includes(searchTenant.toLowerCase())
   )
 
-  // Calcular quantas despesas estão dentro de ±15 dias
   const expensesNearby = sortedExpenses.filter(e => {
     const diff = Math.abs(new Date(e.expense_date).getTime() - txDate.getTime())
     return diff <= 15 * 24 * 60 * 60 * 1000
@@ -780,7 +843,6 @@ function MatchModalComponent({ tx, tenants, leases, expenses, autoMatches, onSav
           <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
         </div>
 
-        {/* Info da transação */}
         <div className="bg-gray-50 rounded-lg p-4 mb-4">
           <div className="flex items-center gap-4 mb-3">
             <div>
@@ -803,7 +865,6 @@ function MatchModalComponent({ tx, tenants, leases, expenses, autoMatches, onSav
           </div>
         </div>
 
-        {/* Sugestões automáticas */}
         {autoMatches.length > 0 && (
           <div className="mb-4">
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-1">
@@ -868,7 +929,6 @@ function MatchModalComponent({ tx, tenants, leases, expenses, autoMatches, onSav
           {type === 'despesa' && (
             <div>
               <label className="label">Despesa associada</label>
-              {/* NOVO: indicador de despesas próximas */}
               {expensesNearby > 0 && (
                 <p className="text-xs text-emerald-600 mb-2">
                   📅 {expensesNearby} despesa(s) dentro de ±15 dias aparecem primeiro
@@ -879,7 +939,6 @@ function MatchModalComponent({ tx, tenants, leases, expenses, autoMatches, onSav
                 <input className="input pl-8 text-sm" placeholder="Pesquisar por descrição, fornecedor ou valor..."
                   value={searchExpense} onChange={e => setSearchExpense(e.target.value)} />
               </div>
-              {/* CORRIGIDO: limite aumentado para 200, ordenado por proximidade de data */}
               <div className="border border-gray-200 rounded-lg overflow-hidden max-h-56 overflow-y-auto">
                 {filteredExpenses.length === 0 ? (
                   <p className="text-sm text-gray-400 text-center py-4">Nenhuma despesa encontrada</p>
@@ -888,17 +947,11 @@ function MatchModalComponent({ tx, tenants, leases, expenses, autoMatches, onSav
                     const diffDays = Math.round(Math.abs(new Date(e.expense_date).getTime() - txDate.getTime()) / (1000 * 60 * 60 * 24))
                     const isNearby = diffDays <= 15
                     return (
-                      <div
-                        key={e.id}
-                        onClick={() => setExpenseId(e.id)}
+                      <div key={e.id} onClick={() => setExpenseId(e.id)}
                         className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors ${expenseId === e.id ? 'bg-emerald-50 border-l-4 border-l-emerald-500' : ''}`}>
-                        {/* Data */}
                         <span className="text-xs text-gray-400 whitespace-nowrap flex-shrink-0 w-20">{formatDate(e.expense_date)}</span>
-                        {/* Valor */}
                         <span className="text-sm font-semibold text-red-600 whitespace-nowrap flex-shrink-0 w-20">{formatCurrency(e.amount)}</span>
-                        {/* Descrição */}
                         <span className="text-xs text-gray-700 truncate flex-1">{e.description}</span>
-                        {/* Badge de proximidade */}
                         {isNearby && (
                           <span className="text-xs px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 flex-shrink-0 font-medium">
                             {diffDays === 0 ? 'hoje' : `${diffDays}d`}
