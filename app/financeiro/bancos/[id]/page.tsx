@@ -494,11 +494,11 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
           <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600" /></div>
         ) : (
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-x-auto">
-            <table className="w-full min-w-[900px]">
+            <table className="w-full">
               <thead className="bg-gray-50 border-b border-gray-100">
                 <tr>
                   <th className="table-header w-28">Data</th>
-                  <th className="table-header">Descrição</th>
+                  <th className="table-header" style={{ maxWidth: '280px' }}>Descrição</th>
                   <th className="table-header w-28">Valor</th>
                   <th className="table-header w-28">Saldo</th>
                   <th className="table-header w-64">Identificação</th>
@@ -513,8 +513,9 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
                   return (
                     <tr key={tx.id} className={`hover:bg-gray-50 ${tx.status === 'ignorado' ? 'opacity-50' : ''}`}>
                       <td className="table-cell text-sm whitespace-nowrap">{formatDate(tx.transaction_date)}</td>
-                      <td className="table-cell">
-                        <p className="text-sm text-gray-800">{tx.description}</p>
+                      <td className="table-cell" style={{ maxWidth: '280px' }}>
+                        {/* Descrição com wrap — a linha expande se necessário */}
+                        <p className="text-sm text-gray-800 break-words">{tx.description}</p>
                       </td>
                       <td className="table-cell whitespace-nowrap">
                         <span className={`font-semibold text-sm ${tx.amount >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
@@ -527,8 +528,8 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
                       <td className="table-cell">
                         {matchInfo ? (
                           <div>
-                            <div className="flex items-center gap-2">
-                              <span className={`text-xs font-medium ${matchInfo.color} truncate max-w-[150px]`}>{matchInfo.label}</span>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className={`text-xs font-medium ${matchInfo.color}`}>{matchInfo.label}</span>
                               {!matchInfo.confirmed && (matchInfo as any).confidence && (
                                 <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium flex-shrink-0 ${
                                   (matchInfo as any).confidence === 'high' ? 'bg-emerald-100 text-emerald-700' :
@@ -762,15 +763,15 @@ function MatchModalComponent({ tx, tenants, leases, expenses, autoMatches, onSav
           <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
         </div>
 
-        {/* Info da transação — ordem: Data + Valor + Descrição */}
+        {/* Info da transação: Data + Valor + Descrição */}
         <div className="bg-gray-50 rounded-lg p-4 mb-4">
-          <div className="flex items-center gap-4 mb-2">
-            <div className="text-center">
+          <div className="flex items-center gap-4 mb-3">
+            <div>
               <p className="text-xs text-gray-400 mb-0.5">Data</p>
               <p className="text-sm font-semibold text-gray-700">{formatDate(tx.transaction_date)}</p>
             </div>
             <div className="w-px h-8 bg-gray-200" />
-            <div className="text-center">
+            <div>
               <p className="text-xs text-gray-400 mb-0.5">Valor</p>
               <p className={`text-lg font-bold ${tx.amount >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                 {tx.amount >= 0 ? '+' : ''}{formatCurrency(tx.amount)}
@@ -805,9 +806,7 @@ function MatchModalComponent({ tx, tenants, leases, expenses, autoMatches, onSav
                     <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${match.confidence === 'high' ? 'bg-emerald-100 text-emerald-700' : match.confidence === 'medium' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-600'}`}>
                       {match.confidence === 'high' ? 'Alta' : match.confidence === 'medium' ? 'Média' : 'Baixa'}
                     </span>
-                    <button onClick={() => applyAutoMatch(match)} className="text-xs bg-blue-600 text-white px-2 py-1 rounded-lg hover:bg-blue-700">
-                      Usar
-                    </button>
+                    <button onClick={() => applyAutoMatch(match)} className="text-xs bg-blue-600 text-white px-2 py-1 rounded-lg hover:bg-blue-700">Usar</button>
                   </div>
                 </div>
               ))}
@@ -857,12 +856,27 @@ function MatchModalComponent({ tx, tenants, leases, expenses, autoMatches, onSav
                 <input className="input pl-8 text-sm" placeholder="Pesquisar por descrição, fornecedor ou valor..."
                   value={searchExpense} onChange={e => setSearchExpense(e.target.value)} />
               </div>
-              <select className="input" value={expenseId} onChange={e => setExpenseId(e.target.value)} size={5}>
-                <option value="">— Nenhuma —</option>
-                {filteredExpenses.slice(0, 50).map(e => (
-                  <option key={e.id} value={e.id}>{formatDate(e.expense_date)} · {e.description} · {formatCurrency(e.amount)}</option>
-                ))}
-              </select>
+              {/* Lista de despesas com Data + Valor + Descrição */}
+              <div className="border border-gray-200 rounded-lg overflow-hidden max-h-56 overflow-y-auto">
+                {filteredExpenses.length === 0 ? (
+                  <p className="text-sm text-gray-400 text-center py-4">Nenhuma despesa encontrada</p>
+                ) : (
+                  filteredExpenses.slice(0, 50).map(e => (
+                    <div
+                      key={e.id}
+                      onClick={() => setExpenseId(e.id)}
+                      className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors ${expenseId === e.id ? 'bg-emerald-50 border-l-4 border-l-emerald-500' : ''}`}>
+                      {/* Data */}
+                      <span className="text-xs text-gray-400 whitespace-nowrap flex-shrink-0 w-20">{formatDate(e.expense_date)}</span>
+                      {/* Valor */}
+                      <span className="text-sm font-semibold text-red-600 whitespace-nowrap flex-shrink-0 w-20">{formatCurrency(e.amount)}</span>
+                      {/* Descrição */}
+                      <span className="text-xs text-gray-700 truncate">{e.description}</span>
+                      {expenseId === e.id && <CheckCircle className="w-4 h-4 text-emerald-500 flex-shrink-0 ml-auto" />}
+                    </div>
+                  ))
+                )}
+              </div>
               {filteredExpenses.length > 50 && <p className="text-xs text-gray-400 mt-1">A mostrar 50 de {filteredExpenses.length} — pesquisa para filtrar</p>}
             </div>
           )}
