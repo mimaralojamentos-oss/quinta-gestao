@@ -3,7 +3,7 @@
 import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
-import { formatDate, getMonthLabel, getCurrentMonth } from '@/lib/utils'
+import { formatCurrency, getMonthLabel, getCurrentMonth } from '@/lib/utils'
 import { Building2, Users, AlertTriangle, CheckCircle, Clock, HardHat, Zap } from 'lucide-react'
 import Link from 'next/link'
 
@@ -12,7 +12,7 @@ export default function Dashboard() {
     totalSpaces: 0, occupiedSpaces: 0, totalTenantsActive: 0,
     pendingRents: 0, activeProjects: 0,
     pendingLeases: [] as any[], alerts: [] as any[],
-    electricityReadings: [] as any[],
+    meters: [] as any[],
   })
   const [loading, setLoading] = useState(true)
   const currentMonth = getCurrentMonth()
@@ -26,32 +26,31 @@ export default function Dashboard() {
       nextMonth.setMonth(nextMonth.getMonth() + 1)
       const nextMonthStr = nextMonth.toISOString().slice(0, 10)
 
-      const [spacesRes, leasesRes, paymentsRes, projectsRes, readingsRes] = await Promise.all([
+      const [spacesRes, leasesRes, paymentsRes, projectsRes, metersRes, meterReadingsRes] = await Promise.all([
         supabase.from('spaces').select('id, status'),
         supabase.from('leases').select('id, monthly_rent, space:spaces(ref), tenant:tenants(name, phone)').eq('status', 'ativo'),
         supabase.from('rent_payments').select('lease_id, amount, tipo').gte('reference_month', currentMonth).lt('reference_month', nextMonthStr),
-        supabase.from('projects').select('id, status').eq('status', 'ativo'),
-        // Leituras da quinta — quadros principais (não pavilhões individuais)
-        supabase.from('electricity_readings')
-          .select('id, reading_date, meter_name, reading_value')
-          .order('reading_date', { ascending: false }),
+        supabase.from('projects').select('id, status').eq('status', 'em_curso'),
+        supabase.from('meters').select('id, name, contract_number').eq('active', true).order('name'),
+        supabase.from('meter_readings').select('meter_id, reading_date, amount').order('reading_date', { ascending: false }),
       ])
 
       const spaces = spacesRes.data ?? []
       const leases = leasesRes.data ?? []
       const payments = paymentsRes.data ?? []
       const projects = projectsRes.data ?? []
-      const allReadings = readingsRes.data ?? []
+      const metersData = metersRes.data ?? []
+      const allMeterReadings = meterReadingsRes.data ?? []
 
-      // Agrupar leituras por quadro — ficar só com a mais recente de cada um
-      const latestByMeter: Record<string, any> = {}
-      for (const r of allReadings) {
-        if (!latestByMeter[r.meter_name]) {
-          latestByMeter[r.meter_name] = r
+      // Para cada quadro, encontrar a última leitura e o seu valor
+      const meters = metersData.map(meter => {
+        const lastReading = allMeterReadings.find(r => r.meter_id === meter.id)
+        return {
+          ...meter,
+          lastReadingDate: lastReading?.reading_date ?? null,
+          lastReadingAmount: lastReading?.amount ?? null,
         }
-      }
-      const electricityReadings = Object.values(latestByMeter)
-        .sort((a, b) => a.meter_name.localeCompare(b.meter_name))
+      })
 
       const paidLeaseIds = new Set(
         payments.filter(p => p.tipo === 'renda' || !p.tipo).map(p => p.lease_id)
@@ -66,7 +65,7 @@ export default function Dashboard() {
         activeProjects: projects.length,
         pendingLeases,
         alerts: pendingLeases,
-        electricityReadings,
+        meters,
       })
     } catch (e) {
       console.error('Dashboard error:', e)
@@ -78,12 +77,11 @@ export default function Dashboard() {
   const occupancyRate = stats.totalSpaces > 0
     ? Math.round((stats.occupiedSpaces / stats.totalSpaces) * 100) : 0
 
-  // Calcular há quantos dias foi a leitura
   function daysAgo(dateStr: string) {
     const diff = Math.floor((Date.now() - new Date(dateStr).getTime()) / (1000 * 60 * 60 * 24))
     if (diff === 0) return 'hoje'
     if (diff === 1) return 'ontem'
-    return `há ${diff} dias`
+    return `há ${diff}d`
   }
 
   if (loading) {
@@ -106,6 +104,7 @@ export default function Dashboard() {
 
         {/* Cards compactos do topo */}
         <div className="grid grid-cols-4 gap-3 mb-6">
+
           {/* Espaços */}
           <div className="bg-white border border-gray-100 rounded-lg shadow-sm px-4 py-3 flex items-center gap-3">
             <div className="w-8 h-8 bg-emerald-50 rounded-lg flex items-center justify-center flex-shrink-0">
@@ -144,21 +143,32 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Eletricidade */}
+          {/* Quadros de Eletricidade */}
           <div className="bg-white border border-gray-100 rounded-lg shadow-sm px-4 py-3 flex items-start gap-3">
             <div className="w-8 h-8 bg-yellow-50 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
               <Zap className="w-4 h-4 text-yellow-500" />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-xs text-gray-400 mb-1">Últimas Leituras</p>
-              {stats.electricityReadings.length === 0 ? (
-                <p className="text-xs text-gray-400">Sem leituras</p>
+              <p className="text-xs text-gray-400 mb-1.5">Quadros EDP</p>
+              {stats.meters.length === 0 ? (
+                <p className="text-xs text-gray-400">Sem quadros</p>
               ) : (
-                <div className="space-y-0.5">
-                  {stats.electricityReadings.map((r, i) => (
-                    <div key={i} className="flex items-center justify-between gap-2">
-                      <span className="text-xs text-gray-700 truncate font-medium">{r.meter_name}</span>
-                      <span className="text-xs text-gray-400 whitespace-nowrap flex-shrink-0">{daysAgo(r.reading_date)}</span>
+                <div className="space-y-1">
+                  {stats.meters.map(meter => (
+                    <div key={meter.id} className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-medium text-gray-700 truncate">{meter.name}</span>
+                      <div className="text-right flex-shrink-0">
+                        {meter.lastReadingDate ? (
+                          <>
+                            <span className="text-xs text-gray-500">{daysAgo(meter.lastReadingDate)}</span>
+                            {meter.lastReadingAmount != null && (
+                              <span className="text-xs text-gray-400 ml-1">· {formatCurrency(meter.lastReadingAmount)}</span>
+                            )}
+                          </>
+                        ) : (
+                          <span className="text-xs text-gray-300">sem leitura</span>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -167,8 +177,9 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Corpo: Rendas Pendentes + Alertas lado a lado */}
+        {/* Corpo: Rendas Pendentes + Alertas */}
         <div className="grid grid-cols-2 gap-6">
+
           {/* Rendas Pendentes */}
           <div className="card">
             <div className="flex items-center justify-between mb-4">
@@ -197,16 +208,9 @@ export default function Dashboard() {
                 ))}
               </div>
             )}
-            {stats.pendingRents > stats.pendingLeases.length && (
-              <Link prefetch={false} href="/pagamentos" className="mt-3 text-xs text-emerald-600 hover:underline font-medium block">
-                Ver todos os pagamentos →
-              </Link>
-            )}
-            {stats.pendingRents <= stats.pendingLeases.length && stats.pendingRents > 0 && (
-              <Link prefetch={false} href="/pagamentos" className="mt-3 text-xs text-emerald-600 hover:underline font-medium block">
-                Ver todos os pagamentos →
-              </Link>
-            )}
+            <Link prefetch={false} href="/pagamentos" className="mt-3 text-xs text-emerald-600 hover:underline font-medium block">
+              Ver todos os pagamentos →
+            </Link>
           </div>
 
           {/* Alertas */}
