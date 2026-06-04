@@ -3,8 +3,8 @@
 import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
-import { formatCurrency, getMonthLabel, getCurrentMonth } from '@/lib/utils'
-import { Building2, Users, AlertTriangle, CheckCircle, Clock, HardHat, Zap } from 'lucide-react'
+import { formatCurrency, getMonthLabel, getCurrentMonth, formatDate } from '@/lib/utils'
+import { Building2, Users, AlertTriangle, CheckCircle, Clock, HardHat, Zap, Bell, NotebookPen } from 'lucide-react'
 import Link from 'next/link'
 
 export default function Dashboard() {
@@ -14,10 +14,33 @@ export default function Dashboard() {
     pendingLeases: [] as any[], alerts: [] as any[],
     meters: [] as any[],
   })
+  const [manualAlerts, setManualAlerts] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const currentMonth = getCurrentMonth()
 
-  useEffect(() => { fetchStats() }, [])
+  useEffect(() => { fetchStats(); fetchManualAlerts() }, [])
+
+  async function fetchManualAlerts() {
+    const supabase = createClient()
+    const todayStr = new Date().toISOString().slice(0, 10)
+    const { data } = await supabase
+      .from('notes')
+      .select('*, space:spaces(ref), tenant:tenants(name)')
+      .eq('has_reminder', true)
+      .eq('dismissed', false)
+      .is('reminder_seen_at', null)
+      .lte('reminder_date', todayStr)
+      .order('reminder_date', { ascending: true })
+    setManualAlerts(data ?? [])
+  }
+
+  async function handleMarkSeen(id: string) {
+    const supabase = createClient()
+    await supabase.from('notes').update({
+      reminder_seen_at: new Date().toISOString(),
+    }).eq('id', id)
+    fetchManualAlerts()
+  }
 
   async function fetchStats() {
     try {
@@ -26,17 +49,13 @@ export default function Dashboard() {
       nextMonth.setMonth(nextMonth.getMonth() + 1)
       const nextMonthStr = nextMonth.toISOString().slice(0, 10)
 
-      const [spacesRes, leasesRes, paymentsRes, projectsRes, metersRes, edpExpensesRes] = await Promise.all([
+      const [spacesRes, leasesRes, paymentsRes, projectsRes, metersRes, meterReadingsRes] = await Promise.all([
         supabase.from('spaces').select('id, status'),
         supabase.from('leases').select('id, monthly_rent, space:spaces(ref), tenant:tenants(name, phone)').eq('status', 'ativo'),
         supabase.from('rent_payments').select('lease_id, amount, tipo').gte('reference_month', currentMonth).lt('reference_month', nextMonthStr),
         supabase.from('projects').select('id, status').eq('status', 'em_curso'),
         supabase.from('meters').select('id, name, contract_number').eq('active', true).order('name'),
-        supabase.from('expenses')
-          .select('id, expense_date, amount, description, supplier')
-          .or('supplier.ilike.%EDP%,description.ilike.%EDP%')
-          .order('expense_date', { ascending: false })
-          .limit(100),
+        supabase.from('meter_readings').select('meter_id, reading_date, amount').order('reading_date', { ascending: false }),
       ])
 
       const spaces = spacesRes.data ?? []
@@ -44,36 +63,14 @@ export default function Dashboard() {
       const payments = paymentsRes.data ?? []
       const projects = projectsRes.data ?? []
       const metersData = metersRes.data ?? []
-      const edpExpenses = edpExpensesRes.data ?? []
+      const allMeterReadings = meterReadingsRes.data ?? []
 
-      // Para cada quadro, encontrar a última fatura EDP correspondente
       const meters = metersData.map(meter => {
-        // Palavras-chave para identificar este quadro nas despesas
-        // Extrair partes do nome para fazer match (ex: "9002", "9005", "Monte Trigo")
-        const keywords = [
-          meter.contract_number,
-          meter.name,
-          // Extrair número do quadro se existir (ex: "9002" de "Quadro 9002 - Tia")
-          ...meter.name.match(/\d{4,}/g) ?? [],
-          // Primeiras palavras do nome (ex: "Monte Trigo")
-          ...meter.name.split(' ').filter((w: string) => w.length > 3),
-        ].filter(Boolean).map((k: string) => k.toLowerCase())
-
-        const lastExpense = edpExpenses.find(e => {
-          const haystack = `${e.description ?? ''} ${e.supplier ?? ''}`.toLowerCase()
-          return keywords.some(kw => haystack.includes(kw))
-        })
-
-        return {
-          ...meter,
-          lastExpenseDate: lastExpense?.expense_date ?? null,
-          lastExpenseAmount: lastExpense?.amount ?? null,
-        }
+        const lastReading = allMeterReadings.find(r => r.meter_id === meter.id)
+        return { ...meter, lastReadingDate: lastReading?.reading_date ?? null, lastReadingAmount: lastReading?.amount ?? null }
       })
 
-      const paidLeaseIds = new Set(
-        payments.filter(p => p.tipo === 'renda' || !p.tipo).map(p => p.lease_id)
-      )
+      const paidLeaseIds = new Set(payments.filter(p => p.tipo === 'renda' || !p.tipo).map(p => p.lease_id))
       const pendingLeases = leases.filter(l => !paidLeaseIds.has(l.id))
 
       setStats({
@@ -96,11 +93,6 @@ export default function Dashboard() {
   const occupancyRate = stats.totalSpaces > 0
     ? Math.round((stats.occupiedSpaces / stats.totalSpaces) * 100) : 0
 
-  function formatExpenseDate(dateStr: string) {
-    const d = new Date(dateStr)
-    return d.toLocaleDateString('pt-PT', { month: 'short', year: 'numeric' })
-  }
-
   if (loading) {
     return (
       <AppLayout>
@@ -109,6 +101,13 @@ export default function Dashboard() {
         </div>
       </AppLayout>
     )
+  }
+
+  const NOTE_TYPE_LABELS: Record<string, string> = {
+    chamada: '📞 Chamada',
+    geral: '🏡 Geral',
+    lembrete: '⏰ Lembrete',
+    outro: '📝 Outro',
   }
 
   return (
@@ -121,8 +120,6 @@ export default function Dashboard() {
 
         {/* Cards compactos do topo */}
         <div className="grid grid-cols-4 gap-3 mb-6">
-
-          {/* Espaços */}
           <div className="bg-white border border-gray-100 rounded-lg shadow-sm px-4 py-3 flex items-center gap-3">
             <div className="w-8 h-8 bg-emerald-50 rounded-lg flex items-center justify-center flex-shrink-0">
               <Building2 className="w-4 h-4 text-emerald-600" />
@@ -136,7 +133,6 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Inquilinos */}
           <div className="bg-white border border-gray-100 rounded-lg shadow-sm px-4 py-3 flex items-center gap-3">
             <div className="w-8 h-8 bg-blue-50 rounded-lg flex items-center justify-center flex-shrink-0">
               <Users className="w-4 h-4 text-blue-600" />
@@ -148,7 +144,6 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Projetos */}
           <div className="bg-white border border-gray-100 rounded-lg shadow-sm px-4 py-3 flex items-center gap-3">
             <div className="w-8 h-8 bg-orange-50 rounded-lg flex items-center justify-center flex-shrink-0">
               <HardHat className="w-4 h-4 text-orange-500" />
@@ -160,7 +155,6 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Quadros EDP */}
           <div className="bg-white border border-gray-100 rounded-lg shadow-sm px-4 py-3 flex items-start gap-3">
             <div className="w-8 h-8 bg-yellow-50 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
               <Zap className="w-4 h-4 text-yellow-500" />
@@ -170,16 +164,13 @@ export default function Dashboard() {
               {stats.meters.length === 0 ? (
                 <p className="text-xs text-gray-400">Sem quadros</p>
               ) : (
-                <div className="space-y-1.5">
+                <div className="space-y-1">
                   {stats.meters.map(meter => (
                     <div key={meter.id} className="flex items-center justify-between gap-2">
                       <span className="text-xs font-medium text-gray-700 truncate">{meter.name}</span>
-                      <div className="flex items-center gap-1 flex-shrink-0">
-                        {meter.lastExpenseDate ? (
-                          <>
-                            <span className="text-xs text-gray-400">{formatExpenseDate(meter.lastExpenseDate)}</span>
-                            <span className="text-xs font-semibold text-gray-700">· {formatCurrency(meter.lastExpenseAmount)}</span>
-                          </>
+                      <div className="text-right flex-shrink-0">
+                        {meter.lastReadingDate ? (
+                          <span className="text-xs text-gray-400">{formatCurrency(meter.lastReadingAmount ?? 0)}</span>
                         ) : (
                           <span className="text-xs text-gray-300">sem fatura</span>
                         )}
@@ -192,10 +183,54 @@ export default function Dashboard() {
           </div>
         </div>
 
+        {/* Lembretes Manuais — só aparece se houver pendentes */}
+        {manualAlerts.length > 0 && (
+          <div className="mb-6">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <NotebookPen className="w-5 h-5 text-purple-600" />
+                <h2 className="font-semibold text-gray-900">Lembretes Manuais</h2>
+                <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium">
+                  {manualAlerts.length} pendente(s)
+                </span>
+              </div>
+              <Link href="/notas" prefetch={false} className="text-xs text-emerald-600 hover:underline font-medium">
+                Ver todas as notas →
+              </Link>
+            </div>
+            <div className="space-y-2">
+              {manualAlerts.map(note => {
+                const isOverdue = note.reminder_date < new Date().toISOString().slice(0, 10)
+                return (
+                  <div key={note.id}
+                    className={`rounded-xl border p-3 flex items-center gap-3 ${isOverdue ? 'bg-red-50 border-red-100' : 'bg-purple-50 border-purple-100'}`}>
+                    <div className={`w-8 h-8 rounded-lg bg-white flex items-center justify-center flex-shrink-0 ${isOverdue ? 'text-red-500' : 'text-purple-500'}`}>
+                      <Bell className="w-4 h-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${isOverdue ? 'bg-red-100 text-red-700' : 'bg-purple-100 text-purple-700'}`}>
+                          {isOverdue ? '⚠️ Em atraso' : '🔔 Hoje'}
+                        </span>
+                        <span className="text-xs text-gray-500">{NOTE_TYPE_LABELS[note.type] ?? note.type}</span>
+                        {note.space?.ref && <span className="text-xs text-gray-400">{note.space.ref}{note.tenant?.name ? ` — ${note.tenant.name}` : ''}</span>}
+                      </div>
+                      <p className="text-sm font-medium text-gray-800 truncate">{note.title}</p>
+                      <p className="text-xs text-gray-400">{formatDate(note.reminder_date)} às {note.reminder_time?.slice(0, 5)}</p>
+                    </div>
+                    <button onClick={() => handleMarkSeen(note.id)}
+                      className="flex items-center gap-1 text-xs bg-white border border-gray-200 text-gray-600 hover:bg-emerald-50 hover:text-emerald-600 hover:border-emerald-200 px-2 py-1.5 rounded-lg transition-colors flex-shrink-0">
+                      <CheckCircle className="w-3.5 h-3.5" /> Visto
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Corpo: Rendas Pendentes + Alertas */}
         <div className="grid grid-cols-2 gap-6">
-
-          {/* Rendas Pendentes */}
           <div className="card">
             <div className="flex items-center justify-between mb-4">
               <h2 className="font-semibold text-gray-900">Rendas Pendentes</h2>
@@ -228,7 +263,6 @@ export default function Dashboard() {
             </Link>
           </div>
 
-          {/* Alertas */}
           <div className="card">
             <div className="flex items-center justify-between mb-4">
               <h2 className="font-semibold text-gray-900">Alertas</h2>
