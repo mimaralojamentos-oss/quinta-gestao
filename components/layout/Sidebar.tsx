@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, Building2, Users, CreditCard,
   Receipt, Wallet, Bell, Zap, LogOut, ShieldCheck,
-  TrendingUp, Landmark, ChevronDown, ChevronRight, FolderOpen, HardHat,
+  TrendingUp, Landmark, ChevronDown, ChevronRight, FolderOpen, HardHat, NotebookPen,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/lib/auth-context'
@@ -17,6 +17,7 @@ const navItems = [
   { href: '/inquilinos', label: 'Inquilinos', icon: Users },
   { href: '/projetos', label: 'Projetos', icon: HardHat },
   { href: '/documentos', label: 'Documentos', icon: FolderOpen },
+  { href: '/notas', label: 'Notas', icon: NotebookPen },
   { href: '/alertas', label: 'Alertas', icon: Bell },
 ]
 
@@ -35,18 +36,13 @@ const financeItems = [
 function LadybugIcon() {
   return (
     <svg viewBox="0 0 36 36" className="w-5 h-5" fill="none" xmlns="http://www.w3.org/2000/svg">
-      {/* Corpo vermelho */}
       <ellipse cx="18" cy="21" rx="11" ry="9" fill="#e53e3e" />
-      {/* Cabeça preta */}
       <circle cx="18" cy="12" r="5" fill="#1a1a1a" />
-      {/* Linha central */}
       <line x1="18" y1="12" x2="18" y2="30" stroke="#1a1a1a" strokeWidth="1.5" />
-      {/* Pintas pretas */}
       <circle cx="13" cy="19" r="2" fill="#1a1a1a" />
       <circle cx="23" cy="19" r="2" fill="#1a1a1a" />
       <circle cx="12" cy="25" r="1.8" fill="#1a1a1a" />
       <circle cx="24" cy="25" r="1.8" fill="#1a1a1a" />
-      {/* Antenas */}
       <line x1="15" y1="8" x2="11" y2="4" stroke="#1a1a1a" strokeWidth="1.2" strokeLinecap="round" />
       <line x1="21" y1="8" x2="25" y2="4" stroke="#1a1a1a" strokeWidth="1.2" strokeLinecap="round" />
       <circle cx="11" cy="4" r="1" fill="#1a1a1a" />
@@ -95,18 +91,15 @@ export default function Sidebar() {
           )
         })}
 
-        {/* Eletricidade com submenus */}
+        {/* Eletricidade */}
         <div className="pt-1">
-          <button
-            onClick={() => setEletricidadeOpen(v => !v)}
+          <button onClick={() => setEletricidadeOpen(v => !v)}
             className="w-full flex items-center justify-between px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-emerald-50 hover:text-emerald-700 transition-colors">
             <div className="flex items-center gap-3">
               <Zap className="w-4 h-4 flex-shrink-0" />
               <span>Eletricidade</span>
             </div>
-            {eletricidadeOpen
-              ? <ChevronDown className="w-3 h-3" />
-              : <ChevronRight className="w-3 h-3" />}
+            {eletricidadeOpen ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
           </button>
           {eletricidadeOpen && (
             <div className="ml-4 mt-1 space-y-1 border-l-2 border-gray-100 pl-3">
@@ -127,16 +120,13 @@ export default function Sidebar() {
 
         {/* Financeiro */}
         <div className="pt-1">
-          <button
-            onClick={() => setFinanceOpen(v => !v)}
+          <button onClick={() => setFinanceOpen(v => !v)}
             className="w-full flex items-center justify-between px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-emerald-50 hover:text-emerald-700 transition-colors">
             <div className="flex items-center gap-3">
               <TrendingUp className="w-4 h-4 flex-shrink-0" />
               <span>Financeiro</span>
             </div>
-            {financeOpen
-              ? <ChevronDown className="w-3 h-3" />
-              : <ChevronRight className="w-3 h-3" />}
+            {financeOpen ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
           </button>
           {financeOpen && (
             <div className="ml-4 mt-1 space-y-1 border-l-2 border-gray-100 pl-3">
