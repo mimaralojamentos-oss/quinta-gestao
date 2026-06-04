@@ -26,13 +26,17 @@ export default function Dashboard() {
       nextMonth.setMonth(nextMonth.getMonth() + 1)
       const nextMonthStr = nextMonth.toISOString().slice(0, 10)
 
-      const [spacesRes, leasesRes, paymentsRes, projectsRes, metersRes, meterReadingsRes] = await Promise.all([
+      const [spacesRes, leasesRes, paymentsRes, projectsRes, metersRes, edpExpensesRes] = await Promise.all([
         supabase.from('spaces').select('id, status'),
         supabase.from('leases').select('id, monthly_rent, space:spaces(ref), tenant:tenants(name, phone)').eq('status', 'ativo'),
         supabase.from('rent_payments').select('lease_id, amount, tipo').gte('reference_month', currentMonth).lt('reference_month', nextMonthStr),
         supabase.from('projects').select('id, status').eq('status', 'em_curso'),
         supabase.from('meters').select('id, name, contract_number').eq('active', true).order('name'),
-        supabase.from('meter_readings').select('meter_id, reading_date, amount').order('reading_date', { ascending: false }),
+        supabase.from('expenses')
+          .select('id, expense_date, amount, description, supplier')
+          .or('supplier.ilike.%EDP%,description.ilike.%EDP%')
+          .order('expense_date', { ascending: false })
+          .limit(100),
       ])
 
       const spaces = spacesRes.data ?? []
@@ -40,15 +44,30 @@ export default function Dashboard() {
       const payments = paymentsRes.data ?? []
       const projects = projectsRes.data ?? []
       const metersData = metersRes.data ?? []
-      const allMeterReadings = meterReadingsRes.data ?? []
+      const edpExpenses = edpExpensesRes.data ?? []
 
-      // Para cada quadro, encontrar a última leitura e o seu valor
+      // Para cada quadro, encontrar a última fatura EDP correspondente
       const meters = metersData.map(meter => {
-        const lastReading = allMeterReadings.find(r => r.meter_id === meter.id)
+        // Palavras-chave para identificar este quadro nas despesas
+        // Extrair partes do nome para fazer match (ex: "9002", "9005", "Monte Trigo")
+        const keywords = [
+          meter.contract_number,
+          meter.name,
+          // Extrair número do quadro se existir (ex: "9002" de "Quadro 9002 - Tia")
+          ...meter.name.match(/\d{4,}/g) ?? [],
+          // Primeiras palavras do nome (ex: "Monte Trigo")
+          ...meter.name.split(' ').filter((w: string) => w.length > 3),
+        ].filter(Boolean).map((k: string) => k.toLowerCase())
+
+        const lastExpense = edpExpenses.find(e => {
+          const haystack = `${e.description ?? ''} ${e.supplier ?? ''}`.toLowerCase()
+          return keywords.some(kw => haystack.includes(kw))
+        })
+
         return {
           ...meter,
-          lastReadingDate: lastReading?.reading_date ?? null,
-          lastReadingAmount: lastReading?.amount ?? null,
+          lastExpenseDate: lastExpense?.expense_date ?? null,
+          lastExpenseAmount: lastExpense?.amount ?? null,
         }
       })
 
@@ -77,11 +96,9 @@ export default function Dashboard() {
   const occupancyRate = stats.totalSpaces > 0
     ? Math.round((stats.occupiedSpaces / stats.totalSpaces) * 100) : 0
 
-  function daysAgo(dateStr: string) {
-    const diff = Math.floor((Date.now() - new Date(dateStr).getTime()) / (1000 * 60 * 60 * 24))
-    if (diff === 0) return 'hoje'
-    if (diff === 1) return 'ontem'
-    return `há ${diff}d`
+  function formatExpenseDate(dateStr: string) {
+    const d = new Date(dateStr)
+    return d.toLocaleDateString('pt-PT', { month: 'short', year: 'numeric' })
   }
 
   if (loading) {
@@ -143,7 +160,7 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Quadros de Eletricidade */}
+          {/* Quadros EDP */}
           <div className="bg-white border border-gray-100 rounded-lg shadow-sm px-4 py-3 flex items-start gap-3">
             <div className="w-8 h-8 bg-yellow-50 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
               <Zap className="w-4 h-4 text-yellow-500" />
@@ -153,20 +170,18 @@ export default function Dashboard() {
               {stats.meters.length === 0 ? (
                 <p className="text-xs text-gray-400">Sem quadros</p>
               ) : (
-                <div className="space-y-1">
+                <div className="space-y-1.5">
                   {stats.meters.map(meter => (
                     <div key={meter.id} className="flex items-center justify-between gap-2">
                       <span className="text-xs font-medium text-gray-700 truncate">{meter.name}</span>
-                      <div className="text-right flex-shrink-0">
-                        {meter.lastReadingDate ? (
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        {meter.lastExpenseDate ? (
                           <>
-                            <span className="text-xs text-gray-500">{daysAgo(meter.lastReadingDate)}</span>
-                            {meter.lastReadingAmount != null && (
-                              <span className="text-xs text-gray-400 ml-1">· {formatCurrency(meter.lastReadingAmount)}</span>
-                            )}
+                            <span className="text-xs text-gray-400">{formatExpenseDate(meter.lastExpenseDate)}</span>
+                            <span className="text-xs font-semibold text-gray-700">· {formatCurrency(meter.lastExpenseAmount)}</span>
                           </>
                         ) : (
-                          <span className="text-xs text-gray-300">sem leitura</span>
+                          <span className="text-xs text-gray-300">sem fatura</span>
                         )}
                       </div>
                     </div>
