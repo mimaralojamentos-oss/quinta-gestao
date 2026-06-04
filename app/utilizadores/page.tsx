@@ -3,7 +3,8 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { useAuth } from '@/lib/auth-context'
-import { Shield, Plus, Trash2, Eye, Zap } from 'lucide-react'
+import { Shield, Plus, Trash2, Eye, Zap, ChevronLeft } from 'lucide-react'
+import Link from 'next/link'
 
 type Profile = {
   id: string
@@ -29,7 +30,6 @@ export default function UtilizadoresPage() {
   }, [])
 
   async function fetchProfiles() {
-    // Buscar profiles
     const { data: profilesData } = await supabase
       .from('profiles')
       .select('*')
@@ -37,7 +37,6 @@ export default function UtilizadoresPage() {
 
     if (!profilesData) { setLoading(false); return }
 
-    // Buscar emails via API (Admin SDK)
     const res = await fetch('/api/create-user', {
       method: 'GET',
       headers: { 'Content-Type': 'application/json' },
@@ -53,7 +52,6 @@ export default function UtilizadoresPage() {
       }
     }
 
-    // Combinar profiles com emails
     const combined = profilesData.map(p => ({
       ...p,
       email: emailMap[p.id] || p.email || '(sem email)'
@@ -129,9 +127,14 @@ export default function UtilizadoresPage() {
   return (
     <div className="p-6 max-w-3xl mx-auto">
       <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Utilizadores</h1>
-          <p className="text-sm text-gray-500 mt-1">Gestão de acessos ao sistema</p>
+        <div className="flex items-center gap-3">
+          <Link href="/dashboard" prefetch={false} className="text-gray-400 hover:text-gray-600 transition-colors">
+            <ChevronLeft className="w-5 h-5" />
+          </Link>
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">Utilizadores</h1>
+            <p className="text-sm text-gray-500 mt-1">Gestão de acessos ao sistema</p>
+          </div>
         </div>
         <button
           onClick={() => setShowCreate(true)}
@@ -268,5 +271,3 @@ export default function UtilizadoresPage() {
     </div>
   )
 }
-
-// https://quinta-gestao.vercel.app/utilizadores
