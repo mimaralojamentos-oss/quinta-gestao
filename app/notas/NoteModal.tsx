@@ -17,10 +17,16 @@ const NOTE_TYPES = [
   { value: 'outro', label: '📝 Outro' },
 ]
 
+interface SpaceOption {
+  id: string
+  ref: string
+  status: string
+  leases: { id: string; tenant: { id: string; name: string } | null }[]
+}
+
 export default function NoteModal({ note, onClose, onSaved }: NoteModalProps) {
   const supabase = createClient()
 
-  // Hora e data atuais como default
   const now = new Date()
   const todayStr = now.toISOString().slice(0, 10)
   const timeStr = now.toTimeString().slice(0, 5)
@@ -37,16 +43,13 @@ export default function NoteModal({ note, onClose, onSaved }: NoteModalProps) {
   const [reminderTime, setReminderTime] = useState(note?.reminder_time?.slice(0, 5) ?? '09:00')
   const [saving, setSaving] = useState(false)
 
-  // Autocomplete de espaços
-  const [spaces, setSpaces] = useState<any[]>([])
+  const [spaces, setSpaces] = useState<SpaceOption[]>([])
   const [spaceSearch, setSpaceSearch] = useState('')
   const [showSpaceDropdown, setShowSpaceDropdown] = useState(false)
-  const [selectedSpaceLabel, setSelectedSpaceLabel] = useState('')
   const spaceRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     fetchSpaces()
-    // Fechar dropdown ao clicar fora
     function handleClick(e: MouseEvent) {
       if (spaceRef.current && !spaceRef.current.contains(e.target as Node)) {
         setShowSpaceDropdown(false)
@@ -59,36 +62,36 @@ export default function NoteModal({ note, onClose, onSaved }: NoteModalProps) {
   async function fetchSpaces() {
     const { data } = await supabase
       .from('spaces')
-      .select('id, ref, status, leases(id, tenant:tenants(id, name))')
-      .eq('leases.status', 'ativo')
+      .select('id, ref, status, leases!left(id, tenant:tenants(id, name))')
       .order('ref')
-    setSpaces(data ?? [])
+    const spacesData = (data ?? []) as SpaceOption[]
+    setSpaces(spacesData)
 
-    // Se estiver a editar, preencher o label do espaço
-    if (note?.space_id && data) {
-      const found = data.find((s: any) => s.id === note.space_id)
+    if (note?.space_id && spacesData.length > 0) {
+      const found = spacesData.find(s => s.id === note.space_id)
       if (found) {
-        const tenant = found.leases?.[0]?.tenant
-        setSelectedSpaceLabel(`${found.ref}${tenant ? ` — ${tenant.name}` : ''}`)
-        setSpaceSearch(`${found.ref}${tenant ? ` — ${tenant.name}` : ''}`)
+        const activeLease = found.leases?.find(l => l.tenant)
+        const tenantName = activeLease?.tenant?.name ?? ''
+        const label = `${found.ref}${tenantName ? ` — ${tenantName}` : ''}`
+        setSpaceSearch(label)
       }
     }
   }
 
-  // Filtrar espaços pelo texto digitado
   const filteredSpaces = spaces.filter(s => {
-    if (!spaceSearch) return true
-    const tenant = s.leases?.[0]?.tenant
-    const label = `${s.ref}${tenant ? ` ${tenant.name}` : ''}`.toLowerCase()
+    if (!spaceSearch || spaceId) return true
+    const activeLease = s.leases?.find(l => l.tenant)
+    const tenantName = activeLease?.tenant?.name ?? ''
+    const label = `${s.ref} ${tenantName}`.toLowerCase()
     return label.includes(spaceSearch.toLowerCase())
   })
 
-  function selectSpace(space: any) {
-    const tenant = space.leases?.[0]?.tenant
+  function selectSpace(space: SpaceOption) {
+    const activeLease = space.leases?.find(l => l.tenant)
+    const tenant = activeLease?.tenant
     const label = `${space.ref}${tenant ? ` — ${tenant.name}` : ''}`
     setSpaceId(space.id)
     setTenantId(tenant?.id ?? '')
-    setSelectedSpaceLabel(label)
     setSpaceSearch(label)
     setShowSpaceDropdown(false)
   }
@@ -96,7 +99,6 @@ export default function NoteModal({ note, onClose, onSaved }: NoteModalProps) {
   function clearSpace() {
     setSpaceId('')
     setTenantId('')
-    setSelectedSpaceLabel('')
     setSpaceSearch('')
   }
 
@@ -199,26 +201,23 @@ export default function NoteModal({ note, onClose, onSaved }: NoteModalProps) {
                   </button>
                 )}
               </div>
-              {showSpaceDropdown && (
+              {showSpaceDropdown && filteredSpaces.length > 0 && (
                 <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                  {filteredSpaces.length === 0 ? (
-                    <p className="text-sm text-gray-400 text-center py-3">Nenhum resultado</p>
-                  ) : (
-                    filteredSpaces.map(space => {
-                      const tenant = space.leases?.[0]?.tenant
-                      return (
-                        <div key={space.id} onClick={() => selectSpace(space)}
-                          className="flex items-center justify-between px-3 py-2.5 hover:bg-emerald-50 cursor-pointer border-b border-gray-50 last:border-0">
-                          <span className="text-sm font-medium text-gray-800">{space.ref}</span>
-                          {tenant ? (
-                            <span className="text-sm text-gray-500">{tenant.name}</span>
-                          ) : (
-                            <span className="text-xs text-gray-300">disponível</span>
-                          )}
-                        </div>
-                      )
-                    })
-                  )}
+                  {filteredSpaces.map(space => {
+                    const activeLease = space.leases?.find(l => l.tenant)
+                    const tenant = activeLease?.tenant
+                    return (
+                      <div key={space.id} onClick={() => selectSpace(space)}
+                        className="flex items-center justify-between px-3 py-2.5 hover:bg-emerald-50 cursor-pointer border-b border-gray-50 last:border-0">
+                        <span className="text-sm font-medium text-gray-800">{space.ref}</span>
+                        {tenant ? (
+                          <span className="text-sm text-gray-500">{tenant.name}</span>
+                        ) : (
+                          <span className="text-xs text-gray-300">disponível</span>
+                        )}
+                      </div>
+                    )
+                  })}
                 </div>
               )}
             </div>
