@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { X, Search, Bell, BellOff } from 'lucide-react'
+import { useAuth } from '@/lib/auth-context'
 
 interface NoteModalProps {
   note?: any
@@ -19,6 +20,7 @@ const NOTE_TYPES = [
 
 export default function NoteModal({ note, onClose, onSaved }: NoteModalProps) {
   const supabase = createClient()
+  const { profile } = useAuth()
 
   const now = new Date()
   const todayStr = now.toISOString().slice(0, 10)
@@ -100,7 +102,7 @@ export default function NoteModal({ note, onClose, onSaved }: NoteModalProps) {
     if (!title.trim()) return
     setSaving(true)
     try {
-      const payload = {
+      const payload: any = {
         title: title.trim(),
         description: description.trim() || null,
         type,
@@ -112,6 +114,11 @@ export default function NoteModal({ note, onClose, onSaved }: NoteModalProps) {
         reminder_date: hasReminder ? reminderDate : null,
         reminder_time: hasReminder ? reminderTime : '09:00',
         dismissed: false,
+      }
+
+      if (!note?.id) {
+        // Só define created_by na criação
+        payload.created_by = profile?.id ?? null
       }
 
       if (note?.id) {
