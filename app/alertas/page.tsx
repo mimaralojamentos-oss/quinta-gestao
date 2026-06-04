@@ -2,9 +2,10 @@
 
 import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
-import { supabase } from '@/lib/supabase'
+import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, formatDate, getMonthLabel, getCurrentMonth } from '@/lib/utils'
-import { AlertTriangle, Clock, FileText, CheckCircle, Zap, X } from 'lucide-react'
+import { AlertTriangle, Clock, FileText, CheckCircle, Zap, X, Bell, NotebookPen } from 'lucide-react'
+import Link from 'next/link'
 
 interface AlertItem {
   id: string
@@ -18,12 +19,34 @@ interface AlertItem {
 }
 
 export default function AlertasPage() {
+  const supabase = createClient()
   const [alerts, setAlerts] = useState<AlertItem[]>([])
   const [dismissed, setDismissed] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
   const [showDismissed, setShowDismissed] = useState(false)
+  const [manualAlerts, setManualAlerts] = useState<any[]>([])
 
-  useEffect(() => { fetchAlerts() }, [])
+  useEffect(() => { fetchAlerts(); fetchManualAlerts() }, [])
+
+  async function fetchManualAlerts() {
+    const todayStr = new Date().toISOString().slice(0, 10)
+    const { data } = await supabase
+      .from('notes')
+      .select('*, space:spaces(ref), tenant:tenants(name)')
+      .eq('has_reminder', true)
+      .eq('dismissed', false)
+      .is('reminder_seen_at', null)
+      .lte('reminder_date', todayStr)
+      .order('reminder_date', { ascending: true })
+    setManualAlerts(data ?? [])
+  }
+
+  async function handleMarkSeen(id: string) {
+    await supabase.from('notes').update({
+      reminder_seen_at: new Date().toISOString(),
+    }).eq('id', id)
+    fetchManualAlerts()
+  }
 
   async function fetchAlerts() {
     setLoading(true)
@@ -48,7 +71,6 @@ export default function AlertasPage() {
       .select('*, lease:leases(*, space:spaces(*), tenant:tenants(*))')
       .eq('paid', false)
 
-    // Carregar alertas dispensados
     const { data: dismissedData } = await supabase
       .from('dismissed_alerts')
       .select('alert_key')
@@ -75,7 +97,7 @@ export default function AlertasPage() {
       }
     })
 
-    // Contratos a expirar — agora até 180 dias
+    // Contratos a expirar
     const oneEightyDays = new Date()
     oneEightyDays.setDate(oneEightyDays.getDate() + 180)
     ;(leases ?? []).filter(l => l.end_date).forEach(l => {
@@ -146,6 +168,13 @@ export default function AlertasPage() {
     return <Zap className="w-5 h-5" />
   }
 
+  const NOTE_TYPE_LABELS: Record<string, string> = {
+    chamada: '📞 Chamada',
+    geral: '🏡 Geral',
+    lembrete: '⏰ Lembrete',
+    outro: '📝 Outro',
+  }
+
   const highCount = activeAlerts.filter(a => a.severity === 'high').length
   const medCount = activeAlerts.filter(a => a.severity === 'medium').length
 
@@ -154,10 +183,11 @@ export default function AlertasPage() {
       <div className="p-8">
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-gray-900">Alertas</h1>
-          <p className="text-sm text-gray-500 mt-1">{activeAlerts.length} alertas ativos</p>
+          <p className="text-sm text-gray-500 mt-1">{activeAlerts.length} alertas automáticos · {manualAlerts.length} lembretes manuais</p>
         </div>
 
-        <div className="grid grid-cols-3 gap-4 mb-6">
+        {/* Cards resumo */}
+        <div className="grid grid-cols-3 gap-4 mb-8">
           <div className="card border-l-4 border-l-red-500">
             <p className="text-sm text-gray-500">Urgentes</p>
             <p className="text-2xl font-bold text-red-600">{highCount}</p>
@@ -166,90 +196,162 @@ export default function AlertasPage() {
             <p className="text-sm text-gray-500">Atenção</p>
             <p className="text-2xl font-bold text-yellow-600">{medCount}</p>
           </div>
-          <div className="card border-l-4 border-l-emerald-500">
-            <p className="text-sm text-gray-500">Total ativos</p>
-            <p className="text-2xl font-bold text-gray-800">{activeAlerts.length}</p>
+          <div className="card border-l-4 border-l-purple-500">
+            <p className="text-sm text-gray-500">Lembretes Manuais</p>
+            <p className="text-2xl font-bold text-purple-600">{manualAlerts.length}</p>
           </div>
         </div>
 
-        {loading ? (
-          <div className="flex justify-center py-12">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600" />
+        {/* ===== SECÇÃO: LEMBRETES MANUAIS ===== */}
+        <div className="mb-8">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <NotebookPen className="w-5 h-5 text-purple-600" />
+              <h2 className="text-lg font-semibold text-gray-900">Lembretes Manuais</h2>
+              {manualAlerts.length > 0 && (
+                <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium">
+                  {manualAlerts.length} pendente(s)
+                </span>
+              )}
+            </div>
+            <Link href="/notas" prefetch={false}
+              className="text-xs text-emerald-600 hover:underline font-medium">
+              Ver todas as notas →
+            </Link>
           </div>
-        ) : activeAlerts.length === 0 ? (
-          <div className="card flex flex-col items-center py-16">
-            <CheckCircle className="w-12 h-12 text-emerald-500 mb-3" />
-            <p className="text-lg font-semibold text-gray-700">Tudo em ordem!</p>
-            <p className="text-sm text-gray-500 mt-1">Não existem alertas ativos neste momento</p>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {activeAlerts.map(alert => {
-              const config = severityConfig[alert.severity]
-              return (
-                <div key={alert.id} className={`rounded-xl border p-4 ${config.bg} flex items-start gap-4`}>
-                  <div className={`w-10 h-10 rounded-lg bg-white flex items-center justify-center flex-shrink-0 ${config.icon}`}>
-                    {typeIcon(alert.type)}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${config.badge}`}>
-                        {config.label}
-                      </span>
-                      <span className="text-sm font-semibold text-gray-800">{alert.title}</span>
-                      <span className="badge-cinza">{alert.spaceRef}</span>
+
+          {manualAlerts.length === 0 ? (
+            <div className="bg-gray-50 border border-gray-100 rounded-xl p-6 text-center text-gray-400">
+              <Bell className="w-8 h-8 mx-auto mb-2 opacity-30" />
+              <p className="text-sm">Sem lembretes manuais pendentes.</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {manualAlerts.map(note => {
+                const isOverdue = note.reminder_date < new Date().toISOString().slice(0, 10)
+                return (
+                  <div key={note.id}
+                    className={`rounded-xl border p-4 flex items-start gap-4 ${isOverdue ? 'bg-red-50 border-red-100' : 'bg-purple-50 border-purple-100'}`}>
+                    <div className={`w-9 h-9 rounded-lg bg-white flex items-center justify-center flex-shrink-0 ${isOverdue ? 'text-red-500' : 'text-purple-500'}`}>
+                      <Bell className="w-4 h-4" />
                     </div>
-                    <p className="text-sm text-gray-700">{alert.tenantName} — {alert.description}</p>
-                    {alert.value && (
-                      <p className="text-sm font-semibold text-gray-800 mt-1">{formatCurrency(alert.value)}</p>
-                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${isOverdue ? 'bg-red-100 text-red-700' : 'bg-purple-100 text-purple-700'}`}>
+                          {isOverdue ? '⚠️ Em atraso' : '🔔 Hoje'}
+                        </span>
+                        <span className="text-xs bg-white border border-gray-200 text-gray-600 px-2 py-0.5 rounded-full">
+                          {NOTE_TYPE_LABELS[note.type] ?? note.type}
+                        </span>
+                        {note.space?.ref && (
+                          <span className="text-xs bg-white border border-gray-200 text-gray-600 px-2 py-0.5 rounded-full">
+                            {note.space.ref}{note.tenant?.name ? ` — ${note.tenant.name}` : ''}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-sm font-semibold text-gray-900">{note.title}</p>
+                      {note.description && (
+                        <p className="text-xs text-gray-500 mt-0.5">{note.description}</p>
+                      )}
+                      <p className="text-xs text-gray-400 mt-1">
+                        Lembrete: {formatDate(note.reminder_date)} às {note.reminder_time?.slice(0, 5)}
+                      </p>
+                    </div>
+                    <button onClick={() => handleMarkSeen(note.id)}
+                      title="Marcar como visto"
+                      className="flex items-center gap-1 text-xs bg-white border border-gray-200 text-gray-600 hover:bg-emerald-50 hover:text-emerald-600 hover:border-emerald-200 px-2 py-1.5 rounded-lg transition-colors flex-shrink-0">
+                      <CheckCircle className="w-3.5 h-3.5" /> Visto
+                    </button>
                   </div>
-                  <button
-                    onClick={() => dismissAlert(alert.id)}
-                    title="Dispensar alerta"
-                    className="text-gray-400 hover:text-gray-600 flex-shrink-0 mt-0.5 transition-colors"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-              )
-            })}
+                )
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* ===== SECÇÃO: ALERTAS AUTOMÁTICOS ===== */}
+        <div>
+          <div className="flex items-center gap-2 mb-3">
+            <AlertTriangle className="w-5 h-5 text-yellow-500" />
+            <h2 className="text-lg font-semibold text-gray-900">Alertas Automáticos</h2>
+            {activeAlerts.length > 0 && (
+              <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full font-medium">
+                {activeAlerts.length} ativo(s)
+              </span>
+            )}
           </div>
-        )}
 
-        {/* Alertas dispensados */}
-        {dismissedAlerts.length > 0 && (
-          <div className="mt-8">
-            <button
-              onClick={() => setShowDismissed(v => !v)}
-              className="text-sm text-gray-400 hover:text-gray-600 underline"
-            >
-              {showDismissed ? 'Ocultar' : `Mostrar ${dismissedAlerts.length} alerta(s) dispensado(s)`}
-            </button>
-
-            {showDismissed && (
-              <div className="space-y-2 mt-3">
-                {dismissedAlerts.map(alert => (
-                  <div key={alert.id} className="rounded-xl border border-gray-100 bg-gray-50 p-4 flex items-start gap-4 opacity-60">
-                    <div className="w-10 h-10 rounded-lg bg-white flex items-center justify-center flex-shrink-0 text-gray-400">
+          {loading ? (
+            <div className="flex justify-center py-12">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600" />
+            </div>
+          ) : activeAlerts.length === 0 ? (
+            <div className="card flex flex-col items-center py-12">
+              <CheckCircle className="w-12 h-12 text-emerald-500 mb-3" />
+              <p className="text-lg font-semibold text-gray-700">Tudo em ordem!</p>
+              <p className="text-sm text-gray-500 mt-1">Não existem alertas automáticos ativos</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {activeAlerts.map(alert => {
+                const config = severityConfig[alert.severity]
+                return (
+                  <div key={alert.id} className={`rounded-xl border p-4 ${config.bg} flex items-start gap-4`}>
+                    <div className={`w-10 h-10 rounded-lg bg-white flex items-center justify-center flex-shrink-0 ${config.icon}`}>
                       {typeIcon(alert.type)}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-600">{alert.title} — {alert.spaceRef}</p>
-                      <p className="text-xs text-gray-500">{alert.tenantName} — {alert.description}</p>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${config.badge}`}>
+                          {config.label}
+                        </span>
+                        <span className="text-sm font-semibold text-gray-800">{alert.title}</span>
+                        <span className="badge-cinza">{alert.spaceRef}</span>
+                      </div>
+                      <p className="text-sm text-gray-700">{alert.tenantName} — {alert.description}</p>
+                      {alert.value && (
+                        <p className="text-sm font-semibold text-gray-800 mt-1">{formatCurrency(alert.value)}</p>
+                      )}
                     </div>
-                    <button
-                      onClick={() => restoreAlert(alert.id)}
-                      className="text-xs text-emerald-600 hover:underline flex-shrink-0"
-                    >
-                      Reativar
+                    <button onClick={() => dismissAlert(alert.id)} title="Dispensar alerta"
+                      className="text-gray-400 hover:text-gray-600 flex-shrink-0 mt-0.5 transition-colors">
+                      <X className="w-5 h-5" />
                     </button>
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
+                )
+              })}
+            </div>
+          )}
+
+          {/* Alertas dispensados */}
+          {dismissedAlerts.length > 0 && (
+            <div className="mt-6">
+              <button onClick={() => setShowDismissed(v => !v)}
+                className="text-sm text-gray-400 hover:text-gray-600 underline">
+                {showDismissed ? 'Ocultar' : `Mostrar ${dismissedAlerts.length} alerta(s) dispensado(s)`}
+              </button>
+              {showDismissed && (
+                <div className="space-y-2 mt-3">
+                  {dismissedAlerts.map(alert => (
+                    <div key={alert.id} className="rounded-xl border border-gray-100 bg-gray-50 p-4 flex items-start gap-4 opacity-60">
+                      <div className="w-10 h-10 rounded-lg bg-white flex items-center justify-center flex-shrink-0 text-gray-400">
+                        {typeIcon(alert.type)}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-600">{alert.title} — {alert.spaceRef}</p>
+                        <p className="text-xs text-gray-500">{alert.tenantName} — {alert.description}</p>
+                      </div>
+                      <button onClick={() => restoreAlert(alert.id)}
+                        className="text-xs text-emerald-600 hover:underline flex-shrink-0">
+                        Reativar
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </AppLayout>
   )
