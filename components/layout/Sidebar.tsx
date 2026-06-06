@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, Building2, Users, CreditCard,
   Receipt, Wallet, Bell, Zap, LogOut, ShieldCheck,
-  TrendingUp, Landmark, ChevronDown, ChevronRight, FolderOpen, HardHat, NotebookPen, BarChart3,
+  TrendingUp, Landmark, ChevronDown, ChevronRight, FolderOpen, HardHat, NotebookPen, BarChart3, UserCircle,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/lib/auth-context'
@@ -163,15 +163,17 @@ export default function Sidebar() {
 
       <div className="p-4 border-t border-gray-100">
         {profile && (
-          <div className="flex items-center gap-3 mb-3 px-1">
+          <Link href="/perfil" prefetch={false}
+            className={cn('flex items-center gap-3 mb-3 px-1 rounded-lg py-1.5 hover:bg-gray-50 transition-colors cursor-pointer', pathname.startsWith('/perfil') ? 'bg-emerald-50' : '')}>
             <div className="w-8 h-8 bg-emerald-100 rounded-full flex items-center justify-center flex-shrink-0">
               <span className="text-xs font-bold text-emerald-700">{profile.name.charAt(0).toUpperCase()}</span>
             </div>
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <p className="text-sm font-medium text-gray-800 truncate">{profile.name}</p>
               <p className="text-xs text-gray-400">{profile.role === 'admin' ? '🔑 Administrador' : '👁 Visualizador'}</p>
             </div>
-          </div>
+            <UserCircle className="w-4 h-4 text-gray-300 flex-shrink-0" />
+          </Link>
         )}
         <button onClick={signOut}
           className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors">
