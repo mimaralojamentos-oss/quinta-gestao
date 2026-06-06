@@ -42,8 +42,8 @@ export default function RelatoriosPage() {
 
   async function fetchRendas() {
     setLoading(true)
-    // reference_month é do tipo date: "2026-05-01"
-    const refMonth = `${selectedMonth}-01`
+    const startDate = `${selectedMonth}-01`
+    const endDate = `${selectedMonth}-28` // usar gte/lte para garantir filtro correto
 
     const { data: leases } = await supabase
       .from('leases')
@@ -53,7 +53,8 @@ export default function RelatoriosPage() {
     const { data: payments } = await supabase
       .from('rent_payments')
       .select('*')
-      .eq('reference_month', refMonth)
+      .gte('reference_month', startDate)
+      .lte('reference_month', endDate)
 
     const totalEsperado = (leases ?? []).reduce((s: number, l: any) => s + (l.monthly_rent ?? 0), 0)
     const totalRecebido = (payments ?? []).reduce((s: number, p: any) => s + (p.amount ?? 0), 0)
@@ -85,20 +86,20 @@ export default function RelatoriosPage() {
 
   async function fetchFinanceiro() {
     setLoading(true)
-    const refMonth = `${selectedMonth}-01`
     const startDate = `${selectedMonth}-01`
-    const endDate = `${selectedMonth}-31`
+    const endDate = `${selectedMonth}-28`
 
     const { data: payments } = await supabase
       .from('rent_payments')
       .select('amount')
-      .eq('reference_month', refMonth)
+      .gte('reference_month', startDate)
+      .lte('reference_month', endDate)
 
     const { data: despesas } = await supabase
       .from('expenses')
       .select('amount, category')
       .gte('expense_date', startDate)
-      .lte('expense_date', endDate)
+      .lte('expense_date', `${selectedMonth}-31`)
 
     const receitas = (payments ?? []).reduce((s: number, p: any) => s + (p.amount ?? 0), 0)
     const totalDespesas = (despesas ?? []).reduce((s: number, e: any) => s + (e.amount ?? 0), 0)
