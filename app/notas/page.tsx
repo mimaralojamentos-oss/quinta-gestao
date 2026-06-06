@@ -22,6 +22,34 @@ const NOTE_TYPE_COLORS: Record<string, string> = {
   outro: 'bg-gray-100 text-gray-600',
 }
 
+// Paleta de cores por utilizador — miguelseverino é sempre vermelho
+const USER_COLORS: Record<string, { bg: string; avatar: string; text: string }> = {
+  miguelseverino: { bg: 'bg-red-50 border-red-100', avatar: 'bg-red-500', text: 'text-red-700' },
+}
+
+const COLOR_PALETTE = [
+  { bg: 'bg-blue-50 border-blue-100', avatar: 'bg-blue-500', text: 'text-blue-700' },
+  { bg: 'bg-emerald-50 border-emerald-100', avatar: 'bg-emerald-500', text: 'text-emerald-700' },
+  { bg: 'bg-purple-50 border-purple-100', avatar: 'bg-purple-500', text: 'text-purple-700' },
+  { bg: 'bg-orange-50 border-orange-100', avatar: 'bg-orange-500', text: 'text-orange-700' },
+  { bg: 'bg-teal-50 border-teal-100', avatar: 'bg-teal-500', text: 'text-teal-700' },
+  { bg: 'bg-pink-50 border-pink-100', avatar: 'bg-pink-500', text: 'text-pink-700' },
+]
+
+// Gera cor consistente para cada utilizador baseada no nome
+function getUserColor(name: string) {
+  // Normalizar nome para comparação
+  const normalized = name?.toLowerCase().replace(/\s/g, '') ?? ''
+  if (USER_COLORS[normalized]) return USER_COLORS[normalized]
+  // Gerar índice consistente baseado no nome
+  let hash = 0
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash)
+  }
+  const index = Math.abs(hash) % COLOR_PALETTE.length
+  return COLOR_PALETTE[index]
+}
+
 export default function NotasPage() {
   const supabase = createClient()
   const { profile } = useAuth()
@@ -34,7 +62,6 @@ export default function NotasPage() {
   const [comments, setComments] = useState<Record<string, any[]>>({})
   const [newComment, setNewComment] = useState<Record<string, string>>({})
   const [savingComment, setSavingComment] = useState<string | null>(null)
-  // Estado para editar comentário
   const [editingComment, setEditingComment] = useState<string | null>(null)
   const [editingCommentText, setEditingCommentText] = useState<string>('')
   const [savingEditComment, setSavingEditComment] = useState(false)
@@ -119,9 +146,7 @@ export default function NotasPage() {
   }
 
   async function handleMarkSeen(id: string) {
-    await supabase.from('notes').update({
-      reminder_seen_at: new Date().toISOString(),
-    }).eq('id', id)
+    await supabase.from('notes').update({ reminder_seen_at: new Date().toISOString() }).eq('id', id)
     fetchNotes()
   }
 
@@ -136,7 +161,6 @@ export default function NotasPage() {
   const pendingReminders = notes.filter(n =>
     n.has_reminder && !n.reminder_seen_at && n.reminder_date <= todayStr
   ).length
-
   const isOwner = (note: any) => note.created_by === profile?.id
 
   return (
@@ -155,7 +179,6 @@ export default function NotasPage() {
           </button>
         </div>
 
-        {/* Alerta de lembretes pendentes */}
         {pendingReminders > 0 && (
           <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-5 flex items-center gap-3">
             <Bell className="w-5 h-5 text-yellow-500 flex-shrink-0" />
@@ -165,7 +188,6 @@ export default function NotasPage() {
           </div>
         )}
 
-        {/* Filtros por tipo */}
         <div className="flex flex-wrap gap-2 mb-5">
           {[
             { key: 'all', label: 'Todas' },
@@ -181,7 +203,6 @@ export default function NotasPage() {
           ))}
         </div>
 
-        {/* Lista de notas */}
         {loading ? (
           <div className="flex justify-center py-12">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600" />
@@ -207,7 +228,6 @@ export default function NotasPage() {
                   <div className="p-4">
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex-1 min-w-0">
-                        {/* Badges */}
                         <div className="flex items-center gap-2 flex-wrap mb-1">
                           <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${NOTE_TYPE_COLORS[note.type] ?? 'bg-gray-100 text-gray-600'}`}>
                             {NOTE_TYPE_LABELS[note.type] ?? note.type}
@@ -234,15 +254,12 @@ export default function NotasPage() {
                           )}
                         </div>
 
-                        {/* Título */}
                         <h3 className="text-sm font-semibold text-gray-900">{note.title}</h3>
 
-                        {/* Descrição */}
                         {note.description && (
                           <p className="text-sm text-gray-500 mt-1 whitespace-pre-line">{note.description}</p>
                         )}
 
-                        {/* Rodapé: criador + data */}
                         <div className="flex items-center gap-3 mt-2">
                           <div className="flex items-center gap-1 text-xs text-gray-400">
                             <User className="w-3 h-3" />
@@ -255,7 +272,6 @@ export default function NotasPage() {
                         </div>
                       </div>
 
-                      {/* Ações */}
                       <div className="flex items-center gap-1 flex-shrink-0">
                         {isReminderPending && (
                           <button onClick={() => handleMarkSeen(note.id)}
@@ -295,7 +311,6 @@ export default function NotasPage() {
                     </div>
                   </div>
 
-                  {/* Secção de comentários */}
                   {isExpanded && (
                     <div className="border-t border-gray-100 px-4 pb-4 pt-3">
                       <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Comentários</p>
@@ -304,78 +319,81 @@ export default function NotasPage() {
                         <p className="text-xs text-gray-400 mb-3">Ainda sem comentários.</p>
                       ) : (
                         <div className="space-y-2 mb-3">
-                          {noteComments.map(c => (
-                            <div key={c.id} className="flex items-start gap-2">
-                              <div className="w-6 h-6 bg-emerald-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
-                                <span className="text-xs font-bold text-emerald-700">
-                                  {c.author?.name?.charAt(0).toUpperCase() ?? '?'}
-                                </span>
-                              </div>
-                              <div className="flex-1 min-w-0 bg-gray-50 rounded-lg px-3 py-2">
-                                <div className="flex items-center justify-between gap-2 mb-0.5">
-                                  <span className="text-xs font-medium text-gray-700">{c.author?.name ?? '—'}</span>
-                                  <span className="text-xs text-gray-400">
-                                    {new Date(c.created_at).toLocaleDateString('pt-PT', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                          {noteComments.map(c => {
+                            const colors = getUserColor(c.author?.name ?? '')
+                            return (
+                              <div key={c.id} className="flex items-start gap-2">
+                                {/* Avatar com cor do utilizador */}
+                                <div className={`w-7 h-7 ${colors.avatar} rounded-full flex items-center justify-center flex-shrink-0 mt-0.5`}>
+                                  <span className="text-xs font-bold text-white">
+                                    {c.author?.name?.charAt(0).toUpperCase() ?? '?'}
                                   </span>
                                 </div>
-
-                                {/* Modo edição do comentário */}
-                                {editingComment === c.id ? (
-                                  <div className="mt-1">
-                                    <textarea
-                                      className="input text-sm w-full min-h-[60px] resize-none"
-                                      value={editingCommentText}
-                                      onChange={e => setEditingCommentText(e.target.value)}
-                                      autoFocus
-                                    />
-                                    <div className="flex gap-2 mt-2">
-                                      <button
-                                        onClick={() => handleSaveEditComment(note.id, c.id)}
-                                        disabled={!editingCommentText.trim() || savingEditComment}
-                                        className="text-xs bg-emerald-600 text-white px-3 py-1 rounded-lg hover:bg-emerald-700 disabled:opacity-40 transition-colors">
-                                        {savingEditComment ? 'A guardar...' : 'Guardar'}
-                                      </button>
-                                      <button onClick={cancelEditComment}
-                                        className="text-xs bg-gray-100 text-gray-600 px-3 py-1 rounded-lg hover:bg-gray-200 transition-colors">
-                                        Cancelar
-                                      </button>
-                                    </div>
+                                {/* Balão com cor de fundo do utilizador */}
+                                <div className={`flex-1 min-w-0 border rounded-lg px-3 py-2 ${colors.bg}`}>
+                                  <div className="flex items-center justify-between gap-2 mb-0.5">
+                                    <span className={`text-xs font-semibold ${colors.text}`}>{c.author?.name ?? '—'}</span>
+                                    <span className="text-xs text-gray-400">
+                                      {new Date(c.created_at).toLocaleDateString('pt-PT', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                                    </span>
                                   </div>
-                                ) : (
-                                  <p className="text-sm text-gray-600">{c.content}</p>
+
+                                  {editingComment === c.id ? (
+                                    <div className="mt-1">
+                                      <textarea
+                                        className="input text-sm w-full min-h-[60px] resize-none"
+                                        value={editingCommentText}
+                                        onChange={e => setEditingCommentText(e.target.value)}
+                                        autoFocus
+                                      />
+                                      <div className="flex gap-2 mt-2">
+                                        <button
+                                          onClick={() => handleSaveEditComment(note.id, c.id)}
+                                          disabled={!editingCommentText.trim() || savingEditComment}
+                                          className="text-xs bg-emerald-600 text-white px-3 py-1 rounded-lg hover:bg-emerald-700 disabled:opacity-40 transition-colors">
+                                          {savingEditComment ? 'A guardar...' : 'Guardar'}
+                                        </button>
+                                        <button onClick={cancelEditComment}
+                                          className="text-xs bg-gray-100 text-gray-600 px-3 py-1 rounded-lg hover:bg-gray-200 transition-colors">
+                                          Cancelar
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <p className="text-sm text-gray-700">{c.content}</p>
+                                  )}
+                                </div>
+
+                                {c.created_by === profile?.id && editingComment !== c.id && (
+                                  <div className="flex flex-col gap-1 flex-shrink-0 mt-0.5">
+                                    <button onClick={() => startEditComment(c)}
+                                      title="Editar comentário"
+                                      className="p-1 text-gray-300 hover:text-blue-400 transition-colors">
+                                      <Edit2 className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button onClick={() => handleDeleteComment(note.id, c.id)}
+                                      title="Apagar comentário"
+                                      className="p-1 text-gray-300 hover:text-red-400 transition-colors">
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                )}
+                                {editingComment === c.id && (
+                                  <button onClick={cancelEditComment}
+                                    className="p-1 text-gray-300 hover:text-gray-500 transition-colors flex-shrink-0 mt-0.5">
+                                    <X className="w-3.5 h-3.5" />
+                                  </button>
                                 )}
                               </div>
-
-                              {/* Só o autor pode editar/apagar */}
-                              {c.created_by === profile?.id && editingComment !== c.id && (
-                                <div className="flex flex-col gap-1 flex-shrink-0 mt-0.5">
-                                  <button onClick={() => startEditComment(c)}
-                                    title="Editar comentário"
-                                    className="p-1 text-gray-300 hover:text-blue-400 transition-colors">
-                                    <Edit2 className="w-3.5 h-3.5" />
-                                  </button>
-                                  <button onClick={() => handleDeleteComment(note.id, c.id)}
-                                    title="Apagar comentário"
-                                    className="p-1 text-gray-300 hover:text-red-400 transition-colors">
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                </div>
-                              )}
-                              {editingComment === c.id && (
-                                <button onClick={cancelEditComment}
-                                  className="p-1 text-gray-300 hover:text-gray-500 transition-colors flex-shrink-0 mt-0.5">
-                                  <X className="w-3.5 h-3.5" />
-                                </button>
-                              )}
-                            </div>
-                          ))}
+                            )
+                          })}
                         </div>
                       )}
 
-                      {/* Caixa de novo comentário */}
+                      {/* Caixa de novo comentário com cor do utilizador atual */}
                       <div className="flex items-center gap-2">
-                        <div className="w-6 h-6 bg-emerald-100 rounded-full flex items-center justify-center flex-shrink-0">
-                          <span className="text-xs font-bold text-emerald-700">
+                        <div className={`w-7 h-7 ${getUserColor(profile?.name ?? '').avatar} rounded-full flex items-center justify-center flex-shrink-0`}>
+                          <span className="text-xs font-bold text-white">
                             {profile?.name?.charAt(0).toUpperCase() ?? '?'}
                           </span>
                         </div>
