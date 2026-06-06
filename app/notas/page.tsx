@@ -153,7 +153,14 @@ export default function NotasPage() {
     fetchNotes()
   }
 
-  const filtered = notes.filter(n => filterType === 'all' || n.type === filterType)
+  // CORRIGIDO: o filtro "Lembretes" mostra notas do tipo lembrete
+  // E também qualquer nota que tenha um lembrete associado (has_reminder = true)
+  const filtered = notes.filter(n => {
+    if (filterType === 'all') return true
+    if (filterType === 'lembrete') return n.type === 'lembrete' || n.has_reminder === true
+    return n.type === filterType
+  })
+
   const todayStr = new Date().toISOString().slice(0, 10)
   const pendingReminders = notes.filter(n =>
     n.has_reminder && !n.reminder_seen_at && n.reminder_date <= todayStr
