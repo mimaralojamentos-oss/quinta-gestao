@@ -22,26 +22,23 @@ const NOTE_TYPE_COLORS: Record<string, string> = {
   outro: 'bg-gray-100 text-gray-600',
 }
 
-// Paleta de cores por utilizador — miguelseverino é sempre vermelho
-const USER_COLORS: Record<string, { bg: string; avatar: string; text: string }> = {
-  miguelseverino: { bg: 'bg-red-50 border-red-100', avatar: 'bg-red-500', text: 'text-red-700' },
+// miguelseverino é sempre vermelho
+const USER_COLORS: Record<string, { bg: string; border: string; avatar: string; text: string }> = {
+  miguelseverino: { bg: 'bg-red-50', border: 'border-red-200', avatar: 'bg-red-500', text: 'text-red-700' },
 }
 
 const COLOR_PALETTE = [
-  { bg: 'bg-blue-50 border-blue-100', avatar: 'bg-blue-500', text: 'text-blue-700' },
-  { bg: 'bg-emerald-50 border-emerald-100', avatar: 'bg-emerald-500', text: 'text-emerald-700' },
-  { bg: 'bg-purple-50 border-purple-100', avatar: 'bg-purple-500', text: 'text-purple-700' },
-  { bg: 'bg-orange-50 border-orange-100', avatar: 'bg-orange-500', text: 'text-orange-700' },
-  { bg: 'bg-teal-50 border-teal-100', avatar: 'bg-teal-500', text: 'text-teal-700' },
-  { bg: 'bg-pink-50 border-pink-100', avatar: 'bg-pink-500', text: 'text-pink-700' },
+  { bg: 'bg-blue-50', border: 'border-blue-200', avatar: 'bg-blue-500', text: 'text-blue-700' },
+  { bg: 'bg-emerald-50', border: 'border-emerald-200', avatar: 'bg-emerald-500', text: 'text-emerald-700' },
+  { bg: 'bg-purple-50', border: 'border-purple-200', avatar: 'bg-purple-500', text: 'text-purple-700' },
+  { bg: 'bg-orange-50', border: 'border-orange-200', avatar: 'bg-orange-500', text: 'text-orange-700' },
+  { bg: 'bg-teal-50', border: 'border-teal-200', avatar: 'bg-teal-500', text: 'text-teal-700' },
+  { bg: 'bg-pink-50', border: 'border-pink-200', avatar: 'bg-pink-500', text: 'text-pink-700' },
 ]
 
-// Gera cor consistente para cada utilizador baseada no nome
 function getUserColor(name: string) {
-  // Normalizar nome para comparação
   const normalized = name?.toLowerCase().replace(/\s/g, '') ?? ''
   if (USER_COLORS[normalized]) return USER_COLORS[normalized]
-  // Gerar índice consistente baseado no nome
   let hash = 0
   for (let i = 0; i < name.length; i++) {
     hash = name.charCodeAt(i) + ((hash << 5) - hash)
@@ -215,6 +212,7 @@ export default function NotasPage() {
         ) : (
           <div className="space-y-3">
             {filtered.map(note => {
+              const creatorColors = getUserColor(note.creator?.name ?? '')
               const isReminderPending = note.has_reminder && !note.reminder_seen_at && note.reminder_date <= todayStr
               const isReminderFuture = note.has_reminder && !note.reminder_seen_at && note.reminder_date > todayStr
               const isReminderSeen = note.has_reminder && note.reminder_seen_at
@@ -224,7 +222,7 @@ export default function NotasPage() {
 
               return (
                 <div key={note.id}
-                  className={`bg-white border rounded-xl shadow-sm transition-colors ${isReminderPending ? 'border-yellow-300 bg-yellow-50/30' : 'border-gray-100'}`}>
+                  className={`border rounded-xl shadow-sm transition-colors ${creatorColors.bg} ${creatorColors.border} ${isReminderPending ? 'ring-2 ring-yellow-300' : ''}`}>
                   <div className="p-4">
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex-1 min-w-0">
@@ -233,7 +231,7 @@ export default function NotasPage() {
                             {NOTE_TYPE_LABELS[note.type] ?? note.type}
                           </span>
                           {note.space?.ref && (
-                            <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
+                            <span className="text-xs bg-white/70 text-gray-600 px-2 py-0.5 rounded-full border border-white">
                               {note.space.ref}{note.tenant?.name ? ` — ${note.tenant.name}` : ''}
                             </span>
                           )}
@@ -248,7 +246,7 @@ export default function NotasPage() {
                             </span>
                           )}
                           {isReminderSeen && (
-                            <span className="text-xs bg-gray-100 text-gray-400 px-2 py-0.5 rounded-full flex items-center gap-1">
+                            <span className="text-xs bg-white/70 text-gray-400 px-2 py-0.5 rounded-full flex items-center gap-1">
                               <CheckCircle className="w-3 h-3" /> Visto
                             </span>
                           )}
@@ -257,16 +255,20 @@ export default function NotasPage() {
                         <h3 className="text-sm font-semibold text-gray-900">{note.title}</h3>
 
                         {note.description && (
-                          <p className="text-sm text-gray-500 mt-1 whitespace-pre-line">{note.description}</p>
+                          <p className="text-sm text-gray-600 mt-1 whitespace-pre-line">{note.description}</p>
                         )}
 
                         <div className="flex items-center gap-3 mt-2">
-                          <div className="flex items-center gap-1 text-xs text-gray-400">
-                            <User className="w-3 h-3" />
+                          <div className={`flex items-center gap-1.5 text-xs font-medium ${creatorColors.text}`}>
+                            <div className={`w-4 h-4 ${creatorColors.avatar} rounded-full flex items-center justify-center`}>
+                              <span className="text-white" style={{ fontSize: '9px', fontWeight: 'bold' }}>
+                                {note.creator?.name?.charAt(0).toUpperCase() ?? '?'}
+                              </span>
+                            </div>
                             <span>{note.creator?.name ?? '—'}</span>
                           </div>
-                          <span className="text-xs text-gray-300">·</span>
-                          <span className="text-xs text-gray-400">
+                          <span className="text-xs text-gray-400">·</span>
+                          <span className="text-xs text-gray-500">
                             {formatDate(note.note_date)} às {note.note_time?.slice(0, 5)}
                           </span>
                         </div>
@@ -276,7 +278,7 @@ export default function NotasPage() {
                         {isReminderPending && (
                           <button onClick={() => handleMarkSeen(note.id)}
                             title="Marcar lembrete como visto"
-                            className="p-1.5 text-yellow-500 hover:bg-yellow-50 rounded-lg transition-colors">
+                            className="p-1.5 text-yellow-500 hover:bg-yellow-100 rounded-lg transition-colors">
                             <CheckCircle className="w-4 h-4" />
                           </button>
                         )}
@@ -284,24 +286,24 @@ export default function NotasPage() {
                           <>
                             <button onClick={() => { setEditNote(note); setShowModal(true) }}
                               title="Editar"
-                              className="p-1.5 text-gray-400 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-colors">
+                              className="p-1.5 text-gray-400 hover:text-blue-500 hover:bg-white/50 rounded-lg transition-colors">
                               <Edit2 className="w-4 h-4" />
                             </button>
                             <button onClick={() => handleDismiss(note.id)}
                               title="Dispensar"
-                              className="p-1.5 text-gray-400 hover:text-orange-500 hover:bg-orange-50 rounded-lg transition-colors">
+                              className="p-1.5 text-gray-400 hover:text-orange-500 hover:bg-white/50 rounded-lg transition-colors">
                               <BellOff className="w-4 h-4" />
                             </button>
                             <button onClick={() => handleDelete(note.id)}
                               title="Apagar"
-                              className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
+                              className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-white/50 rounded-lg transition-colors">
                               <Trash2 className="w-4 h-4" />
                             </button>
                           </>
                         )}
                         <button onClick={() => toggleExpand(note.id)}
                           title="Comentários"
-                          className={`p-1.5 rounded-lg transition-colors flex items-center gap-1 ${isExpanded ? 'bg-emerald-50 text-emerald-600' : 'text-gray-400 hover:text-emerald-500 hover:bg-emerald-50'}`}>
+                          className={`p-1.5 rounded-lg transition-colors flex items-center gap-1 ${isExpanded ? 'bg-white/50 text-emerald-600' : 'text-gray-400 hover:text-emerald-500 hover:bg-white/50'}`}>
                           <MessageSquare className="w-4 h-4" />
                           {noteComments.length > 0 && (
                             <span className="text-xs font-medium">{noteComments.length}</span>
@@ -312,7 +314,7 @@ export default function NotasPage() {
                   </div>
 
                   {isExpanded && (
-                    <div className="border-t border-gray-100 px-4 pb-4 pt-3">
+                    <div className={`border-t px-4 pb-4 pt-3 ${creatorColors.border}`}>
                       <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Comentários</p>
 
                       {noteComments.length === 0 ? (
@@ -323,14 +325,12 @@ export default function NotasPage() {
                             const colors = getUserColor(c.author?.name ?? '')
                             return (
                               <div key={c.id} className="flex items-start gap-2">
-                                {/* Avatar com cor do utilizador */}
                                 <div className={`w-7 h-7 ${colors.avatar} rounded-full flex items-center justify-center flex-shrink-0 mt-0.5`}>
                                   <span className="text-xs font-bold text-white">
                                     {c.author?.name?.charAt(0).toUpperCase() ?? '?'}
                                   </span>
                                 </div>
-                                {/* Balão com cor de fundo do utilizador */}
-                                <div className={`flex-1 min-w-0 border rounded-lg px-3 py-2 ${colors.bg}`}>
+                                <div className={`flex-1 min-w-0 border rounded-lg px-3 py-2 ${colors.bg} ${colors.border}`}>
                                   <div className="flex items-center justify-between gap-2 mb-0.5">
                                     <span className={`text-xs font-semibold ${colors.text}`}>{c.author?.name ?? '—'}</span>
                                     <span className="text-xs text-gray-400">
@@ -390,7 +390,6 @@ export default function NotasPage() {
                         </div>
                       )}
 
-                      {/* Caixa de novo comentário com cor do utilizador atual */}
                       <div className="flex items-center gap-2">
                         <div className={`w-7 h-7 ${getUserColor(profile?.name ?? '').avatar} rounded-full flex items-center justify-center flex-shrink-0`}>
                           <span className="text-xs font-bold text-white">
