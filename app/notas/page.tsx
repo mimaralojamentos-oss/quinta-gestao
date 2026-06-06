@@ -4,7 +4,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatDate } from '@/lib/utils'
-import { Plus, Edit2, Trash2, Bell, BellOff, CheckCircle, NotebookPen, User, Send, MessageSquare } from 'lucide-react'
+import { Plus, Edit2, Trash2, Bell, BellOff, CheckCircle, NotebookPen, User, Send, MessageSquare, X } from 'lucide-react'
 import NoteModal from './NoteModal'
 import { useAuth } from '@/lib/auth-context'
 
@@ -34,6 +34,10 @@ export default function NotasPage() {
   const [comments, setComments] = useState<Record<string, any[]>>({})
   const [newComment, setNewComment] = useState<Record<string, string>>({})
   const [savingComment, setSavingComment] = useState<string | null>(null)
+  // Estado para editar comentário
+  const [editingComment, setEditingComment] = useState<string | null>(null)
+  const [editingCommentText, setEditingCommentText] = useState<string>('')
+  const [savingEditComment, setSavingEditComment] = useState(false)
 
   useEffect(() => { fetchNotes() }, [])
 
@@ -78,6 +82,27 @@ export default function NotasPage() {
     fetchComments(noteId)
   }
 
+  function startEditComment(comment: any) {
+    setEditingComment(comment.id)
+    setEditingCommentText(comment.content)
+  }
+
+  function cancelEditComment() {
+    setEditingComment(null)
+    setEditingCommentText('')
+  }
+
+  async function handleSaveEditComment(noteId: string, commentId: string) {
+    const content = editingCommentText.trim()
+    if (!content) return
+    setSavingEditComment(true)
+    await supabase.from('note_comments').update({ content }).eq('id', commentId)
+    setEditingComment(null)
+    setEditingCommentText('')
+    await fetchComments(noteId)
+    setSavingEditComment(false)
+  }
+
   function toggleExpand(noteId: string) {
     if (expandedNote === noteId) {
       setExpandedNote(null)
@@ -107,7 +132,6 @@ export default function NotasPage() {
   }
 
   const filtered = notes.filter(n => filterType === 'all' || n.type === filterType)
-
   const todayStr = new Date().toISOString().slice(0, 10)
   const pendingReminders = notes.filter(n =>
     n.has_reminder && !n.reminder_seen_at && n.reminder_date <= todayStr
@@ -240,7 +264,6 @@ export default function NotasPage() {
                             <CheckCircle className="w-4 h-4" />
                           </button>
                         )}
-                        {/* Só o criador pode editar/dispensar/apagar */}
                         {canEdit && (
                           <>
                             <button onClick={() => { setEditNote(note); setShowModal(true) }}
@@ -260,7 +283,6 @@ export default function NotasPage() {
                             </button>
                           </>
                         )}
-                        {/* Botão comentários — todos podem ver/adicionar */}
                         <button onClick={() => toggleExpand(note.id)}
                           title="Comentários"
                           className={`p-1.5 rounded-lg transition-colors flex items-center gap-1 ${isExpanded ? 'bg-emerald-50 text-emerald-600' : 'text-gray-400 hover:text-emerald-500 hover:bg-emerald-50'}`}>
@@ -278,7 +300,6 @@ export default function NotasPage() {
                     <div className="border-t border-gray-100 px-4 pb-4 pt-3">
                       <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Comentários</p>
 
-                      {/* Lista de comentários */}
                       {noteComments.length === 0 ? (
                         <p className="text-xs text-gray-400 mb-3">Ainda sem comentários.</p>
                       ) : (
@@ -291,19 +312,59 @@ export default function NotasPage() {
                                 </span>
                               </div>
                               <div className="flex-1 min-w-0 bg-gray-50 rounded-lg px-3 py-2">
-                                <div className="flex items-center justify-between gap-2">
+                                <div className="flex items-center justify-between gap-2 mb-0.5">
                                   <span className="text-xs font-medium text-gray-700">{c.author?.name ?? '—'}</span>
                                   <span className="text-xs text-gray-400">
                                     {new Date(c.created_at).toLocaleDateString('pt-PT', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
                                   </span>
                                 </div>
-                                <p className="text-sm text-gray-600 mt-0.5">{c.content}</p>
+
+                                {/* Modo edição do comentário */}
+                                {editingComment === c.id ? (
+                                  <div className="mt-1">
+                                    <textarea
+                                      className="input text-sm w-full min-h-[60px] resize-none"
+                                      value={editingCommentText}
+                                      onChange={e => setEditingCommentText(e.target.value)}
+                                      autoFocus
+                                    />
+                                    <div className="flex gap-2 mt-2">
+                                      <button
+                                        onClick={() => handleSaveEditComment(note.id, c.id)}
+                                        disabled={!editingCommentText.trim() || savingEditComment}
+                                        className="text-xs bg-emerald-600 text-white px-3 py-1 rounded-lg hover:bg-emerald-700 disabled:opacity-40 transition-colors">
+                                        {savingEditComment ? 'A guardar...' : 'Guardar'}
+                                      </button>
+                                      <button onClick={cancelEditComment}
+                                        className="text-xs bg-gray-100 text-gray-600 px-3 py-1 rounded-lg hover:bg-gray-200 transition-colors">
+                                        Cancelar
+                                      </button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <p className="text-sm text-gray-600">{c.content}</p>
+                                )}
                               </div>
-                              {/* Só o autor do comentário pode apagar */}
-                              {c.created_by === profile?.id && (
-                                <button onClick={() => handleDeleteComment(note.id, c.id)}
-                                  className="p-1 text-gray-300 hover:text-red-400 transition-colors flex-shrink-0 mt-1">
-                                  <Trash2 className="w-3.5 h-3.5" />
+
+                              {/* Só o autor pode editar/apagar */}
+                              {c.created_by === profile?.id && editingComment !== c.id && (
+                                <div className="flex flex-col gap-1 flex-shrink-0 mt-0.5">
+                                  <button onClick={() => startEditComment(c)}
+                                    title="Editar comentário"
+                                    className="p-1 text-gray-300 hover:text-blue-400 transition-colors">
+                                    <Edit2 className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button onClick={() => handleDeleteComment(note.id, c.id)}
+                                    title="Apagar comentário"
+                                    className="p-1 text-gray-300 hover:text-red-400 transition-colors">
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              )}
+                              {editingComment === c.id && (
+                                <button onClick={cancelEditComment}
+                                  className="p-1 text-gray-300 hover:text-gray-500 transition-colors flex-shrink-0 mt-0.5">
+                                  <X className="w-3.5 h-3.5" />
                                 </button>
                               )}
                             </div>
