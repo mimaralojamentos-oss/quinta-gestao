@@ -4,7 +4,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatDate } from '@/lib/utils'
-import { BarChart3, TrendingUp, Users, Home, Zap, FileText, Calendar, ChevronDown } from 'lucide-react'
+import { BarChart3, TrendingUp, Home, FileText, Calendar, ChevronDown } from 'lucide-react'
 
 interface MonthOption { label: string; value: string }
 
@@ -42,7 +42,8 @@ export default function RelatoriosPage() {
 
   async function fetchRendas() {
     setLoading(true)
-    const [year, month] = selectedMonth.split('-')
+    // reference_month é do tipo date: "2026-05-01"
+    const refMonth = `${selectedMonth}-01`
 
     const { data: leases } = await supabase
       .from('leases')
@@ -52,13 +53,10 @@ export default function RelatoriosPage() {
     const { data: payments } = await supabase
       .from('rent_payments')
       .select('*')
-      .eq('year', parseInt(year))
-      .eq('month', parseInt(month))
+      .eq('reference_month', refMonth)
 
     const totalEsperado = (leases ?? []).reduce((s: number, l: any) => s + (l.monthly_rent ?? 0), 0)
-    const totalRecebido = (payments ?? [])
-      .filter((p: any) => p.tipo === 'renda' || !p.tipo)
-      .reduce((s: number, p: any) => s + (p.amount ?? 0), 0)
+    const totalRecebido = (payments ?? []).reduce((s: number, p: any) => s + (p.amount ?? 0), 0)
 
     const pagosIds = new Set((payments ?? []).map((p: any) => p.lease_id))
     const emFalta = (leases ?? []).filter((l: any) => !pagosIds.has(l.id))
@@ -87,19 +85,20 @@ export default function RelatoriosPage() {
 
   async function fetchFinanceiro() {
     setLoading(true)
-    const [year, month] = selectedMonth.split('-')
+    const refMonth = `${selectedMonth}-01`
+    const startDate = `${selectedMonth}-01`
+    const endDate = `${selectedMonth}-31`
 
     const { data: payments } = await supabase
       .from('rent_payments')
-      .select('amount, tipo')
-      .eq('year', parseInt(year))
-      .eq('month', parseInt(month))
+      .select('amount')
+      .eq('reference_month', refMonth)
 
     const { data: despesas } = await supabase
       .from('expenses')
-      .select('amount, category, description')
-      .gte('date', `${selectedMonth}-01`)
-      .lte('date', `${selectedMonth}-31`)
+      .select('amount, category')
+      .gte('expense_date', startDate)
+      .lte('expense_date', endDate)
 
     const receitas = (payments ?? []).reduce((s: number, p: any) => s + (p.amount ?? 0), 0)
     const totalDespesas = (despesas ?? []).reduce((s: number, e: any) => s + (e.amount ?? 0), 0)
