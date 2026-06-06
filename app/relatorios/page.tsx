@@ -4,9 +4,8 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatDate } from '@/lib/utils'
-import { BarChart3, TrendingUp, Users, Home, Zap, FileText, Download, Calendar, ChevronDown } from 'lucide-react'
+import { BarChart3, TrendingUp, Users, Home, Zap, FileText, Calendar, ChevronDown } from 'lucide-react'
 
-// ── tipos ──────────────────────────────────────────────────────────────────
 interface MonthOption { label: string; value: string }
 
 function getLastMonths(n: number): MonthOption[] {
@@ -23,14 +22,12 @@ function getLastMonths(n: number): MonthOption[] {
 
 const MONTHS = getLastMonths(12)
 
-// ── componente principal ───────────────────────────────────────────────────
 export default function RelatoriosPage() {
   const supabase = createClient()
   const [activeReport, setActiveReport] = useState('rendas')
   const [selectedMonth, setSelectedMonth] = useState(MONTHS[0].value)
   const [loading, setLoading] = useState(false)
 
-  // dados dos relatórios
   const [rendas, setRendas] = useState<any>(null)
   const [ocupacao, setOcupacao] = useState<any>(null)
   const [financeiro, setFinanceiro] = useState<any>(null)
@@ -43,14 +40,13 @@ export default function RelatoriosPage() {
     if (activeReport === 'contratos') fetchContratos()
   }, [activeReport, selectedMonth])
 
-  // ── Relatório 1: Rendas ──────────────────────────────────────────────────
   async function fetchRendas() {
     setLoading(true)
     const [year, month] = selectedMonth.split('-')
 
     const { data: leases } = await supabase
       .from('leases')
-      .select('id, rent_amount, space:spaces(ref), tenant:tenants(name)')
+      .select('id, monthly_rent, space:spaces(ref), tenant:tenants(name)')
       .eq('status', 'ativo')
 
     const { data: payments } = await supabase
@@ -59,7 +55,7 @@ export default function RelatoriosPage() {
       .eq('year', parseInt(year))
       .eq('month', parseInt(month))
 
-    const totalEsperado = (leases ?? []).reduce((s: number, l: any) => s + (l.rent_amount ?? 0), 0)
+    const totalEsperado = (leases ?? []).reduce((s: number, l: any) => s + (l.monthly_rent ?? 0), 0)
     const totalRecebido = (payments ?? [])
       .filter((p: any) => p.tipo === 'renda' || !p.tipo)
       .reduce((s: number, p: any) => s + (p.amount ?? 0), 0)
@@ -72,7 +68,6 @@ export default function RelatoriosPage() {
     setLoading(false)
   }
 
-  // ── Relatório 2: Ocupação ────────────────────────────────────────────────
   async function fetchOcupacao() {
     setLoading(true)
     const { data: spaces } = await supabase
@@ -90,7 +85,6 @@ export default function RelatoriosPage() {
     setLoading(false)
   }
 
-  // ── Relatório 3: Financeiro ──────────────────────────────────────────────
   async function fetchFinanceiro() {
     setLoading(true)
     const [year, month] = selectedMonth.split('-')
@@ -111,7 +105,6 @@ export default function RelatoriosPage() {
     const totalDespesas = (despesas ?? []).reduce((s: number, e: any) => s + (e.amount ?? 0), 0)
     const saldo = receitas - totalDespesas
 
-    // agrupar despesas por categoria
     const porCategoria: Record<string, number> = {}
     ;(despesas ?? []).forEach((e: any) => {
       const cat = e.category ?? 'Outros'
@@ -122,7 +115,6 @@ export default function RelatoriosPage() {
     setLoading(false)
   }
 
-  // ── Relatório 4: Contratos a expirar ────────────────────────────────────
   async function fetchContratos() {
     setLoading(true)
     const hoje = new Date()
@@ -131,8 +123,9 @@ export default function RelatoriosPage() {
 
     const { data } = await supabase
       .from('leases')
-      .select('id, end_date, rent_amount, space:spaces(ref), tenant:tenants(name)')
+      .select('id, end_date, monthly_rent, space:spaces(ref), tenant:tenants(name)')
       .eq('status', 'ativo')
+      .not('end_date', 'is', null)
       .lte('end_date', em6meses)
       .order('end_date', { ascending: true })
 
@@ -140,7 +133,6 @@ export default function RelatoriosPage() {
     setLoading(false)
   }
 
-  // ── helpers de UI ────────────────────────────────────────────────────────
   function fmt(v: number) {
     return v.toLocaleString('pt-PT', { style: 'currency', currency: 'EUR' })
   }
@@ -162,7 +154,6 @@ export default function RelatoriosPage() {
   return (
     <AppLayout>
       <div className="p-8">
-        {/* cabeçalho */}
         <div className="flex items-center gap-3 mb-6">
           <BarChart3 className="w-6 h-6 text-emerald-600" />
           <div>
@@ -171,7 +162,6 @@ export default function RelatoriosPage() {
           </div>
         </div>
 
-        {/* seletor de relatório */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
           {REPORTS.map(r => (
             <button key={r.key} onClick={() => setActiveReport(r.key)}
@@ -186,14 +176,11 @@ export default function RelatoriosPage() {
           ))}
         </div>
 
-        {/* seletor de mês */}
         {showMonthPicker && (
           <div className="flex items-center gap-3 mb-5">
             <label className="text-sm font-medium text-gray-600">Mês:</label>
             <div className="relative">
-              <select
-                value={selectedMonth}
-                onChange={e => setSelectedMonth(e.target.value)}
+              <select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)}
                 className="appearance-none bg-white border border-gray-200 rounded-lg px-3 py-2 pr-8 text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-emerald-500">
                 {MONTHS.map(m => (
                   <option key={m.value} value={m.value}>{m.label}</option>
@@ -204,7 +191,6 @@ export default function RelatoriosPage() {
           </div>
         )}
 
-        {/* conteúdo do relatório */}
         {loading ? (
           <div className="flex justify-center py-16">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600" />
@@ -212,7 +198,7 @@ export default function RelatoriosPage() {
         ) : (
           <div>
 
-            {/* ── RENDAS ── */}
+            {/* RENDAS */}
             {activeReport === 'rendas' && rendas && (
               <div className="space-y-5">
                 <div className="grid grid-cols-3 gap-4">
@@ -230,7 +216,6 @@ export default function RelatoriosPage() {
                   </div>
                 </div>
 
-                {/* barra de progresso */}
                 <div className="bg-white border border-gray-200 rounded-xl p-4">
                   <div className="flex justify-between text-sm mb-2">
                     <span className="text-gray-600 font-medium">Taxa de cobrança</span>
@@ -248,7 +233,6 @@ export default function RelatoriosPage() {
                   </div>
                 </div>
 
-                {/* em falta */}
                 {rendas.emFalta.length > 0 && (
                   <div className="bg-white border border-gray-200 rounded-xl p-4">
                     <h3 className="text-sm font-semibold text-gray-700 mb-3">⚠️ Rendas em falta</h3>
@@ -259,14 +243,13 @@ export default function RelatoriosPage() {
                             <p className="text-sm font-medium text-gray-800">{l.tenant?.name ?? '—'}</p>
                             <p className="text-xs text-gray-400">{l.space?.ref}</p>
                           </div>
-                          <span className="text-sm font-semibold text-red-500">{fmt(l.rent_amount ?? 0)}</span>
+                          <span className="text-sm font-semibold text-red-500">{fmt(l.monthly_rent ?? 0)}</span>
                         </div>
                       ))}
                     </div>
                   </div>
                 )}
 
-                {/* pagos */}
                 {rendas.pagos.length > 0 && (
                   <div className="bg-white border border-gray-200 rounded-xl p-4">
                     <h3 className="text-sm font-semibold text-gray-700 mb-3">✅ Rendas pagas</h3>
@@ -289,7 +272,7 @@ export default function RelatoriosPage() {
               </div>
             )}
 
-            {/* ── OCUPAÇÃO ── */}
+            {/* OCUPAÇÃO */}
             {activeReport === 'ocupacao' && ocupacao && (
               <div className="space-y-5">
                 <div className="grid grid-cols-3 gap-4">
@@ -337,7 +320,7 @@ export default function RelatoriosPage() {
               </div>
             )}
 
-            {/* ── FINANCEIRO ── */}
+            {/* FINANCEIRO */}
             {activeReport === 'financeiro' && financeiro && (
               <div className="space-y-5">
                 <div className="grid grid-cols-3 gap-4">
@@ -383,14 +366,14 @@ export default function RelatoriosPage() {
               </div>
             )}
 
-            {/* ── CONTRATOS ── */}
+            {/* CONTRATOS */}
             {activeReport === 'contratos' && (
               <div className="space-y-5">
                 <div className="bg-white border border-gray-200 rounded-xl p-4">
                   <h3 className="text-sm font-semibold text-gray-700 mb-1">Contratos a expirar nos próximos 6 meses</h3>
-                  <p className="text-xs text-gray-400 mb-4">Ordenados por data de fim mais próxima</p>
+                  <p className="text-xs text-gray-400 mb-4">Apenas contratos com data de fim definida</p>
 
-                  {contratos?.length === 0 ? (
+                  {!contratos || contratos.length === 0 ? (
                     <div className="text-center py-8 text-gray-400">
                       <p className="text-sm">✅ Nenhum contrato a expirar nos próximos 6 meses.</p>
                     </div>
@@ -410,7 +393,7 @@ export default function RelatoriosPage() {
                               <p className={`text-sm font-bold ${urgente ? 'text-red-600' : aviso ? 'text-yellow-600' : 'text-gray-600'}`}>
                                 {dias} dias
                               </p>
-                              <p className="text-xs text-gray-400">{fmt(c.rent_amount ?? 0)}/mês</p>
+                              <p className="text-xs text-gray-400">{fmt(c.monthly_rent ?? 0)}/mês</p>
                             </div>
                           </div>
                         )
