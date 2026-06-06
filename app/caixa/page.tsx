@@ -1,20 +1,29 @@
 'use client'
 
 import AppLayout from '@/components/layout/AppLayout'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '@/lib/supabase'
 import { CashFundMovement } from '@/lib/types'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Plus, TrendingUp, TrendingDown, Wallet, Trash2 } from 'lucide-react'
+import { Plus, TrendingUp, TrendingDown, Wallet, Trash2, Search, X } from 'lucide-react'
 import CashModal from './CashModal'
 import { useAuth } from '@/lib/auth-context'
+
+type PeriodFilter = 'all' | 'today' | 'week' | 'month' | 'year' | 'range'
+type SourceFilter = 'all' | 'manual' | 'renda' | 'despesa'
 
 export default function CaixaPage() {
   const { isAdmin } = useAuth()
   const [movements, setMovements] = useState<CashFundMovement[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
-  const [balance, setBalance] = useState(0)
+
+  // filtros
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all')
+  const [periodFilter, setPeriodFilter] = useState<PeriodFilter>('all')
+  const [rangeStart, setRangeStart] = useState('')
+  const [rangeEnd, setRangeEnd] = useState('')
+  const [search, setSearch] = useState('')
 
   useEffect(() => { fetchData() }, [])
 
@@ -25,7 +34,6 @@ export default function CaixaPage() {
       .select('*')
       .order('movement_date', { ascending: false })
     setMovements(data ?? [])
-    setBalance((data ?? []).reduce((s, m) => s + m.amount, 0))
     setLoading(false)
   }
 
@@ -39,6 +47,41 @@ export default function CaixaPage() {
     fetchData()
   }
 
+  // filtragem
+  const filtered = useMemo(() => {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+
+    return movements.filter(m => {
+      // filtro origem
+      if (sourceFilter !== 'all' && (m as any).source !== sourceFilter) return false
+
+      // filtro descrição
+      if (search && !m.description?.toLowerCase().includes(search.toLowerCase())) return false
+
+      // filtro período
+      const date = new Date(m.movement_date)
+      date.setHours(0, 0, 0, 0)
+
+      if (periodFilter === 'today') {
+        if (date.getTime() !== today.getTime()) return false
+      } else if (periodFilter === 'week') {
+        const weekAgo = new Date(today); weekAgo.setDate(today.getDate() - 7)
+        if (date < weekAgo) return false
+      } else if (periodFilter === 'month') {
+        if (date.getMonth() !== today.getMonth() || date.getFullYear() !== today.getFullYear()) return false
+      } else if (periodFilter === 'year') {
+        if (date.getFullYear() !== today.getFullYear()) return false
+      } else if (periodFilter === 'range') {
+        if (rangeStart && date < new Date(rangeStart)) return false
+        if (rangeEnd && date > new Date(rangeEnd)) return false
+      }
+
+      return true
+    })
+  }, [movements, sourceFilter, periodFilter, rangeStart, rangeEnd, search])
+
+  const balance = movements.reduce((s, m) => s + m.amount, 0)
   const entries = movements.filter(m => m.amount > 0).reduce((s, m) => s + m.amount, 0)
   const exits = movements.filter(m => m.amount < 0).reduce((s, m) => s + m.amount, 0)
 
@@ -48,50 +91,136 @@ export default function CaixaPage() {
     return '✋ Manual'
   }
 
+  const PERIOD_FILTERS = [
+    { key: 'all', label: 'Todos' },
+    { key: 'today', label: 'Hoje' },
+    { key: 'week', label: 'Semana' },
+    { key: 'month', label: 'Mês' },
+    { key: 'year', label: 'Ano' },
+    { key: 'range', label: 'Intervalo' },
+  ]
+
+  const SOURCE_FILTERS = [
+    { key: 'all', label: 'Todas origens' },
+    { key: 'manual', label: '✋ Manual' },
+    { key: 'renda', label: '🏠 Renda' },
+    { key: 'despesa', label: '💸 Despesa' },
+  ]
+
   return (
     <AppLayout>
       <div className="p-8">
-        <div className="flex items-center justify-between mb-6">
+
+        {/* cabeçalho */}
+        <div className="flex items-center justify-between mb-5">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Fundo de Maneio</h1>
-            <p className="text-sm text-gray-500 mt-1">Controlo de saldo em dinheiro</p>
+            <p className="text-sm text-gray-500 mt-0.5">Controlo de saldo em dinheiro</p>
           </div>
           {isAdmin && (
             <button className="btn-primary" onClick={() => setShowModal(true)}>
-              <Plus className="w-4 h-4" />
-              Novo Movimento
+              <Plus className="w-4 h-4" /> Novo Movimento
             </button>
           )}
         </div>
 
-        <div className="grid grid-cols-3 gap-5 mb-6">
-          <div className="card border-l-4 border-l-emerald-500">
-            <div className="flex items-center gap-3 mb-2">
-              <div className="w-10 h-10 bg-emerald-50 rounded-lg flex items-center justify-center">
-                <Wallet className="w-5 h-5 text-emerald-600" />
-              </div>
-              <p className="text-sm text-gray-500 font-medium">Saldo em Caixa</p>
+        {/* KPIs — mais compactos */}
+        <div className="grid grid-cols-3 gap-4 mb-5">
+          <div className="bg-white border border-gray-200 rounded-xl px-4 py-3 flex items-center gap-3 border-l-4 border-l-emerald-500">
+            <div className="w-8 h-8 bg-emerald-50 rounded-lg flex items-center justify-center flex-shrink-0">
+              <Wallet className="w-4 h-4 text-emerald-600" />
             </div>
-            <p className={`text-3xl font-bold ${balance >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-              {formatCurrency(balance)}
-            </p>
+            <div>
+              <p className="text-xs text-gray-500 font-medium">Saldo em Caixa</p>
+              <p className={`text-xl font-bold ${balance >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                {formatCurrency(balance)}
+              </p>
+            </div>
           </div>
-          <div className="card">
-            <div className="flex items-center gap-2 mb-2">
+          <div className="bg-white border border-gray-200 rounded-xl px-4 py-3 flex items-center gap-3">
+            <div className="w-8 h-8 bg-emerald-50 rounded-lg flex items-center justify-center flex-shrink-0">
               <TrendingUp className="w-4 h-4 text-emerald-500" />
-              <p className="text-sm text-gray-500">Total Entradas</p>
             </div>
-            <p className="text-2xl font-bold text-emerald-600">{formatCurrency(entries)}</p>
+            <div>
+              <p className="text-xs text-gray-500">Total Entradas</p>
+              <p className="text-xl font-bold text-emerald-600">{formatCurrency(entries)}</p>
+            </div>
           </div>
-          <div className="card">
-            <div className="flex items-center gap-2 mb-2">
+          <div className="bg-white border border-gray-200 rounded-xl px-4 py-3 flex items-center gap-3">
+            <div className="w-8 h-8 bg-red-50 rounded-lg flex items-center justify-center flex-shrink-0">
               <TrendingDown className="w-4 h-4 text-red-500" />
-              <p className="text-sm text-gray-500">Total Saídas</p>
             </div>
-            <p className="text-2xl font-bold text-red-600">{formatCurrency(Math.abs(exits))}</p>
+            <div>
+              <p className="text-xs text-gray-500">Total Saídas</p>
+              <p className="text-xl font-bold text-red-600">{formatCurrency(Math.abs(exits))}</p>
+            </div>
           </div>
         </div>
 
+        {/* filtros */}
+        <div className="bg-white border border-gray-200 rounded-xl p-4 mb-4 space-y-3">
+
+          {/* período */}
+          <div className="flex flex-wrap gap-2 items-center">
+            <span className="text-xs font-semibold text-gray-500 w-16">Período:</span>
+            {PERIOD_FILTERS.map(f => (
+              <button key={f.key} onClick={() => setPeriodFilter(f.key as PeriodFilter)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${periodFilter === f.key ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+                {f.label}
+              </button>
+            ))}
+            {periodFilter === 'range' && (
+              <div className="flex items-center gap-2 ml-2">
+                <input type="date" value={rangeStart} onChange={e => setRangeStart(e.target.value)}
+                  className="input text-xs py-1.5 px-2 h-8" />
+                <span className="text-xs text-gray-400">até</span>
+                <input type="date" value={rangeEnd} onChange={e => setRangeEnd(e.target.value)}
+                  className="input text-xs py-1.5 px-2 h-8" />
+              </div>
+            )}
+          </div>
+
+          {/* origem */}
+          <div className="flex flex-wrap gap-2 items-center">
+            <span className="text-xs font-semibold text-gray-500 w-16">Origem:</span>
+            {SOURCE_FILTERS.map(f => (
+              <button key={f.key} onClick={() => setSourceFilter(f.key as SourceFilter)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${sourceFilter === f.key ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+                {f.label}
+              </button>
+            ))}
+          </div>
+
+          {/* pesquisa */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-gray-500 w-16">Pesquisa:</span>
+            <div className="relative flex-1 max-w-sm">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Pesquisar descrição..."
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                className="input pl-8 pr-8 text-sm py-1.5 h-8 w-full"
+              />
+              {search && (
+                <button onClick={() => setSearch('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+            {(sourceFilter !== 'all' || periodFilter !== 'all' || search) && (
+              <button onClick={() => { setSourceFilter('all'); setPeriodFilter('all'); setSearch(''); setRangeStart(''); setRangeEnd('') }}
+                className="text-xs text-red-500 hover:text-red-700 font-medium ml-2">
+                Limpar filtros
+              </button>
+            )}
+            <span className="text-xs text-gray-400 ml-auto">{filtered.length} movimento(s)</span>
+          </div>
+        </div>
+
+        {/* tabela */}
         {loading ? (
           <div className="flex justify-center py-12">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600" />
@@ -111,7 +240,7 @@ export default function CaixaPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {movements.map((m) => (
+                {filtered.map((m) => (
                   <tr key={m.id} className="hover:bg-gray-50">
                     <td className="table-cell text-sm">{formatDate(m.movement_date)}</td>
                     <td className="table-cell font-medium text-gray-800">{m.description}</td>
@@ -140,16 +269,15 @@ export default function CaixaPage() {
                         <button
                           onClick={() => handleDelete(m.id, (m as any).source ?? 'manual')}
                           className="text-gray-300 hover:text-red-500 transition-colors"
-                          title="Apagar"
-                        >
+                          title="Apagar">
                           <Trash2 className="w-4 h-4" />
                         </button>
                       </td>
                     )}
                   </tr>
                 ))}
-                {movements.length === 0 && (
-                  <tr><td colSpan={isAdmin ? 7 : 6} className="py-12 text-center text-gray-400 text-sm">Sem movimentos registados</td></tr>
+                {filtered.length === 0 && (
+                  <tr><td colSpan={isAdmin ? 7 : 6} className="py-12 text-center text-gray-400 text-sm">Sem movimentos encontrados</td></tr>
                 )}
               </tbody>
             </table>
