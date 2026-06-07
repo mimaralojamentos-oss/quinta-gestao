@@ -577,6 +577,7 @@ export default function DocumentosPage() {
               <div>
                 <label className="label">Categoria</label>
                 <select className="input" value={editForm.category} onChange={e => setEditForm((f: any) => ({ ...f, category: e.target.value }))}>
+                  <option value="administracao">Administração</option>
                   <option value="obras">Obras</option>
                   <option value="edp">Eletricidade (EDP)</option>
                   <option value="pessoal">Pessoal</option>
