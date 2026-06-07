@@ -161,21 +161,23 @@ export default function RelatoriosPage() {
     setLoading(false)
   }
 
-  async function handleSaveExpense() {
-    if (!editingExpense) return
-    setSavingExpense(true)
-    await supabase.from('expenses').update({
-      description: editForm.description,
-      amount: parseFloat(editForm.amount),
-      category: editForm.category,
-      expense_date: editForm.expense_date,
-      supplier: editForm.supplier,
-      payment_method: editForm.payment_method,
-    }).eq('id', editingExpense.id)
-    setEditingExpense(null)
-    setSavingExpense(false)
-    fetchFinanceiro()
-  }
+async function handleSaveExpense() {
+  if (!editingExpense) return
+  setSavingExpense(true)
+  await supabase.from('expenses').update({
+    description: editForm.description,
+    amount: parseFloat(editForm.amount),
+    category: editForm.category,
+    expense_date: editForm.expense_date,
+    supplier: editForm.supplier,
+    payment_method: editForm.payment_method,
+  }).eq('id', editingExpense.id)
+  setEditingExpense(null)
+  setSavingExpense(false)
+  // CORRIGIDO: fechar categoria expandida para forçar re-render correto
+  setExpandedCategory(null)
+  fetchFinanceiro()
+}
 
   function fmt(v: number) {
     return v.toLocaleString('pt-PT', { style: 'currency', currency: 'EUR' })
