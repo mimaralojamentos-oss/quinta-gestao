@@ -2,10 +2,10 @@
 
 import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState, useMemo } from 'react'
-import { supabase } from '@/lib/supabase'
+import { createClient } from '@/lib/supabase-client'
 import { CashFundMovement } from '@/lib/types'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Plus, TrendingUp, TrendingDown, Wallet, Trash2, Search, X } from 'lucide-react'
+import { Plus, TrendingUp, TrendingDown, Wallet, Trash2, Search, X, Calendar } from 'lucide-react'
 import CashModal from './CashModal'
 import { useAuth } from '@/lib/auth-context'
 
@@ -13,10 +13,15 @@ type PeriodFilter = 'all' | 'today' | 'week' | 'month' | 'year' | 'range'
 type SourceFilter = 'all' | 'manual' | 'renda' | 'despesa'
 
 export default function CaixaPage() {
+  const supabase = createClient()
   const { isAdmin } = useAuth()
   const [movements, setMovements] = useState<CashFundMovement[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
+
+  // Saldo numa data específica
+  const [saldoData, setSaldoData] = useState('')
+  const [saldoNaData, setSaldoNaData] = useState<number | null>(null)
 
   // filtros
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all')
@@ -37,6 +42,15 @@ export default function CaixaPage() {
     setLoading(false)
   }
 
+  // Calcular saldo até uma data específica
+  function calcularSaldoNaData(data: string) {
+    if (!data) { setSaldoNaData(null); return }
+    const saldo = movements
+      .filter(m => m.movement_date <= data)
+      .reduce((s, m) => s + m.amount, 0)
+    setSaldoNaData(saldo)
+  }
+
   async function handleDelete(id: string, source: string) {
     if (source !== 'manual') {
       alert('Este movimento foi gerado automaticamente e não pode ser apagado aqui. Apaga o pagamento/despesa original.')
@@ -47,19 +61,14 @@ export default function CaixaPage() {
     fetchData()
   }
 
-  // filtragem
   const filtered = useMemo(() => {
     const today = new Date()
     today.setHours(0, 0, 0, 0)
 
     return movements.filter(m => {
-      // filtro origem
       if (sourceFilter !== 'all' && (m as any).source !== sourceFilter) return false
-
-      // filtro descrição
       if (search && !m.description?.toLowerCase().includes(search.toLowerCase())) return false
 
-      // filtro período
       const date = new Date(m.movement_date)
       date.setHours(0, 0, 0, 0)
 
@@ -111,7 +120,6 @@ export default function CaixaPage() {
     <AppLayout>
       <div className="p-8">
 
-        {/* cabeçalho */}
         <div className="flex items-center justify-between mb-5">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Fundo de Maneio</h1>
@@ -124,14 +132,14 @@ export default function CaixaPage() {
           )}
         </div>
 
-        {/* KPIs — mais compactos */}
-        <div className="grid grid-cols-3 gap-4 mb-5">
+        {/* KPIs */}
+        <div className="grid grid-cols-4 gap-4 mb-5">
           <div className="bg-white border border-gray-200 rounded-xl px-4 py-3 flex items-center gap-3 border-l-4 border-l-emerald-500">
             <div className="w-8 h-8 bg-emerald-50 rounded-lg flex items-center justify-center flex-shrink-0">
               <Wallet className="w-4 h-4 text-emerald-600" />
             </div>
             <div>
-              <p className="text-xs text-gray-500 font-medium">Saldo em Caixa</p>
+              <p className="text-xs text-gray-500 font-medium">Saldo Atual</p>
               <p className={`text-xl font-bold ${balance >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                 {formatCurrency(balance)}
               </p>
@@ -155,12 +163,34 @@ export default function CaixaPage() {
               <p className="text-xl font-bold text-red-600">{formatCurrency(Math.abs(exits))}</p>
             </div>
           </div>
+
+          {/* Card saldo numa data */}
+          <div className="bg-white border border-gray-200 rounded-xl px-4 py-3 flex items-center gap-3 border-l-4 border-l-blue-400">
+            <div className="w-8 h-8 bg-blue-50 rounded-lg flex items-center justify-center flex-shrink-0">
+              <Calendar className="w-4 h-4 text-blue-500" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs text-gray-500 font-medium mb-1">Saldo numa data</p>
+              <input
+                type="date"
+                className="input text-xs py-1 h-7 w-full mb-1"
+                value={saldoData}
+                onChange={e => {
+                  setSaldoData(e.target.value)
+                  calcularSaldoNaData(e.target.value)
+                }}
+              />
+              {saldoNaData !== null && (
+                <p className={`text-base font-bold ${saldoNaData >= 0 ? 'text-blue-600' : 'text-red-600'}`}>
+                  {formatCurrency(saldoNaData)}
+                </p>
+              )}
+            </div>
+          </div>
         </div>
 
         {/* filtros */}
         <div className="bg-white border border-gray-200 rounded-xl p-4 mb-4 space-y-3">
-
-          {/* período */}
           <div className="flex flex-wrap gap-2 items-center">
             <span className="text-xs font-semibold text-gray-500 w-16">Período:</span>
             {PERIOD_FILTERS.map(f => (
@@ -180,7 +210,6 @@ export default function CaixaPage() {
             )}
           </div>
 
-          {/* origem */}
           <div className="flex flex-wrap gap-2 items-center">
             <span className="text-xs font-semibold text-gray-500 w-16">Origem:</span>
             {SOURCE_FILTERS.map(f => (
@@ -191,18 +220,13 @@ export default function CaixaPage() {
             ))}
           </div>
 
-          {/* pesquisa */}
           <div className="flex items-center gap-2">
             <span className="text-xs font-semibold text-gray-500 w-16">Pesquisa:</span>
             <div className="relative flex-1 max-w-sm">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Pesquisar descrição..."
-                value={search}
+              <input type="text" placeholder="Pesquisar descrição..." value={search}
                 onChange={e => setSearch(e.target.value)}
-                className="input pl-8 pr-8 text-sm py-1.5 h-8 w-full"
-              />
+                className="input pl-8 pr-8 text-sm py-1.5 h-8 w-full" />
               {search && (
                 <button onClick={() => setSearch('')}
                   className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
@@ -220,7 +244,6 @@ export default function CaixaPage() {
           </div>
         </div>
 
-        {/* tabela */}
         {loading ? (
           <div className="flex justify-center py-12">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600" />
@@ -266,10 +289,8 @@ export default function CaixaPage() {
                     <td className="table-cell text-xs text-gray-500">{m.notes ?? '—'}</td>
                     {isAdmin && (
                       <td className="table-cell">
-                        <button
-                          onClick={() => handleDelete(m.id, (m as any).source ?? 'manual')}
-                          className="text-gray-300 hover:text-red-500 transition-colors"
-                          title="Apagar">
+                        <button onClick={() => handleDelete(m.id, (m as any).source ?? 'manual')}
+                          className="text-gray-300 hover:text-red-500 transition-colors" title="Apagar">
                           <Trash2 className="w-4 h-4" />
                         </button>
                       </td>
