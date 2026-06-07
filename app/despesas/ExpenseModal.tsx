@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { supabase } from '@/lib/supabase'
+import { createClient } from '@/lib/supabase-client'
 import { Expense } from '@/lib/types'
 import { X, Upload, FileText, Loader2, Sparkles } from 'lucide-react'
 
@@ -12,6 +12,7 @@ interface Props {
 }
 
 export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
+  const supabase = createClient()
   const [form, setForm] = useState({
     expense_date: expense?.expense_date ?? new Date().toISOString().slice(0, 10),
     category: expense?.category ?? 'outros',
@@ -55,18 +56,14 @@ export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
     setInvoiceFile(file)
     setOcrDone(false)
 
-    // OCR automático para nova despesa
     if (!expense && (file.type === 'application/pdf' || file.type.startsWith('image/'))) {
       setProcessingOcr(true)
       try {
         const formData = new FormData()
         formData.append('file', file)
         formData.append('tipo', 'fatura')
-        // Não guarda ainda — só faz OCR para preencher o formulário
         const res = await fetch('/api/process-document', { method: 'POST', body: formData })
         const data = await res.json()
-
-        // Se for duplicado ou sucesso, usa os dados extraídos
         const doc = data.document ?? data.existing
         if (doc) {
           setForm(f => ({
@@ -107,6 +104,16 @@ export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
       const { error: err } = await supabase.from('expenses').update(payload).eq('id', expense.id)
       if (err) { setError(err.message); setSaving(false); return }
 
+      // Sincronizar categoria com o documento associado
+      const { data: linkedDoc } = await supabase
+        .from('documents')
+        .select('id')
+        .eq('expense_id', expense.id)
+        .single()
+      if (linkedDoc) {
+        await supabase.from('documents').update({ category: form.category }).eq('id', linkedDoc.id)
+      }
+
       const { data: existingCash } = await supabase
         .from('cash_fund_movements').select('id').eq('source_id', expense.id).single()
 
@@ -139,7 +146,6 @@ export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
         .from('expenses').insert(payload).select().single()
       if (err) { setError(err.message); setSaving(false); return }
 
-      // Fundo de Maneio
       if (form.payment_method === 'dinheiro' && newExpense) {
         await supabase.from('cash_fund_movements').insert({
           movement_date: form.expense_date,
@@ -150,18 +156,14 @@ export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
         })
       }
 
-      // Se foi feito upload, guardar documento e ligar à despesa
       if (invoiceFile && newExpense) {
         const formData = new FormData()
         formData.append('file', invoiceFile)
         formData.append('tipo', 'fatura')
-
         const res = await fetch('/api/process-document', { method: 'POST', body: formData })
         const data = await res.json()
-
         const docId = data.document?.id ?? data.existing?.id
         if (docId) {
-          // Ligar documento à despesa
           await supabase.from('documents').update({ expense_id: newExpense.id }).eq('id', docId)
         }
       }
@@ -258,6 +260,7 @@ export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
             <div>
               <label className="label">Categoria</label>
               <select className="input" value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value as any }))}>
+                <option value="administracao">Administração</option>
                 <option value="obras">Obras</option>
                 <option value="edp">Eletricidade (EDP)</option>
                 <option value="pessoal">Pessoal</option>
