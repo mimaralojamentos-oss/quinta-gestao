@@ -4,7 +4,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatDate } from '@/lib/utils'
-import { BarChart3, TrendingUp, Home, FileText, Calendar, ChevronDown } from 'lucide-react'
+import { BarChart3, TrendingUp, Home, FileText, Calendar, ChevronDown, ChevronUp, Edit2, X, Save } from 'lucide-react'
 
 interface MonthOption { label: string; value: string }
 
@@ -33,6 +33,19 @@ export default function RelatoriosPage() {
   const [financeiro, setFinanceiro] = useState<any>(null)
   const [contratos, setContratos] = useState<any>(null)
 
+  // Categoria expandida no financeiro
+  const [expandedCategory, setExpandedCategory] = useState<string | null>(null)
+
+  // Modal conta corrente
+  const [contaCorrenteModal, setContaCorrenteModal] = useState<any>(null)
+  const [contaCorrenteData, setContaCorrenteData] = useState<any[]>([])
+  const [loadingCC, setLoadingCC] = useState(false)
+
+  // Editar despesa
+  const [editingExpense, setEditingExpense] = useState<any>(null)
+  const [editForm, setEditForm] = useState<any>({})
+  const [savingExpense, setSavingExpense] = useState(false)
+
   useEffect(() => {
     if (activeReport === 'rendas') fetchRendas()
     if (activeReport === 'ocupacao') fetchOcupacao()
@@ -48,7 +61,7 @@ export default function RelatoriosPage() {
 
     const { data: leases } = await supabase
       .from('leases')
-      .select('id, monthly_rent, space:spaces(ref), tenant:tenants(name)')
+      .select('id, monthly_rent, space:spaces(ref), tenant:tenants(id, name)')
       .eq('status', 'ativo')
 
     const { data: payments } = await supabase
@@ -66,6 +79,18 @@ export default function RelatoriosPage() {
 
     setRendas({ totalEsperado, totalRecebido, emFalta, pagos, leases, payments })
     setLoading(false)
+  }
+
+  async function fetchContaCorrente(tenant: any) {
+    setContaCorrenteModal(tenant)
+    setLoadingCC(true)
+    const { data } = await supabase
+      .from('rent_payments')
+      .select('*, lease:leases(space:spaces(ref))')
+      .eq('lease_id', tenant.leaseId)
+      .order('reference_month', { ascending: false })
+    setContaCorrenteData(data ?? [])
+    setLoadingCC(false)
   }
 
   async function fetchOcupacao() {
@@ -99,18 +124,21 @@ export default function RelatoriosPage() {
 
     const { data: despesas } = await supabase
       .from('expenses')
-      .select('amount, category')
+      .select('id, amount, category, description, expense_date, supplier, payment_method')
       .gte('expense_date', startDate)
       .lt('expense_date', nextMonthDate)
+      .order('expense_date', { ascending: false })
 
     const receitas = (payments ?? []).reduce((s: number, p: any) => s + (p.amount ?? 0), 0)
     const totalDespesas = (despesas ?? []).reduce((s: number, e: any) => s + (e.amount ?? 0), 0)
     const saldo = receitas - totalDespesas
 
-    const porCategoria: Record<string, number> = {}
+    const porCategoria: Record<string, { total: number; items: any[] }> = {}
     ;(despesas ?? []).forEach((e: any) => {
-      const cat = e.category ?? 'Outros'
-      porCategoria[cat] = (porCategoria[cat] ?? 0) + e.amount
+      const cat = e.category ?? 'outros'
+      if (!porCategoria[cat]) porCategoria[cat] = { total: 0, items: [] }
+      porCategoria[cat].total += e.amount
+      porCategoria[cat].items.push(e)
     })
 
     setFinanceiro({ receitas, totalDespesas, saldo, porCategoria, despesas })
@@ -133,6 +161,22 @@ export default function RelatoriosPage() {
 
     setContratos(data ?? [])
     setLoading(false)
+  }
+
+  async function handleSaveExpense() {
+    if (!editingExpense) return
+    setSavingExpense(true)
+    await supabase.from('expenses').update({
+      description: editForm.description,
+      amount: parseFloat(editForm.amount),
+      category: editForm.category,
+      expense_date: editForm.expense_date,
+      supplier: editForm.supplier,
+      payment_method: editForm.payment_method,
+    }).eq('id', editingExpense.id)
+    setEditingExpense(null)
+    setSavingExpense(false)
+    fetchFinanceiro()
   }
 
   function fmt(v: number) {
@@ -240,9 +284,11 @@ export default function RelatoriosPage() {
                     <h3 className="text-sm font-semibold text-gray-700 mb-3">⚠️ Rendas em falta</h3>
                     <div className="space-y-2">
                       {rendas.emFalta.map((l: any) => (
-                        <div key={l.id} className="flex justify-between items-center py-2 border-b border-gray-50 last:border-0">
+                        <div key={l.id}
+                          onClick={() => fetchContaCorrente({ name: l.tenant?.name, leaseId: l.id, spaceRef: l.space?.ref })}
+                          className="flex justify-between items-center py-2 border-b border-gray-50 last:border-0 cursor-pointer hover:bg-gray-50 rounded-lg px-2 transition-colors">
                           <div>
-                            <p className="text-sm font-medium text-gray-800">{l.tenant?.name ?? '—'}</p>
+                            <p className="text-sm font-medium text-gray-800 hover:text-emerald-600">{l.tenant?.name ?? '—'}</p>
                             <p className="text-xs text-gray-400">{l.space?.ref}</p>
                           </div>
                           <span className="text-sm font-semibold text-red-500">{fmt(l.monthly_rent ?? 0)}</span>
@@ -259,9 +305,11 @@ export default function RelatoriosPage() {
                       {rendas.pagos.map((l: any) => {
                         const p = rendas.payments.find((pay: any) => pay.lease_id === l.id)
                         return (
-                          <div key={l.id} className="flex justify-between items-center py-2 border-b border-gray-50 last:border-0">
+                          <div key={l.id}
+                            onClick={() => fetchContaCorrente({ name: l.tenant?.name, leaseId: l.id, spaceRef: l.space?.ref })}
+                            className="flex justify-between items-center py-2 border-b border-gray-50 last:border-0 cursor-pointer hover:bg-gray-50 rounded-lg px-2 transition-colors">
                             <div>
-                              <p className="text-sm font-medium text-gray-800">{l.tenant?.name ?? '—'}</p>
+                              <p className="text-sm font-medium text-gray-800 hover:text-emerald-600">{l.tenant?.name ?? '—'}</p>
                               <p className="text-xs text-gray-400">{l.space?.ref} · {p?.payment_method === 'dinheiro' ? '💵 Dinheiro' : '🏦 Banco'}</p>
                             </div>
                             <span className="text-sm font-semibold text-emerald-600">{fmt(p?.amount ?? 0)}</span>
@@ -343,19 +391,110 @@ export default function RelatoriosPage() {
                 {Object.keys(financeiro.porCategoria).length > 0 && (
                   <div className="bg-white border border-gray-200 rounded-xl p-4">
                     <h3 className="text-sm font-semibold text-gray-700 mb-3">Despesas por categoria</h3>
-                    <div className="space-y-3">
+                    <div className="space-y-2">
                       {Object.entries(financeiro.porCategoria)
-                        .sort(([, a]: any, [, b]: any) => b - a)
-                        .map(([cat, val]: any) => (
-                          <div key={cat}>
-                            <div className="flex justify-between text-sm mb-1">
-                              <span className="text-gray-600">{cat}</span>
-                              <span className="font-medium text-gray-800">{fmt(val)}</span>
-                            </div>
-                            <div className="w-full bg-gray-100 rounded-full h-2">
-                              <div className="bg-purple-400 h-2 rounded-full"
-                                style={{ width: `${financeiro.totalDespesas > 0 ? Math.round((val / financeiro.totalDespesas) * 100) : 0}%` }} />
-                            </div>
+                        .sort(([, a]: any, [, b]: any) => b.total - a.total)
+                        .map(([cat, data]: any) => (
+                          <div key={cat} className="border border-gray-100 rounded-lg overflow-hidden">
+                            {/* Cabeçalho da categoria — clicável */}
+                            <button
+                              onClick={() => setExpandedCategory(expandedCategory === cat ? null : cat)}
+                              className="w-full flex items-center gap-3 p-3 hover:bg-gray-50 transition-colors">
+                              <div className="flex-1">
+                                <div className="flex justify-between text-sm mb-1.5">
+                                  <span className="text-gray-700 font-medium capitalize">{cat}</span>
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-semibold text-gray-800">{fmt(data.total)}</span>
+                                    <span className="text-xs text-gray-400">({data.items.length} registo(s))</span>
+                                  </div>
+                                </div>
+                                <div className="w-full bg-gray-100 rounded-full h-2">
+                                  <div className="bg-purple-400 h-2 rounded-full"
+                                    style={{ width: `${financeiro.totalDespesas > 0 ? Math.round((data.total / financeiro.totalDespesas) * 100) : 0}%` }} />
+                                </div>
+                              </div>
+                              {expandedCategory === cat
+                                ? <ChevronUp className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                                : <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />}
+                            </button>
+
+                            {/* Detalhe das despesas — expandido */}
+                            {expandedCategory === cat && (
+                              <div className="border-t border-gray-100 bg-gray-50">
+                                {data.items.map((exp: any) => (
+                                  <div key={exp.id} className="px-4 py-3 border-b border-gray-100 last:border-0">
+                                    {editingExpense?.id === exp.id ? (
+                                      /* Modo edição */
+                                      <div className="space-y-2">
+                                        <div className="grid grid-cols-2 gap-2">
+                                          <div>
+                                            <label className="text-xs text-gray-500 mb-0.5 block">Descrição</label>
+                                            <input className="input text-sm" value={editForm.description}
+                                              onChange={e => setEditForm((f: any) => ({ ...f, description: e.target.value }))} />
+                                          </div>
+                                          <div>
+                                            <label className="text-xs text-gray-500 mb-0.5 block">Fornecedor</label>
+                                            <input className="input text-sm" value={editForm.supplier ?? ''}
+                                              onChange={e => setEditForm((f: any) => ({ ...f, supplier: e.target.value }))} />
+                                          </div>
+                                        </div>
+                                        <div className="grid grid-cols-3 gap-2">
+                                          <div>
+                                            <label className="text-xs text-gray-500 mb-0.5 block">Valor (€)</label>
+                                            <input type="number" step="0.01" className="input text-sm" value={editForm.amount}
+                                              onChange={e => setEditForm((f: any) => ({ ...f, amount: e.target.value }))} />
+                                          </div>
+                                          <div>
+                                            <label className="text-xs text-gray-500 mb-0.5 block">Data</label>
+                                            <input type="date" className="input text-sm" value={editForm.expense_date}
+                                              onChange={e => setEditForm((f: any) => ({ ...f, expense_date: e.target.value }))} />
+                                          </div>
+                                          <div>
+                                            <label className="text-xs text-gray-500 mb-0.5 block">Pagamento</label>
+                                            <select className="input text-sm" value={editForm.payment_method}
+                                              onChange={e => setEditForm((f: any) => ({ ...f, payment_method: e.target.value }))}>
+                                              <option value="dinheiro">Dinheiro</option>
+                                              <option value="banco">Banco</option>
+                                            </select>
+                                          </div>
+                                        </div>
+                                        <div className="flex gap-2 justify-end mt-1">
+                                          <button onClick={() => setEditingExpense(null)}
+                                            className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-100 transition-colors">
+                                            <X className="w-3 h-3" /> Cancelar
+                                          </button>
+                                          <button onClick={handleSaveExpense} disabled={savingExpense}
+                                            className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40 transition-colors">
+                                            <Save className="w-3 h-3" /> {savingExpense ? 'A guardar...' : 'Guardar'}
+                                          </button>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      /* Modo visualização */
+                                      <div className="flex items-center justify-between gap-3">
+                                        <div className="flex-1 min-w-0">
+                                          <p className="text-sm text-gray-800 font-medium truncate">{exp.description}</p>
+                                          <div className="flex items-center gap-2 mt-0.5">
+                                            <span className="text-xs text-gray-400">{formatDate(exp.expense_date)}</span>
+                                            {exp.supplier && <span className="text-xs text-gray-400">· {exp.supplier}</span>}
+                                            <span className="text-xs text-gray-400">· {exp.payment_method === 'dinheiro' ? '💵' : '🏦'}</span>
+                                          </div>
+                                        </div>
+                                        <div className="flex items-center gap-2 flex-shrink-0">
+                                          <span className="text-sm font-semibold text-red-600">{fmt(exp.amount)}</span>
+                                          <button
+                                            onClick={() => { setEditingExpense(exp); setEditForm({ ...exp }) }}
+                                            className="p-1.5 text-gray-400 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"
+                                            title="Editar">
+                                            <Edit2 className="w-3.5 h-3.5" />
+                                          </button>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         ))}
                     </div>
@@ -405,10 +544,57 @@ export default function RelatoriosPage() {
                 </div>
               </div>
             )}
-
           </div>
         )}
       </div>
+
+      {/* Modal Conta Corrente */}
+      {contaCorrenteModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 max-h-[85vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="font-semibold text-lg text-gray-900">Conta Corrente</h2>
+                <p className="text-sm text-gray-500">{contaCorrenteModal.name} · {contaCorrenteModal.spaceRef}</p>
+              </div>
+              <button onClick={() => setContaCorrenteModal(null)}>
+                <X className="w-5 h-5 text-gray-400" />
+              </button>
+            </div>
+
+            {loadingCC ? (
+              <div className="flex justify-center py-8">
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-emerald-600" />
+              </div>
+            ) : contaCorrenteData.length === 0 ? (
+              <p className="text-sm text-gray-400 text-center py-8">Sem pagamentos registados.</p>
+            ) : (
+              <div className="space-y-2">
+                {contaCorrenteData.map((p: any) => (
+                  <div key={p.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-100">
+                    <div>
+                      <p className="text-sm font-medium text-gray-800">
+                        {p.reference_month ? new Date(p.reference_month).toLocaleDateString('pt-PT', { month: 'long', year: 'numeric' }) : '—'}
+                      </p>
+                      <p className="text-xs text-gray-400">
+                        {p.payment_date ? formatDate(p.payment_date) : '—'} · {p.payment_method === 'dinheiro' ? '💵 Dinheiro' : '🏦 Banco'}
+                        {p.tipo && p.tipo !== 'renda' ? ` · ${p.tipo}` : ''}
+                      </p>
+                    </div>
+                    <span className="text-sm font-semibold text-emerald-600">{fmt(p.amount ?? 0)}</span>
+                  </div>
+                ))}
+                <div className="flex justify-between items-center pt-2 border-t border-gray-200 mt-2">
+                  <span className="text-sm font-semibold text-gray-700">Total</span>
+                  <span className="text-base font-bold text-emerald-600">
+                    {fmt(contaCorrenteData.reduce((s: number, p: any) => s + (p.amount ?? 0), 0))}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </AppLayout>
   )
 }
