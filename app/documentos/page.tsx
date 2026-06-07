@@ -161,23 +161,31 @@ export default function DocumentosPage() {
     })
   }
 
-  async function handleSaveEdit() {
-    if (!editDoc) return
-    setSaving(true)
-    await supabase.from('documents').update({
-      tipo: editForm.tipo,
-      tipo_custom: editForm.tipo_custom || null,
-      supplier_name: editForm.supplier_name || null,
-      amount: editForm.amount ? parseFloat(editForm.amount) : null,
-      doc_date: editForm.doc_date || null,
-      doc_number: editForm.doc_number || null,
-      items_summary: editForm.items_summary || null,
-      category: editForm.category || null,
-    }).eq('id', editDoc.id)
-    setSaving(false)
-    setEditDoc(null)
-    fetchAll()
+async function handleSaveEdit() {
+  if (!editDoc) return
+  setSaving(true)
+  await supabase.from('documents').update({
+    tipo: editForm.tipo,
+    tipo_custom: editForm.tipo_custom || null,
+    supplier_name: editForm.supplier_name || null,
+    amount: editForm.amount ? parseFloat(editForm.amount) : null,
+    doc_date: editForm.doc_date || null,
+    doc_number: editForm.doc_number || null,
+    items_summary: editForm.items_summary || null,
+    category: editForm.category || null,
+  }).eq('id', editDoc.id)
+
+  // Se o documento tem uma despesa associada, atualiza também a categoria da despesa
+  if (editDoc.expense_id && editForm.category) {
+    await supabase.from('expenses').update({
+      category: editForm.category,
+    }).eq('id', editDoc.expense_id)
   }
+
+  setSaving(false)
+  setEditDoc(null)
+  fetchAll()
+}
 
   async function processFile(file: File, index: number, force = false) {
     setUploadResults(prev => prev.map((r, i) => i === index ? { ...r, status: 'processing' } : r))
