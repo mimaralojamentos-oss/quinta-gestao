@@ -21,6 +21,7 @@ function getLastMonths(n: number): MonthOption[] {
 }
 
 const MONTHS = getLastMonths(12)
+const CATEGORIAS = ['administracao', 'contabilidade', 'edp', 'manutencao', 'obras', 'outros', 'pessoal']
 
 export default function RelatoriosPage() {
   const supabase = createClient()
@@ -33,15 +34,12 @@ export default function RelatoriosPage() {
   const [financeiro, setFinanceiro] = useState<any>(null)
   const [contratos, setContratos] = useState<any>(null)
 
-  // Categoria expandida no financeiro
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null)
 
-  // Modal conta corrente
   const [contaCorrenteModal, setContaCorrenteModal] = useState<any>(null)
   const [contaCorrenteData, setContaCorrenteData] = useState<any[]>([])
   const [loadingCC, setLoadingCC] = useState(false)
 
-  // Editar despesa
   const [editingExpense, setEditingExpense] = useState<any>(null)
   const [editForm, setEditForm] = useState<any>({})
   const [savingExpense, setSavingExpense] = useState(false)
@@ -396,7 +394,6 @@ export default function RelatoriosPage() {
                         .sort(([, a]: any, [, b]: any) => b.total - a.total)
                         .map(([cat, data]: any) => (
                           <div key={cat} className="border border-gray-100 rounded-lg overflow-hidden">
-                            {/* Cabeçalho da categoria — clicável */}
                             <button
                               onClick={() => setExpandedCategory(expandedCategory === cat ? null : cat)}
                               className="w-full flex items-center gap-3 p-3 hover:bg-gray-50 transition-colors">
@@ -418,13 +415,11 @@ export default function RelatoriosPage() {
                                 : <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />}
                             </button>
 
-                            {/* Detalhe das despesas — expandido */}
                             {expandedCategory === cat && (
                               <div className="border-t border-gray-100 bg-gray-50">
                                 {data.items.map((exp: any) => (
                                   <div key={exp.id} className="px-4 py-3 border-b border-gray-100 last:border-0">
                                     {editingExpense?.id === exp.id ? (
-                                      /* Modo edição */
                                       <div className="space-y-2">
                                         <div className="grid grid-cols-2 gap-2">
                                           <div>
@@ -438,7 +433,7 @@ export default function RelatoriosPage() {
                                               onChange={e => setEditForm((f: any) => ({ ...f, supplier: e.target.value }))} />
                                           </div>
                                         </div>
-                                        <div className="grid grid-cols-3 gap-2">
+                                        <div className="grid grid-cols-4 gap-2">
                                           <div>
                                             <label className="text-xs text-gray-500 mb-0.5 block">Valor (€)</label>
                                             <input type="number" step="0.01" className="input text-sm" value={editForm.amount}
@@ -450,11 +445,20 @@ export default function RelatoriosPage() {
                                               onChange={e => setEditForm((f: any) => ({ ...f, expense_date: e.target.value }))} />
                                           </div>
                                           <div>
+                                            <label className="text-xs text-gray-500 mb-0.5 block">Categoria</label>
+                                            <select className="input text-sm" value={editForm.category ?? ''}
+                                              onChange={e => setEditForm((f: any) => ({ ...f, category: e.target.value }))}>
+                                              {CATEGORIAS.map(c => (
+                                                <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>
+                                              ))}
+                                            </select>
+                                          </div>
+                                          <div>
                                             <label className="text-xs text-gray-500 mb-0.5 block">Pagamento</label>
                                             <select className="input text-sm" value={editForm.payment_method}
                                               onChange={e => setEditForm((f: any) => ({ ...f, payment_method: e.target.value }))}>
-                                              <option value="dinheiro">Dinheiro</option>
-                                              <option value="banco">Banco</option>
+                                              <option value="dinheiro">💵 Dinheiro</option>
+                                              <option value="banco">🏦 Banco</option>
                                             </select>
                                           </div>
                                         </div>
@@ -470,7 +474,6 @@ export default function RelatoriosPage() {
                                         </div>
                                       </div>
                                     ) : (
-                                      /* Modo visualização */
                                       <div className="flex items-center justify-between gap-3">
                                         <div className="flex-1 min-w-0">
                                           <p className="text-sm text-gray-800 font-medium truncate">{exp.description}</p>
