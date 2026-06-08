@@ -23,6 +23,14 @@ function getLastMonths(n: number): MonthOption[] {
 const MONTHS = getLastMonths(12)
 const CATEGORIAS = ['administracao', 'contabilidade', 'edp', 'manutencao', 'obras', 'outros', 'pessoal']
 
+const TIPO_LABELS: Record<string, string> = {
+  renda: '🏠 Renda',
+  luz: '⚡ Luz',
+  caucao: '🔒 Caução',
+  extra: '➕ Extra',
+  outro: '📝 Outro',
+}
+
 export default function RelatoriosPage() {
   const supabase = createClient()
   const [activeReport, setActiveReport] = useState('rendas')
@@ -52,36 +60,38 @@ export default function RelatoriosPage() {
   }, [activeReport, selectedMonth])
 
   async function fetchRendas() {
-  setLoading(true)
-  const startDate = `${selectedMonth}-01`
-  const [y, m] = selectedMonth.split('-').map(Number)
-  const nextMonthDate = new Date(y, m, 1).toISOString().slice(0, 10)
+    setLoading(true)
+    const startDate = `${selectedMonth}-01`
+    const [y, m] = selectedMonth.split('-').map(Number)
+    const nextMonthDate = new Date(y, m, 1).toISOString().slice(0, 10)
 
-  const { data: leases } = await supabase
-    .from('leases')
-    .select('id, monthly_rent, space:spaces(ref), tenant:tenants(id, name)')
-    .eq('status', 'ativo')
+    const { data: leases } = await supabase
+      .from('leases')
+      .select('id, monthly_rent, space:spaces(ref), tenant:tenants(id, name)')
+      .eq('status', 'ativo')
 
-  const { data: payments } = await supabase
-    .from('rent_payments')
-    .select('*')
-    .gte('reference_month', startDate)
-    .lt('reference_month', nextMonthDate)
+    const { data: payments } = await supabase
+      .from('rent_payments')
+      .select('*, lease:leases(space:spaces(ref), tenant:tenants(name))')
+      .gte('reference_month', startDate)
+      .lt('reference_month', nextMonthDate)
 
-  // CORRIGIDO: só contar pagamentos do tipo 'renda'
-  const rendaPayments = (payments ?? []).filter((p: any) => p.tipo === 'renda' || !p.tipo)
+    // Só pagamentos de renda
+    const rendaPayments = (payments ?? []).filter((p: any) => p.tipo === 'renda' || !p.tipo)
+    // Outros pagamentos (luz, caução, extra, etc.)
+    const outrosPayments = (payments ?? []).filter((p: any) => p.tipo && p.tipo !== 'renda')
 
-  const totalEsperado = (leases ?? []).reduce((s: number, l: any) => s + (l.monthly_rent ?? 0), 0)
-  const totalRecebido = rendaPayments.reduce((s: number, p: any) => s + (p.amount ?? 0), 0)
+    const totalEsperado = (leases ?? []).reduce((s: number, l: any) => s + (l.monthly_rent ?? 0), 0)
+    const totalRecebido = rendaPayments.reduce((s: number, p: any) => s + (p.amount ?? 0), 0)
+    const totalOutros = outrosPayments.reduce((s: number, p: any) => s + (p.amount ?? 0), 0)
 
-  // CORRIGIDO: "pago" só se tiver pagamento de tipo 'renda'
-  const pagosIds = new Set(rendaPayments.map((p: any) => p.lease_id))
-  const emFalta = (leases ?? []).filter((l: any) => !pagosIds.has(l.id))
-  const pagos = (leases ?? []).filter((l: any) => pagosIds.has(l.id))
+    const pagosIds = new Set(rendaPayments.map((p: any) => p.lease_id))
+    const emFalta = (leases ?? []).filter((l: any) => !pagosIds.has(l.id))
+    const pagos = (leases ?? []).filter((l: any) => pagosIds.has(l.id))
 
-  setRendas({ totalEsperado, totalRecebido, emFalta, pagos, leases, payments: rendaPayments })
-  setLoading(false)
-}
+    setRendas({ totalEsperado, totalRecebido, totalOutros, emFalta, pagos, leases, payments: rendaPayments, outrosPayments })
+    setLoading(false)
+  }
 
   async function fetchContaCorrente(tenant: any) {
     setContaCorrenteModal(tenant)
@@ -165,23 +175,22 @@ export default function RelatoriosPage() {
     setLoading(false)
   }
 
-async function handleSaveExpense() {
-  if (!editingExpense) return
-  setSavingExpense(true)
-  await supabase.from('expenses').update({
-    description: editForm.description,
-    amount: parseFloat(editForm.amount),
-    category: editForm.category,
-    expense_date: editForm.expense_date,
-    supplier: editForm.supplier,
-    payment_method: editForm.payment_method,
-  }).eq('id', editingExpense.id)
-  setEditingExpense(null)
-  setSavingExpense(false)
-  // CORRIGIDO: fechar categoria expandida para forçar re-render correto
-  setExpandedCategory(null)
-  fetchFinanceiro()
-}
+  async function handleSaveExpense() {
+    if (!editingExpense) return
+    setSavingExpense(true)
+    await supabase.from('expenses').update({
+      description: editForm.description,
+      amount: parseFloat(editForm.amount),
+      category: editForm.category,
+      expense_date: editForm.expense_date,
+      supplier: editForm.supplier,
+      payment_method: editForm.payment_method,
+    }).eq('id', editingExpense.id)
+    setEditingExpense(null)
+    setSavingExpense(false)
+    setExpandedCategory(null)
+    fetchFinanceiro()
+  }
 
   function fmt(v: number) {
     return v.toLocaleString('pt-PT', { style: 'currency', currency: 'EUR' })
@@ -257,7 +266,7 @@ async function handleSaveExpense() {
                     <p className="text-2xl font-bold text-gray-900">{fmt(rendas.totalEsperado)}</p>
                   </div>
                   <div className="bg-white border border-gray-200 rounded-xl p-4">
-                    <p className="text-xs text-gray-500 mb-1">Recebido</p>
+                    <p className="text-xs text-gray-500 mb-1">Rendas Recebidas</p>
                     <p className="text-2xl font-bold text-emerald-600">{fmt(rendas.totalRecebido)}</p>
                   </div>
                   <div className="bg-white border border-gray-200 rounded-xl p-4">
@@ -265,6 +274,14 @@ async function handleSaveExpense() {
                     <p className="text-2xl font-bold text-red-500">{fmt(Math.max(0, rendas.totalEsperado - rendas.totalRecebido))}</p>
                   </div>
                 </div>
+
+                {/* Card extras */}
+                {rendas.totalOutros > 0 && (
+                  <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+                    <p className="text-xs text-blue-600 font-medium mb-1">💡 Outros recebimentos este mês (luz, caução, extra...)</p>
+                    <p className="text-xl font-bold text-blue-700">{fmt(rendas.totalOutros)}</p>
+                  </div>
+                )}
 
                 <div className="bg-white border border-gray-200 rounded-xl p-4">
                   <div className="flex justify-between text-sm mb-2">
@@ -320,6 +337,32 @@ async function handleSaveExpense() {
                           </div>
                         )
                       })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Outros pagamentos */}
+                {rendas.outrosPayments?.length > 0 && (
+                  <div className="bg-white border border-gray-200 rounded-xl p-4">
+                    <h3 className="text-sm font-semibold text-gray-700 mb-3">💡 Outros pagamentos do mês</h3>
+                    <div className="space-y-2">
+                      {rendas.outrosPayments.map((p: any) => (
+                        <div key={p.id} className="flex justify-between items-center py-2 border-b border-gray-50 last:border-0 px-2">
+                          <div>
+                            <p className="text-sm font-medium text-gray-800">
+                              {p.lease?.tenant?.name ?? '—'}
+                            </p>
+                            <p className="text-xs text-gray-400">
+                              {p.lease?.space?.ref} · {TIPO_LABELS[p.tipo] ?? p.tipo} · {p.payment_method === 'dinheiro' ? '💵 Dinheiro' : '🏦 Banco'}
+                            </p>
+                          </div>
+                          <span className="text-sm font-semibold text-blue-600">{fmt(p.amount ?? 0)}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex justify-between items-center pt-2 border-t border-gray-100 mt-2">
+                      <span className="text-xs font-semibold text-gray-500">Total outros</span>
+                      <span className="text-sm font-bold text-blue-600">{fmt(rendas.totalOutros)}</span>
                     </div>
                   </div>
                 )}
@@ -587,7 +630,7 @@ async function handleSaveExpense() {
                       </p>
                       <p className="text-xs text-gray-400">
                         {p.payment_date ? formatDate(p.payment_date) : '—'} · {p.payment_method === 'dinheiro' ? '💵 Dinheiro' : '🏦 Banco'}
-                        {p.tipo && p.tipo !== 'renda' ? ` · ${p.tipo}` : ''}
+                        {p.tipo && p.tipo !== 'renda' ? ` · ${TIPO_LABELS[p.tipo] ?? p.tipo}` : ''}
                       </p>
                     </div>
                     <span className="text-sm font-semibold text-emerald-600">{fmt(p.amount ?? 0)}</span>
