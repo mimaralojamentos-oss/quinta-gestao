@@ -60,38 +60,53 @@ export default function RelatoriosPage() {
   }, [activeReport, selectedMonth])
 
   async function fetchRendas() {
-    setLoading(true)
-    const startDate = `${selectedMonth}-01`
-    const [y, m] = selectedMonth.split('-').map(Number)
-    const nextMonthDate = new Date(y, m, 1).toISOString().slice(0, 10)
+  setLoading(true)
+  const startDate = `${selectedMonth}-01`
+  const [y, m] = selectedMonth.split('-').map(Number)
+  const nextMonthDate = new Date(y, m, 1).toISOString().slice(0, 10)
 
-    const { data: leases } = await supabase
-      .from('leases')
-      .select('id, monthly_rent, space:spaces(ref), tenant:tenants(id, name)')
-      .eq('status', 'ativo')
+  const { data: leases } = await supabase
+    .from('leases')
+    .select('id, monthly_rent, space:spaces(ref), tenant:tenants(id, name)')
+    .eq('status', 'ativo')
 
-    const { data: payments } = await supabase
-      .from('rent_payments')
-      .select('*, lease:leases(space:spaces(ref), tenant:tenants(name))')
-      .gte('reference_month', startDate)
-      .lt('reference_month', nextMonthDate)
+  // Buscar todos os pagamentos do mês
+  const { data: allPayments } = await supabase
+    .from('rent_payments')
+    .select('*')
+    .gte('reference_month', startDate)
+    .lt('reference_month', nextMonthDate)
 
-    // Só pagamentos de renda
-    const rendaPayments = (payments ?? []).filter((p: any) => p.tipo === 'renda' || !p.tipo)
-    // Outros pagamentos (luz, caução, extra, etc.)
-    const outrosPayments = (payments ?? []).filter((p: any) => p.tipo && p.tipo !== 'renda')
+  // Buscar dados dos contratos para os outros pagamentos
+  const { data: leasesForOthers } = await supabase
+    .from('leases')
+    .select('id, space:spaces(ref), tenant:tenants(name)')
 
-    const totalEsperado = (leases ?? []).reduce((s: number, l: any) => s + (l.monthly_rent ?? 0), 0)
-    const totalRecebido = rendaPayments.reduce((s: number, p: any) => s + (p.amount ?? 0), 0)
-    const totalOutros = outrosPayments.reduce((s: number, p: any) => s + (p.amount ?? 0), 0)
-
-    const pagosIds = new Set(rendaPayments.map((p: any) => p.lease_id))
-    const emFalta = (leases ?? []).filter((l: any) => !pagosIds.has(l.id))
-    const pagos = (leases ?? []).filter((l: any) => pagosIds.has(l.id))
-
-    setRendas({ totalEsperado, totalRecebido, totalOutros, emFalta, pagos, leases, payments: rendaPayments, outrosPayments })
-    setLoading(false)
+  const leasesMap: Record<string, any> = {}
+  for (const l of leasesForOthers ?? []) {
+    leasesMap[l.id] = l
   }
+
+  // Separar rendas de outros pagamentos
+  const rendaPayments = (allPayments ?? []).filter((p: any) => p.tipo === 'renda' || !p.tipo)
+  const outrosPayments = (allPayments ?? [])
+    .filter((p: any) => p.tipo && p.tipo !== 'renda')
+    .map((p: any) => ({
+      ...p,
+      lease: leasesMap[p.lease_id] ?? null,
+    }))
+
+  const totalEsperado = (leases ?? []).reduce((s: number, l: any) => s + (l.monthly_rent ?? 0), 0)
+  const totalRecebido = rendaPayments.reduce((s: number, p: any) => s + (p.amount ?? 0), 0)
+  const totalOutros = outrosPayments.reduce((s: number, p: any) => s + (p.amount ?? 0), 0)
+
+  const pagosIds = new Set(rendaPayments.map((p: any) => p.lease_id))
+  const emFalta = (leases ?? []).filter((l: any) => !pagosIds.has(l.id))
+  const pagos = (leases ?? []).filter((l: any) => pagosIds.has(l.id))
+
+  setRendas({ totalEsperado, totalRecebido, totalOutros, emFalta, pagos, leases, payments: rendaPayments, outrosPayments })
+  setLoading(false)
+}
 
   async function fetchContaCorrente(tenant: any) {
     setContaCorrenteModal(tenant)
