@@ -52,32 +52,36 @@ export default function RelatoriosPage() {
   }, [activeReport, selectedMonth])
 
   async function fetchRendas() {
-    setLoading(true)
-    const startDate = `${selectedMonth}-01`
-    const [y, m] = selectedMonth.split('-').map(Number)
-    const nextMonthDate = new Date(y, m, 1).toISOString().slice(0, 10)
+  setLoading(true)
+  const startDate = `${selectedMonth}-01`
+  const [y, m] = selectedMonth.split('-').map(Number)
+  const nextMonthDate = new Date(y, m, 1).toISOString().slice(0, 10)
 
-    const { data: leases } = await supabase
-      .from('leases')
-      .select('id, monthly_rent, space:spaces(ref), tenant:tenants(id, name)')
-      .eq('status', 'ativo')
+  const { data: leases } = await supabase
+    .from('leases')
+    .select('id, monthly_rent, space:spaces(ref), tenant:tenants(id, name)')
+    .eq('status', 'ativo')
 
-    const { data: payments } = await supabase
-      .from('rent_payments')
-      .select('*')
-      .gte('reference_month', startDate)
-      .lt('reference_month', nextMonthDate)
+  const { data: payments } = await supabase
+    .from('rent_payments')
+    .select('*')
+    .gte('reference_month', startDate)
+    .lt('reference_month', nextMonthDate)
 
-    const totalEsperado = (leases ?? []).reduce((s: number, l: any) => s + (l.monthly_rent ?? 0), 0)
-    const totalRecebido = (payments ?? []).reduce((s: number, p: any) => s + (p.amount ?? 0), 0)
+  // CORRIGIDO: só contar pagamentos do tipo 'renda'
+  const rendaPayments = (payments ?? []).filter((p: any) => p.tipo === 'renda' || !p.tipo)
 
-    const pagosIds = new Set((payments ?? []).map((p: any) => p.lease_id))
-    const emFalta = (leases ?? []).filter((l: any) => !pagosIds.has(l.id))
-    const pagos = (leases ?? []).filter((l: any) => pagosIds.has(l.id))
+  const totalEsperado = (leases ?? []).reduce((s: number, l: any) => s + (l.monthly_rent ?? 0), 0)
+  const totalRecebido = rendaPayments.reduce((s: number, p: any) => s + (p.amount ?? 0), 0)
 
-    setRendas({ totalEsperado, totalRecebido, emFalta, pagos, leases, payments })
-    setLoading(false)
-  }
+  // CORRIGIDO: "pago" só se tiver pagamento de tipo 'renda'
+  const pagosIds = new Set(rendaPayments.map((p: any) => p.lease_id))
+  const emFalta = (leases ?? []).filter((l: any) => !pagosIds.has(l.id))
+  const pagos = (leases ?? []).filter((l: any) => pagosIds.has(l.id))
+
+  setRendas({ totalEsperado, totalRecebido, emFalta, pagos, leases, payments: rendaPayments })
+  setLoading(false)
+}
 
   async function fetchContaCorrente(tenant: any) {
     setContaCorrenteModal(tenant)
