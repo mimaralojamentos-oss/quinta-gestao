@@ -17,6 +17,7 @@ const tipoConfig = {
   extra:  { label: '➕ Extra' },
   luz:    { label: '⚡ Luz' },
   divida: { label: '⚠️ Dívida' },
+  eletricidade: { label: '⚡ Eletricidade' },
 }
 
 interface PaymentRow {
@@ -31,6 +32,7 @@ interface PaymentRow {
   lease?: any
   isMissing?: boolean
   isManualDebt?: boolean
+  isElecCharge?: boolean
   remainingAmount?: number
 }
 
@@ -116,7 +118,7 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
       : { data: [] }
 
     const enriched: PaymentRow[] = (pays ?? []).map(p => ({
-      ...p, lease: (leasesData ?? []).find(l => l.id === p.lease_id), isMissing: false, isManualDebt: false
+      ...p, lease: (leasesData ?? []).find(l => l.id === p.lease_id), isMissing: false, isManualDebt: false, isElecCharge: false
     }))
 
     // Rendas em falta
@@ -133,7 +135,7 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
         const hasPayment = enriched.some(p => p.lease_id === lease.id && p.reference_month?.slice(0, 7) === monthStr && (p.tipo === 'renda' || !p.tipo))
         if (!hasPayment) missingRows.push({
           reference_month: monthStr + '-01', amount: lease.monthly_rent,
-          payment_date: null, payment_method: null, tipo: 'renda', lease, isMissing: true, isManualDebt: false
+          payment_date: null, payment_method: null, tipo: 'renda', lease, isMissing: true, isManualDebt: false, isElecCharge: false
         })
         cursor.setMonth(cursor.getMonth() + 1)
       }
@@ -155,10 +157,40 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
         notes: d.description,
         isMissing: false,
         isManualDebt: true,
+        isElecCharge: false,
       }
     })
 
-    const allRows = [...enriched, ...missingRows, ...manualDebtRows]
+    // Cobranças de eletricidade por pagar
+    const elecChargeRows: PaymentRow[] = []
+    if (leaseIds.length > 0) {
+      const { data: elecData } = await supabase
+        .from('electricity_charges')
+        .select('id, lease_id, amount, charge_date, reading_date')
+        .in('lease_id', leaseIds)
+        .eq('paid', false)
+
+      for (const ec of elecData ?? []) {
+        const lease = (leasesData ?? []).find(l => l.id === ec.lease_id)
+        const refDate = ec.charge_date ?? ec.reading_date ?? new Date().toISOString().slice(0, 10)
+        elecChargeRows.push({
+          id: ec.id,
+          lease_id: ec.lease_id,
+          reference_month: refDate,
+          amount: ec.amount,
+          payment_date: null,
+          payment_method: null,
+          tipo: 'eletricidade',
+          notes: 'Cobrança de eletricidade por pagar',
+          lease,
+          isMissing: false,
+          isManualDebt: false,
+          isElecCharge: true,
+        })
+      }
+    }
+
+    const allRows = [...enriched, ...missingRows, ...manualDebtRows, ...elecChargeRows]
       .sort((a, b) => b.reference_month.localeCompare(a.reference_month))
 
     setPayments(allRows)
@@ -276,10 +308,14 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
     await fetchPayments()
   }
 
+  // totalDebt inclui: rendas em falta + dívidas manuais + eletricidade por pagar
   const totalDebt = payments
     .filter(p => !p.payment_date || p.payment_date === null)
     .filter(p => p.payment_date !== 'liquidada')
-    .reduce((sum, p) => sum + (p.isManualDebt ? (p.remainingAmount ?? 0) : (p.amount ?? 0)), 0)
+    .reduce((sum, p) => {
+      if (p.isManualDebt) return sum + (p.remainingAmount ?? 0)
+      return sum + (p.amount ?? 0)
+    }, 0)
 
   const getTitle = () => {
     if (!isNew) return tenant!.name
@@ -528,7 +564,7 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
                     <div>
                       <label className="label">Tipo</label>
                       <div className="grid grid-cols-4 gap-2">
-                        {Object.entries(tipoConfig).filter(([k]) => k !== 'divida').map(([key, cfg]) => (
+                        {Object.entries(tipoConfig).filter(([k]) => k !== 'divida' && k !== 'eletricidade').map(([key, cfg]) => (
                           <button key={key} onClick={() => setPaymentForm(f => ({ ...f, tipo: key }))}
                             className={`py-2 rounded-lg border text-xs font-medium transition-colors ${paymentForm.tipo === key ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
                             {cfg.label}
@@ -588,12 +624,13 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
                 <div className="space-y-2">
                   {payments.map((p, i) => {
                     const isLiquidada = p.isManualDebt && p.payment_date === 'liquidada'
-                    const isPago = !p.isManualDebt && p.payment_date
+                    const isPago = !p.isManualDebt && !p.isElecCharge && p.payment_date
                     return (
                       <div key={p.id ?? `row-${i}`}
                         className={`flex items-center justify-between p-3 rounded-lg border ${
                           isPago || isLiquidada ? 'border-gray-100 bg-white'
                           : p.isMissing ? 'border-orange-200 bg-orange-50'
+                          : p.isElecCharge ? 'border-yellow-200 bg-yellow-50'
                           : p.isManualDebt ? 'border-red-200 bg-red-50'
                           : 'border-red-100 bg-red-50'
                         }`}>
@@ -604,6 +641,7 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
                               p.tipo === 'caucao' ? 'bg-blue-100 text-blue-700'
                               : p.tipo === 'extra' ? 'bg-orange-100 text-orange-700'
                               : p.tipo === 'luz' ? 'bg-yellow-100 text-yellow-700'
+                              : p.tipo === 'eletricidade' ? 'bg-yellow-100 text-yellow-700'
                               : p.tipo === 'divida' ? 'bg-red-100 text-red-700'
                               : 'bg-gray-100 text-gray-600'
                             }`}>
@@ -612,6 +650,8 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
                           </p>
                           {p.isManualDebt ? (
                             <p className="text-xs text-gray-600">{p.notes}</p>
+                          ) : p.isElecCharge ? (
+                            <p className="text-xs text-yellow-700 font-medium">⚡ Eletricidade por pagar</p>
                           ) : p.payment_date ? (
                             <p className="text-xs text-gray-500">Pago em {formatDate(p.payment_date)} · {p.payment_method}</p>
                           ) : p.isMissing ? (
@@ -629,7 +669,7 @@ export default function TenantModal({ tenant, onClose, onSaved }: Props) {
                           <span className={`font-semibold text-sm ${isPago || isLiquidada ? 'text-gray-900' : 'text-red-600'}`}>
                             {formatCurrency(p.amount)}
                           </span>
-                          {!p.isMissing && !p.isManualDebt && p.id && (
+                          {!p.isMissing && !p.isManualDebt && !p.isElecCharge && p.id && (
                             <>
                               <button onClick={() => handleEditPayment(p)} className="text-gray-300 hover:text-blue-500 transition-colors" title="Editar"><Pencil className="w-4 h-4" /></button>
                               <button onClick={() => handleDeletePayment(p.id!)} className="text-gray-300 hover:text-red-500 transition-colors" title="Apagar"><Trash2 className="w-4 h-4" /></button>
