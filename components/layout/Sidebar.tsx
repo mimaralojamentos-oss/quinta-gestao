@@ -35,24 +35,6 @@ const financeItems = [
   { href: '/financeiro/bancos', label: 'Bancos', icon: Landmark },
 ]
 
-function LadybugIcon() {
-  return (
-    <svg viewBox="0 0 36 36" className="w-5 h-5" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <ellipse cx="18" cy="21" rx="11" ry="9" fill="#e53e3e" />
-      <circle cx="18" cy="12" r="5" fill="#1a1a1a" />
-      <line x1="18" y1="12" x2="18" y2="30" stroke="#1a1a1a" strokeWidth="1.5" />
-      <circle cx="13" cy="19" r="2" fill="#1a1a1a" />
-      <circle cx="23" cy="19" r="2" fill="#1a1a1a" />
-      <circle cx="12" cy="25" r="1.8" fill="#1a1a1a" />
-      <circle cx="24" cy="25" r="1.8" fill="#1a1a1a" />
-      <line x1="15" y1="8" x2="11" y2="4" stroke="#1a1a1a" strokeWidth="1.2" strokeLinecap="round" />
-      <line x1="21" y1="8" x2="25" y2="4" stroke="#1a1a1a" strokeWidth="1.2" strokeLinecap="round" />
-      <circle cx="11" cy="4" r="1" fill="#1a1a1a" />
-      <circle cx="25" cy="4" r="1" fill="#1a1a1a" />
-    </svg>
-  )
-}
-
 export default function Sidebar() {
   const pathname = usePathname()
   const { profile, isAdmin, signOut } = useAuth()
@@ -70,8 +52,8 @@ export default function Sidebar() {
     <aside className="w-64 bg-white border-r border-gray-100 min-h-screen flex flex-col">
       <div className="p-6 border-b border-gray-100">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 bg-red-600 rounded-lg flex items-center justify-center">
-            <LadybugIcon />
+          <div className="w-9 h-9 bg-blue-600 rounded-lg flex items-center justify-center">
+            <span className="text-white text-xs font-bold">GQ</span>
           </div>
           <div>
             <p className="font-bold text-gray-900 text-sm">Gestão da Quinta</p>
