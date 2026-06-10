@@ -3,7 +3,7 @@
 import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { Plus, Trash2, Send, MessageSquare, Check, X, Search, ChevronDown } from 'lucide-react'
+import { Plus, Trash2, Send, MessageSquare, Check, X, Search } from 'lucide-react'
 
 interface GatePhone {
   id: string
@@ -23,6 +23,22 @@ interface SmsLog {
   sent_at: string
   status: string
 }
+
+// ✅ FORA do componente principal — evita recriação a cada render
+const CellInput = ({ value, onChange, type = 'text', placeholder = '' }: {
+  value: string | null | undefined
+  onChange: (v: string) => void
+  type?: string
+  placeholder?: string
+}) => (
+  <input
+    type={type}
+    value={value ?? ''}
+    onChange={e => onChange(e.target.value)}
+    placeholder={placeholder}
+    className="w-full px-2 py-1 text-sm border border-emerald-300 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500 bg-emerald-50"
+  />
+)
 
 export default function PortaoPage() {
   const [phones, setPhones] = useState<GatePhone[]>([])
@@ -162,16 +178,6 @@ export default function PortaoPage() {
   const activePhones = filteredPhones.filter(p => p.active)
   const inactivePhones = filteredPhones.filter(p => !p.active)
 
-  const CellInput = ({ value, onChange, type = 'text', placeholder = '' }: any) => (
-    <input
-      type={type}
-      value={value ?? ''}
-      onChange={e => onChange(e.target.value)}
-      placeholder={placeholder}
-      className="w-full px-2 py-1 text-sm border border-emerald-300 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500 bg-emerald-50"
-    />
-  )
-
   return (
     <AppLayout>
       <div className="p-8">
@@ -193,7 +199,7 @@ export default function PortaoPage() {
             className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${tab === 'lista' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
             Lista de Acessos
           </button>
-          <button onClick={() => { setTab('sms') }}
+          <button onClick={() => setTab('sms')}
             className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${tab === 'sms' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
             <Send className="w-4 h-4" /> Enviar SMS
           </button>
@@ -237,11 +243,11 @@ export default function PortaoPage() {
                     {/* Nova linha */}
                     {showNewRow && (
                       <tr className="bg-emerald-50">
-                        <td className="px-4 py-2"><CellInput value={newForm.phone} onChange={(v: string) => setNewForm(f => ({ ...f, phone: v }))} placeholder="9XXXXXXXXX" /></td>
-                        <td className="px-4 py-2"><CellInput value={newForm.name} onChange={(v: string) => setNewForm(f => ({ ...f, name: v }))} placeholder="Nome" /></td>
-                        <td className="px-4 py-2"><CellInput value={newForm.space} onChange={(v: string) => setNewForm(f => ({ ...f, space: v }))} placeholder="P01" /></td>
-                        <td className="px-4 py-2"><CellInput value={newForm.activation_date} onChange={(v: string) => setNewForm(f => ({ ...f, activation_date: v }))} type="date" /></td>
-                        <td className="px-4 py-2"><CellInput value={newForm.notes} onChange={(v: string) => setNewForm(f => ({ ...f, notes: v }))} placeholder="Notas" /></td>
+                        <td className="px-4 py-2"><CellInput value={newForm.phone} onChange={(v) => setNewForm(f => ({ ...f, phone: v }))} placeholder="9XXXXXXXXX" /></td>
+                        <td className="px-4 py-2"><CellInput value={newForm.name} onChange={(v) => setNewForm(f => ({ ...f, name: v }))} placeholder="Nome" /></td>
+                        <td className="px-4 py-2"><CellInput value={newForm.space} onChange={(v) => setNewForm(f => ({ ...f, space: v }))} placeholder="P01" /></td>
+                        <td className="px-4 py-2"><CellInput value={newForm.activation_date} onChange={(v) => setNewForm(f => ({ ...f, activation_date: v }))} type="date" /></td>
+                        <td className="px-4 py-2"><CellInput value={newForm.notes} onChange={(v) => setNewForm(f => ({ ...f, notes: v }))} placeholder="Notas" /></td>
                         <td className="px-4 py-2"></td>
                         <td className="px-4 py-2">
                           <div className="flex gap-1">
@@ -262,11 +268,11 @@ export default function PortaoPage() {
                       <tr key={phone.id} className={`hover:bg-gray-50 transition-colors ${editingId === phone.id ? 'bg-emerald-50' : ''}`}>
                         {editingId === phone.id ? (
                           <>
-                            <td className="px-4 py-2"><CellInput value={editForm.phone} onChange={(v: string) => setEditForm(f => ({ ...f, phone: v }))} /></td>
-                            <td className="px-4 py-2"><CellInput value={editForm.name} onChange={(v: string) => setEditForm(f => ({ ...f, name: v }))} /></td>
-                            <td className="px-4 py-2"><CellInput value={editForm.space} onChange={(v: string) => setEditForm(f => ({ ...f, space: v }))} /></td>
-                            <td className="px-4 py-2"><CellInput value={editForm.activation_date} onChange={(v: string) => setEditForm(f => ({ ...f, activation_date: v }))} type="date" /></td>
-                            <td className="px-4 py-2"><CellInput value={editForm.notes} onChange={(v: string) => setEditForm(f => ({ ...f, notes: v }))} /></td>
+                            <td className="px-4 py-2"><CellInput value={editForm.phone} onChange={(v) => setEditForm(f => ({ ...f, phone: v }))} /></td>
+                            <td className="px-4 py-2"><CellInput value={editForm.name} onChange={(v) => setEditForm(f => ({ ...f, name: v }))} /></td>
+                            <td className="px-4 py-2"><CellInput value={editForm.space} onChange={(v) => setEditForm(f => ({ ...f, space: v }))} /></td>
+                            <td className="px-4 py-2"><CellInput value={editForm.activation_date} onChange={(v) => setEditForm(f => ({ ...f, activation_date: v }))} type="date" /></td>
+                            <td className="px-4 py-2"><CellInput value={editForm.notes} onChange={(v) => setEditForm(f => ({ ...f, notes: v }))} /></td>
                             <td className="px-4 py-2">
                               <select value={editForm.active ? 'true' : 'false'}
                                 onChange={e => setEditForm(f => ({ ...f, active: e.target.value === 'true' }))}
@@ -324,11 +330,11 @@ export default function PortaoPage() {
                           <tr key={phone.id} className={`opacity-50 hover:opacity-75 transition-opacity ${editingId === phone.id ? 'bg-emerald-50 opacity-100' : ''}`}>
                             {editingId === phone.id ? (
                               <>
-                                <td className="px-4 py-2"><CellInput value={editForm.phone} onChange={(v: string) => setEditForm(f => ({ ...f, phone: v }))} /></td>
-                                <td className="px-4 py-2"><CellInput value={editForm.name} onChange={(v: string) => setEditForm(f => ({ ...f, name: v }))} /></td>
-                                <td className="px-4 py-2"><CellInput value={editForm.space} onChange={(v: string) => setEditForm(f => ({ ...f, space: v }))} /></td>
-                                <td className="px-4 py-2"><CellInput value={editForm.activation_date} onChange={(v: string) => setEditForm(f => ({ ...f, activation_date: v }))} type="date" /></td>
-                                <td className="px-4 py-2"><CellInput value={editForm.notes} onChange={(v: string) => setEditForm(f => ({ ...f, notes: v }))} /></td>
+                                <td className="px-4 py-2"><CellInput value={editForm.phone} onChange={(v) => setEditForm(f => ({ ...f, phone: v }))} /></td>
+                                <td className="px-4 py-2"><CellInput value={editForm.name} onChange={(v) => setEditForm(f => ({ ...f, name: v }))} /></td>
+                                <td className="px-4 py-2"><CellInput value={editForm.space} onChange={(v) => setEditForm(f => ({ ...f, space: v }))} /></td>
+                                <td className="px-4 py-2"><CellInput value={editForm.activation_date} onChange={(v) => setEditForm(f => ({ ...f, activation_date: v }))} type="date" /></td>
+                                <td className="px-4 py-2"><CellInput value={editForm.notes} onChange={(v) => setEditForm(f => ({ ...f, notes: v }))} /></td>
                                 <td className="px-4 py-2">
                                   <select value={editForm.active ? 'true' : 'false'}
                                     onChange={e => setEditForm(f => ({ ...f, active: e.target.value === 'true' }))}
