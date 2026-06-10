@@ -28,6 +28,7 @@ const TIPO_LABELS: Record<string, string> = {
   luz: '⚡ Luz',
   caucao: '🔒 Caução',
   extra: '➕ Extra',
+  adiantamento: '💰 Adiantamento',
   outro: '📝 Outro',
 }
 
@@ -60,53 +61,50 @@ export default function RelatoriosPage() {
   }, [activeReport, selectedMonth])
 
   async function fetchRendas() {
-  setLoading(true)
-  const startDate = `${selectedMonth}-01`
-  const [y, m] = selectedMonth.split('-').map(Number)
-  const nextMonthDate = new Date(y, m, 1).toISOString().slice(0, 10)
+    setLoading(true)
+    const startDate = `${selectedMonth}-01`
+    const [y, m] = selectedMonth.split('-').map(Number)
+    const nextMonthDate = new Date(y, m, 1).toISOString().slice(0, 10)
 
-  const { data: leases } = await supabase
-    .from('leases')
-    .select('id, monthly_rent, space:spaces(ref), tenant:tenants(id, name)')
-    .eq('status', 'ativo')
+    const { data: leases } = await supabase
+      .from('leases')
+      .select('id, monthly_rent, space:spaces(ref), tenant:tenants(id, name)')
+      .eq('status', 'ativo')
 
-  // Buscar todos os pagamentos do mês
-  const { data: allPayments } = await supabase
-    .from('rent_payments')
-    .select('*')
-    .gte('reference_month', startDate)
-    .lt('reference_month', nextMonthDate)
+    const { data: allPayments } = await supabase
+      .from('rent_payments')
+      .select('*')
+      .gte('reference_month', startDate)
+      .lt('reference_month', nextMonthDate)
 
-  // Buscar dados dos contratos para os outros pagamentos
-  const { data: leasesForOthers } = await supabase
-    .from('leases')
-    .select('id, space:spaces(ref), tenant:tenants(name)')
+    const { data: leasesForOthers } = await supabase
+      .from('leases')
+      .select('id, space:spaces(ref), tenant:tenants(name)')
 
-  const leasesMap: Record<string, any> = {}
-  for (const l of leasesForOthers ?? []) {
-    leasesMap[l.id] = l
+    const leasesMap: Record<string, any> = {}
+    for (const l of leasesForOthers ?? []) {
+      leasesMap[l.id] = l
+    }
+
+    const rendaPayments = (allPayments ?? []).filter((p: any) => p.tipo === 'renda' || !p.tipo)
+    const outrosPayments = (allPayments ?? [])
+      .filter((p: any) => p.tipo && p.tipo !== 'renda')
+      .map((p: any) => ({
+        ...p,
+        lease: leasesMap[p.lease_id] ?? null,
+      }))
+
+    const totalEsperado = (leases ?? []).reduce((s: number, l: any) => s + (l.monthly_rent ?? 0), 0)
+    const totalRecebido = rendaPayments.reduce((s: number, p: any) => s + (p.amount ?? 0), 0)
+    const totalOutros = outrosPayments.reduce((s: number, p: any) => s + (p.amount ?? 0), 0)
+
+    const pagosIds = new Set(rendaPayments.map((p: any) => p.lease_id))
+    const emFalta = (leases ?? []).filter((l: any) => !pagosIds.has(l.id))
+    const pagos = (leases ?? []).filter((l: any) => pagosIds.has(l.id))
+
+    setRendas({ totalEsperado, totalRecebido, totalOutros, emFalta, pagos, leases, payments: rendaPayments, outrosPayments })
+    setLoading(false)
   }
-
-  // Separar rendas de outros pagamentos
-  const rendaPayments = (allPayments ?? []).filter((p: any) => p.tipo === 'renda' || !p.tipo)
-  const outrosPayments = (allPayments ?? [])
-    .filter((p: any) => p.tipo && p.tipo !== 'renda')
-    .map((p: any) => ({
-      ...p,
-      lease: leasesMap[p.lease_id] ?? null,
-    }))
-
-  const totalEsperado = (leases ?? []).reduce((s: number, l: any) => s + (l.monthly_rent ?? 0), 0)
-  const totalRecebido = rendaPayments.reduce((s: number, p: any) => s + (p.amount ?? 0), 0)
-  const totalOutros = outrosPayments.reduce((s: number, p: any) => s + (p.amount ?? 0), 0)
-
-  const pagosIds = new Set(rendaPayments.map((p: any) => p.lease_id))
-  const emFalta = (leases ?? []).filter((l: any) => !pagosIds.has(l.id))
-  const pagos = (leases ?? []).filter((l: any) => pagosIds.has(l.id))
-
-  setRendas({ totalEsperado, totalRecebido, totalOutros, emFalta, pagos, leases, payments: rendaPayments, outrosPayments })
-  setLoading(false)
-}
 
   async function fetchContaCorrente(tenant: any) {
     setContaCorrenteModal(tenant)
@@ -139,21 +137,24 @@ export default function RelatoriosPage() {
 
   async function fetchFinanceiro() {
     setLoading(true)
-    const startDate = `${selectedMonth}-01`
     const [y, m] = selectedMonth.split('-').map(Number)
-    const nextMonthDate = new Date(y, m, 1).toISOString().slice(0, 10)
+    // Usar strings de data diretas para evitar problemas de timezone
+    const startDate = `${selectedMonth}-01`
+    const endYear = m === 12 ? y + 1 : y
+    const endMonth = m === 12 ? 1 : m + 1
+    const endDate = `${endYear}-${String(endMonth).padStart(2, '0')}-01`
 
     const { data: payments } = await supabase
       .from('rent_payments')
       .select('amount')
       .gte('reference_month', startDate)
-      .lt('reference_month', nextMonthDate)
+      .lt('reference_month', endDate)
 
     const { data: despesas } = await supabase
       .from('expenses')
       .select('id, amount, category, description, expense_date, supplier, payment_method')
       .gte('expense_date', startDate)
-      .lt('expense_date', nextMonthDate)
+      .lt('expense_date', endDate)
       .order('expense_date', { ascending: false })
 
     const receitas = (payments ?? []).reduce((s: number, p: any) => s + (p.amount ?? 0), 0)
@@ -290,10 +291,9 @@ export default function RelatoriosPage() {
                   </div>
                 </div>
 
-                {/* Card extras */}
                 {rendas.totalOutros > 0 && (
                   <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-                    <p className="text-xs text-blue-600 font-medium mb-1">💡 Outros recebimentos este mês (luz, caução, extra...)</p>
+                    <p className="text-xs text-blue-600 font-medium mb-1">💡 Outros recebimentos este mês (luz, caução, adiantamento...)</p>
                     <p className="text-xl font-bold text-blue-700">{fmt(rendas.totalOutros)}</p>
                   </div>
                 )}
@@ -356,7 +356,6 @@ export default function RelatoriosPage() {
                   </div>
                 )}
 
-                {/* Outros pagamentos */}
                 {rendas.outrosPayments?.length > 0 && (
                   <div className="bg-white border border-gray-200 rounded-xl p-4">
                     <h3 className="text-sm font-semibold text-gray-700 mb-3">💡 Outros pagamentos do mês</h3>
@@ -371,7 +370,9 @@ export default function RelatoriosPage() {
                               {p.lease?.space?.ref} · {TIPO_LABELS[p.tipo] ?? p.tipo} · {p.payment_method === 'dinheiro' ? '💵 Dinheiro' : '🏦 Banco'}
                             </p>
                           </div>
-                          <span className="text-sm font-semibold text-blue-600">{fmt(p.amount ?? 0)}</span>
+                          <span className={`text-sm font-semibold ${p.tipo === 'adiantamento' ? 'text-purple-600' : 'text-blue-600'}`}>
+                            {fmt(p.amount ?? 0)}
+                          </span>
                         </div>
                       ))}
                     </div>
@@ -648,7 +649,9 @@ export default function RelatoriosPage() {
                         {p.tipo && p.tipo !== 'renda' ? ` · ${TIPO_LABELS[p.tipo] ?? p.tipo}` : ''}
                       </p>
                     </div>
-                    <span className="text-sm font-semibold text-emerald-600">{fmt(p.amount ?? 0)}</span>
+                    <span className={`text-sm font-semibold ${p.tipo === 'adiantamento' ? 'text-purple-600' : 'text-emerald-600'}`}>
+                      {fmt(p.amount ?? 0)}
+                    </span>
                   </div>
                 ))}
                 <div className="flex justify-between items-center pt-2 border-t border-gray-200 mt-2">
