@@ -314,19 +314,6 @@ export default function NotasPage() {
                               className="p-1.5 text-gray-400 hover:text-blue-500 hover:bg-white/50 rounded-lg transition-colors">
                               <Edit2 className="w-4 h-4" />
                             </button>
-                            {showArchived ? (
-                              <button onClick={() => handleRestore(note.id)}
-                                title="Restaurar"
-                                className="p-1.5 text-gray-400 hover:text-emerald-500 hover:bg-white/50 rounded-lg transition-colors">
-                                <ArchiveRestore className="w-4 h-4" />
-                              </button>
-                            ) : (
-                              <button onClick={() => handleArchive(note.id)}
-                                title="Arquivar"
-                                className="p-1.5 text-gray-400 hover:text-blue-500 hover:bg-white/50 rounded-lg transition-colors">
-                                <Archive className="w-4 h-4" />
-                              </button>
-                            )}
                             <button onClick={() => handleDismiss(note.id)}
                               title="Dispensar"
                               className="p-1.5 text-gray-400 hover:text-orange-500 hover:bg-white/50 rounded-lg transition-colors">
@@ -338,6 +325,19 @@ export default function NotasPage() {
                               <Trash2 className="w-4 h-4" />
                             </button>
                           </>
+                        )}
+                        {showArchived ? (
+                          <button onClick={() => handleRestore(note.id)}
+                            title="Restaurar"
+                            className="p-1.5 text-gray-400 hover:text-emerald-500 hover:bg-white/50 rounded-lg transition-colors">
+                            <ArchiveRestore className="w-4 h-4" />
+                          </button>
+                        ) : (
+                          <button onClick={() => handleArchive(note.id)}
+                            title="Arquivar"
+                            className="p-1.5 text-gray-400 hover:text-blue-500 hover:bg-white/50 rounded-lg transition-colors">
+                            <Archive className="w-4 h-4" />
+                          </button>
                         )}
                         <button onClick={() => toggleExpand(note.id)}
                           title="Comentários"
