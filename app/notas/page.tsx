@@ -4,7 +4,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatDate } from '@/lib/utils'
-import { Plus, Edit2, Trash2, Bell, BellOff, CheckCircle, NotebookPen, User, Send, MessageSquare, X } from 'lucide-react'
+import { Plus, Edit2, Trash2, Bell, BellOff, CheckCircle, NotebookPen, User, Send, MessageSquare, X, Archive, ArchiveRestore } from 'lucide-react'
 import NoteModal from './NoteModal'
 import { useAuth } from '@/lib/auth-context'
 
@@ -55,6 +55,7 @@ export default function NotasPage() {
   const [showModal, setShowModal] = useState(false)
   const [editNote, setEditNote] = useState<any>(null)
   const [filterType, setFilterType] = useState<string>('all')
+  const [showArchived, setShowArchived] = useState(false)
   const [expandedNote, setExpandedNote] = useState<string | null>(null)
   const [comments, setComments] = useState<Record<string, any[]>>({})
   const [newComment, setNewComment] = useState<Record<string, string>>({})
@@ -63,7 +64,7 @@ export default function NotasPage() {
   const [editingCommentText, setEditingCommentText] = useState<string>('')
   const [savingEditComment, setSavingEditComment] = useState(false)
 
-  useEffect(() => { fetchNotes() }, [])
+  useEffect(() => { fetchNotes() }, [showArchived])
 
   async function fetchNotes() {
     setLoading(true)
@@ -71,6 +72,7 @@ export default function NotasPage() {
       .from('notes')
       .select('*, space:spaces(ref), tenant:tenants(name), creator:profiles!notes_created_by_fkey(name)')
       .eq('dismissed', false)
+      .eq('archived', showArchived)
       .order('note_date', { ascending: false })
       .order('note_time', { ascending: false })
     setNotes(data ?? [])
@@ -153,6 +155,16 @@ export default function NotasPage() {
     fetchNotes()
   }
 
+  async function handleArchive(id: string) {
+    await supabase.from('notes').update({ archived: true }).eq('id', id)
+    fetchNotes()
+  }
+
+  async function handleRestore(id: string) {
+    await supabase.from('notes').update({ archived: false }).eq('id', id)
+    fetchNotes()
+  }
+
   // CORRIGIDO: o filtro "Lembretes" mostra notas do tipo lembrete
   // E também qualquer nota que tenha um lembrete associado (has_reminder = true)
   const filtered = notes.filter(n => {
@@ -175,12 +187,18 @@ export default function NotasPage() {
             <NotebookPen className="w-6 h-6 text-emerald-600" />
             <div>
               <h1 className="text-2xl font-bold text-gray-900">Notas</h1>
-              <p className="text-sm text-gray-500 mt-0.5">{notes.length} nota(s) ativa(s)</p>
+              <p className="text-sm text-gray-500 mt-0.5">{notes.length} nota(s) {showArchived ? 'arquivada(s)' : 'ativa(s)'}</p>
             </div>
           </div>
-          <button onClick={() => { setEditNote(null); setShowModal(true) }} className="btn-primary">
-            <Plus className="w-4 h-4" /> Nova Nota
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setShowArchived(v => !v)} className="btn-secondary">
+              {showArchived ? <NotebookPen className="w-4 h-4" /> : <Archive className="w-4 h-4" />}
+              {showArchived ? 'Notas ativas' : 'Notas arquivadas'}
+            </button>
+            <button onClick={() => { setEditNote(null); setShowModal(true) }} className="btn-primary">
+              <Plus className="w-4 h-4" /> Nova Nota
+            </button>
+          </div>
         </div>
 
         {pendingReminders > 0 && (
@@ -214,7 +232,7 @@ export default function NotasPage() {
         ) : filtered.length === 0 ? (
           <div className="text-center py-16 text-gray-400">
             <NotebookPen className="w-12 h-12 mx-auto mb-3 opacity-30" />
-            <p className="text-sm">Nenhuma nota encontrada.</p>
+            <p className="text-sm">{showArchived ? 'Nenhuma nota arquivada.' : 'Nenhuma nota encontrada.'}</p>
           </div>
         ) : (
           <div className="space-y-3">
@@ -296,6 +314,19 @@ export default function NotasPage() {
                               className="p-1.5 text-gray-400 hover:text-blue-500 hover:bg-white/50 rounded-lg transition-colors">
                               <Edit2 className="w-4 h-4" />
                             </button>
+                            {showArchived ? (
+                              <button onClick={() => handleRestore(note.id)}
+                                title="Restaurar"
+                                className="p-1.5 text-gray-400 hover:text-emerald-500 hover:bg-white/50 rounded-lg transition-colors">
+                                <ArchiveRestore className="w-4 h-4" />
+                              </button>
+                            ) : (
+                              <button onClick={() => handleArchive(note.id)}
+                                title="Arquivar"
+                                className="p-1.5 text-gray-400 hover:text-blue-500 hover:bg-white/50 rounded-lg transition-colors">
+                                <Archive className="w-4 h-4" />
+                              </button>
+                            )}
                             <button onClick={() => handleDismiss(note.id)}
                               title="Dispensar"
                               className="p-1.5 text-gray-400 hover:text-orange-500 hover:bg-white/50 rounded-lg transition-colors">
