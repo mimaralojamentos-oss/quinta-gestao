@@ -9,6 +9,7 @@ interface Props {
   tenant: Tenant | null
   onClose: () => void
   onSaved: () => void
+  initialTab?: 'dados' | 'espacos' | 'conta'
 }
 
 const tipoConfig = {
@@ -36,13 +37,13 @@ interface PaymentRow {
   remainingAmount?: number
 }
 
-export default function TenantModal({ tenant, onClose, onSaved }: Props) {
+export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Props) {
   const isNew = !tenant
 
   const [createMode, setCreateMode] = useState<'escolha' | 'manual' | 'ocr'>('escolha')
   const [step, setStep] = useState<1 | 2>(1)
   const [newTenantId, setNewTenantId] = useState<string | null>(null)
-  const [tab, setTab] = useState<'dados' | 'espacos' | 'conta'>('dados')
+  const [tab, setTab] = useState<'dados' | 'espacos' | 'conta'>(initialTab ?? 'dados')
 
   const [form, setForm] = useState({
     name: tenant?.name ?? '',
