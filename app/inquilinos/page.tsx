@@ -144,7 +144,12 @@ export default function InquilinosPage() {
         .filter(c => leaseIds.includes(c.lease_id))
         .reduce((sum, c) => sum + (c.amount ?? 0), 0)
 
-      return { ...t, leases, spaces, debt: explicitDebt + missingDebt + manualDebt + elecDebt }
+      // Adiantamentos disponíveis (crédito do inquilino)
+      const totalAdvance = (paymentsData ?? [])
+        .filter(p => leaseIds.includes(p.lease_id) && p.tipo === 'adiantamento')
+        .reduce((sum, p) => sum + (p.amount ?? 0), 0)
+
+      return { ...t, leases, spaces, debt: explicitDebt + missingDebt + manualDebt + elecDebt - totalAdvance }
     })
     setTenants(tenantsWithData)
     setLoading(false)
@@ -254,7 +259,7 @@ export default function InquilinosPage() {
     const debt = t.debt ?? 0
     let matchDebt = true
     if (filterDebt === 'com_divida') matchDebt = debt > 0
-    else if (filterDebt === 'sem_divida') matchDebt = debt === 0
+    else if (filterDebt === 'sem_divida') matchDebt = debt <= 0
     const activeLease = t.leases?.find(l => l.status === 'ativo')
     let matchContract = true
     if (filterContract !== 'all' && activeLease?.end_date) {
@@ -449,6 +454,12 @@ export default function InquilinosPage() {
                             onClick={() => { setEditTenant(tenant); setOpenTab('conta'); setShowTenantModal(true) }}
                             className="inline-flex items-center gap-1 text-sm font-semibold text-red-600 bg-red-50 px-2 py-0.5 rounded-full hover:bg-red-100 transition-colors cursor-pointer">
                             {formatCurrency(tenant.debt!)}
+                          </button>
+                        ) : (tenant.debt ?? 0) < 0 ? (
+                          <button
+                            onClick={() => { setEditTenant(tenant); setOpenTab('conta'); setShowTenantModal(true) }}
+                            className="inline-flex items-center gap-1 text-sm font-semibold text-purple-600 bg-purple-50 px-2 py-0.5 rounded-full hover:bg-purple-100 transition-colors cursor-pointer">
+                            💰 +{formatCurrency(Math.abs(tenant.debt!))}
                           </button>
                         ) : (
                           <button
