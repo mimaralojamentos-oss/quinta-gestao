@@ -442,15 +442,21 @@ export default function InquilinosPage() {
                       <td className="table-cell font-medium">
                         {activeLease ? formatCurrency(activeLease.monthly_rent) : '—'}
                       </td>
-                      <td className="table-cell">
-                        {hasDebt ? (
-                          <span className="inline-flex items-center gap-1 text-sm font-semibold text-red-600 bg-red-50 px-2 py-0.5 rounded-full">
-                            {formatCurrency(tenant.debt!)}
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center text-sm text-emerald-600 font-medium">✓ Sem dívida</span>
-                        )}
-                      </td>
+                     <td className="table-cell">
+  {hasDebt ? (
+    <button
+      onClick={() => { setEditTenant(tenant); setShowTenantModal(true) }}
+      className="inline-flex items-center gap-1 text-sm font-semibold text-red-600 bg-red-50 px-2 py-0.5 rounded-full hover:bg-red-100 transition-colors cursor-pointer">
+      {formatCurrency(tenant.debt!)}
+    </button>
+  ) : (
+    <button
+      onClick={() => { setEditTenant(tenant); setShowTenantModal(true) }}
+      className="inline-flex items-center text-sm text-emerald-600 font-medium hover:underline cursor-pointer">
+      ✓ Sem dívida
+    </button>
+  )}
+</td>
                       <td className="table-cell text-sm">
                         {activeLease?.start_date ? (
                           <div>
