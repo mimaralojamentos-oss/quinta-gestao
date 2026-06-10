@@ -17,6 +17,7 @@ const tipoConfig = {
   caucao: { label: '🔒 Caução' },
   extra:  { label: '➕ Extra' },
   luz:    { label: '⚡ Luz' },
+  adiantamento: { label: '💰 Adiantamento' },
   divida: { label: '⚠️ Dívida' },
   eletricidade: { label: '⚡ Eletricidade' },
 }
@@ -167,13 +168,13 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
     if (leaseIds.length > 0) {
       const { data: elecData } = await supabase
         .from('electricity_charges')
-        .select('id, lease_id, amount, charge_date, reading_date')
+        .select('id, lease_id, amount, charge_date, reference_month')
         .in('lease_id', leaseIds)
         .eq('paid', false)
 
       for (const ec of elecData ?? []) {
         const lease = (leasesData ?? []).find(l => l.id === ec.lease_id)
-        const refDate = ec.charge_date ?? ec.reading_date ?? new Date().toISOString().slice(0, 10)
+        const refDate = ec.charge_date ?? ec.reference_month ?? new Date().toISOString().slice(0, 10)
         elecChargeRows.push({
           id: ec.id,
           lease_id: ec.lease_id,
@@ -309,14 +310,18 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
     await fetchPayments()
   }
 
-  // totalDebt inclui: rendas em falta + dívidas manuais + eletricidade por pagar
+  // totalDebt inclui: rendas em falta + dívidas manuais + eletricidade por pagar, deduzindo adiantamentos disponíveis (crédito do inquilino)
+  const totalAdvance = payments
+    .filter(p => p.tipo === 'adiantamento')
+    .reduce((sum, p) => sum + (p.amount ?? 0), 0)
+
   const totalDebt = payments
     .filter(p => !p.payment_date || p.payment_date === null)
     .filter(p => p.payment_date !== 'liquidada')
     .reduce((sum, p) => {
       if (p.isManualDebt) return sum + (p.remainingAmount ?? 0)
       return sum + (p.amount ?? 0)
-    }, 0)
+    }, 0) - totalAdvance
 
   const getTitle = () => {
     if (!isNew) return tenant!.name
@@ -354,6 +359,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
             <button onClick={() => setTab('conta')} className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-md text-sm font-medium transition-colors ${tab === 'conta' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
               <FileText className="w-4 h-4" /> Conta Corrente
               {totalDebt > 0 && <span className="bg-red-500 text-white text-xs px-1.5 py-0.5 rounded-full">{formatCurrency(totalDebt)}</span>}
+              {totalDebt < 0 && <span className="bg-purple-500 text-white text-xs px-1.5 py-0.5 rounded-full">+{formatCurrency(Math.abs(totalDebt))}</span>}
             </button>
           </div>
         )}
@@ -535,9 +541,11 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                   <p className="text-xs text-gray-500 mb-1">Total pago</p>
                   <p className="font-semibold text-gray-900">{formatCurrency(payments.filter(p => p.payment_date && p.payment_date !== 'liquidada').reduce((s, p) => s + p.amount, 0))}</p>
                 </div>
-                <div className="bg-red-50 rounded-lg p-3 text-center">
-                  <p className="text-xs text-gray-500 mb-1">Em dívida</p>
-                  <p className={`font-semibold ${totalDebt > 0 ? 'text-red-600' : 'text-emerald-600'}`}>{totalDebt > 0 ? formatCurrency(totalDebt) : '✓ Sem dívida'}</p>
+                <div className={`rounded-lg p-3 text-center ${totalDebt > 0 ? 'bg-red-50' : totalDebt < 0 ? 'bg-purple-50' : 'bg-emerald-50'}`}>
+                  <p className="text-xs text-gray-500 mb-1">{totalDebt < 0 ? '💰 Crédito do inquilino' : 'Em dívida'}</p>
+                  <p className={`font-semibold ${totalDebt > 0 ? 'text-red-600' : totalDebt < 0 ? 'text-purple-700' : 'text-emerald-600'}`}>
+                    {totalDebt > 0 ? formatCurrency(totalDebt) : totalDebt < 0 ? formatCurrency(Math.abs(totalDebt)) : '✓ Sem dívida'}
+                  </p>
                 </div>
                 <div className="bg-gray-50 rounded-lg p-3 text-center">
                   <p className="text-xs text-gray-500 mb-1">Nº registos</p>
@@ -565,7 +573,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                     <div>
                       <label className="label">Tipo</label>
                       <div className="grid grid-cols-4 gap-2">
-                        {Object.entries(tipoConfig).filter(([k]) => k !== 'divida' && k !== 'eletricidade').map(([key, cfg]) => (
+                        {Object.entries(tipoConfig).filter(([k]) => k !== 'divida' && k !== 'eletricidade' && k !== 'adiantamento').map(([key, cfg]) => (
                           <button key={key} onClick={() => setPaymentForm(f => ({ ...f, tipo: key }))}
                             className={`py-2 rounded-lg border text-xs font-medium transition-colors ${paymentForm.tipo === key ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
                             {cfg.label}
@@ -629,9 +637,10 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                     return (
                       <div key={p.id ?? `row-${i}`}
                         className={`flex items-center justify-between p-3 rounded-lg border ${
-                          isPago || isLiquidada ? 'border-gray-100 bg-white'
+                          p.tipo === 'adiantamento' ? 'border-purple-200 bg-purple-50'
+                          : isPago || isLiquidada ? 'border-gray-100 bg-white'
                           : p.isMissing ? 'border-orange-200 bg-orange-50'
-                          : p.isElecCharge ? 'border-yellow-200 bg-yellow-50'
+                          : p.isElecCharge ? 'border-red-200 bg-red-50'
                           : p.isManualDebt ? 'border-red-200 bg-red-50'
                           : 'border-red-100 bg-red-50'
                         }`}>
@@ -642,17 +651,20 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                               p.tipo === 'caucao' ? 'bg-blue-100 text-blue-700'
                               : p.tipo === 'extra' ? 'bg-orange-100 text-orange-700'
                               : p.tipo === 'luz' ? 'bg-yellow-100 text-yellow-700'
-                              : p.tipo === 'eletricidade' ? 'bg-yellow-100 text-yellow-700'
+                              : p.tipo === 'eletricidade' ? 'bg-red-100 text-red-700'
                               : p.tipo === 'divida' ? 'bg-red-100 text-red-700'
+                              : p.tipo === 'adiantamento' ? 'bg-purple-100 text-purple-700'
                               : 'bg-gray-100 text-gray-600'
                             }`}>
                               {tipoConfig[p.tipo as keyof typeof tipoConfig]?.label ?? '🏠 Renda'}
                             </span>
                           </p>
-                          {p.isManualDebt ? (
+                          {p.tipo === 'adiantamento' ? (
+                            <p className="text-xs text-purple-600 font-medium">💰 Crédito do inquilino · pago em {formatDate(p.payment_date!)} · {p.payment_method}</p>
+                          ) : p.isManualDebt ? (
                             <p className="text-xs text-gray-600">{p.notes}</p>
                           ) : p.isElecCharge ? (
-                            <p className="text-xs text-yellow-700 font-medium">⚡ Eletricidade por pagar</p>
+                            <p className="text-xs text-red-600 font-medium">⚡ Eletricidade por pagar</p>
                           ) : p.payment_date ? (
                             <p className="text-xs text-gray-500">Pago em {formatDate(p.payment_date)} · {p.payment_method}</p>
                           ) : p.isMissing ? (
@@ -667,8 +679,12 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                           )}
                         </div>
                         <div className="flex items-center gap-2">
-                          <span className={`font-semibold text-sm ${isPago || isLiquidada ? 'text-gray-900' : 'text-red-600'}`}>
-                            {formatCurrency(p.amount)}
+                          <span className={`font-semibold text-sm ${
+                            p.tipo === 'adiantamento' ? 'text-purple-700'
+                            : isPago || isLiquidada ? 'text-gray-900'
+                            : 'text-red-600'
+                          }`}>
+                            {p.tipo === 'adiantamento' ? '+' : ''}{formatCurrency(p.amount)}
                           </span>
                           {!p.isMissing && !p.isManualDebt && !p.isElecCharge && p.id && (
                             <>
