@@ -17,6 +17,7 @@ const tipoConfig = {
   caucao: { label: '🔒 Caução / Sinal', color: 'bg-blue-600 text-white border-blue-600' },
   extra:  { label: '➕ Extra', color: 'bg-orange-500 text-white border-orange-500' },
   luz:    { label: '⚡ Luz', color: 'bg-yellow-500 text-white border-yellow-500' },
+  adiantamento: { label: '💰 Adiantamento', color: 'bg-purple-600 text-white border-purple-600' },
 }
 
 const tipoLabels: Record<string, string> = {
@@ -24,6 +25,7 @@ const tipoLabels: Record<string, string> = {
   caucao: '🔒 Caução',
   extra: '➕ Extra',
   luz: '⚡ Luz',
+  adiantamento: '💰 Adiantamento',
 }
 
 interface DebtItem {

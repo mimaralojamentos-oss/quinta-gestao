@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase'
 import { formatCurrency, getMonthLabel, getCurrentMonth } from '@/lib/utils'
 import { Plus, ChevronLeft, ChevronRight, CheckCircle, Clock, Search, SlidersHorizontal, X, ArrowUpDown, ArrowUp, ArrowDown, ChevronDown } from 'lucide-react'
 import PaymentModal from './PaymentModal'
+import AdvancePaymentModal from './AdvancePaymentModal'
 import { useAuth } from '@/lib/auth-context'
 
 interface LeaseWithDetails {
@@ -30,6 +31,7 @@ const tipoLabels: Record<string, string> = {
   caucao: '🔒 Caução',
   extra: '➕ Extra',
   luz: '⚡ Luz',
+  adiantamento: '💰 Adiantamento',
 }
 
 type SortField = 'space' | 'tenant' | 'rent' | 'state' | 'balance' | 'debt' | null
@@ -59,6 +61,7 @@ export default function PagamentosPage() {
   const [loading, setLoading] = useState(true)
   const [currentMonth, setCurrentMonth] = useState(getCurrentMonth())
   const [showModal, setShowModal] = useState(false)
+  const [showAdvanceModal, setShowAdvanceModal] = useState(false)
   const [selectedLease, setSelectedLease] = useState<LeaseWithDetails | null>(null)
   const [summary, setSummary] = useState({ expected: 0, received: 0, pending: 0, inCash: 0, inBank: 0, totalDebt: 0 })
 
@@ -224,10 +227,18 @@ export default function PagamentosPage() {
       <div className="p-8">
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-2xl font-bold text-gray-900">Rendas & Pagamentos</h1>
-          <div className="flex items-center gap-3 bg-white border border-gray-200 rounded-lg px-3 py-1.5">
-            <button onClick={() => changeMonth(-1)} className="text-gray-500 hover:text-gray-700"><ChevronLeft className="w-4 h-4" /></button>
-            <span className="font-medium text-gray-800 min-w-[140px] text-center text-sm">{getMonthLabel(currentMonth)}</span>
-            <button onClick={() => changeMonth(1)} className="text-gray-500 hover:text-gray-700"><ChevronRight className="w-4 h-4" /></button>
+          <div className="flex items-center gap-3">
+            {isAdmin && (
+              <button onClick={() => setShowAdvanceModal(true)}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-purple-600 text-white hover:bg-purple-700 transition-colors">
+                <Plus className="w-4 h-4" /> Adiantamento
+              </button>
+            )}
+            <div className="flex items-center gap-3 bg-white border border-gray-200 rounded-lg px-3 py-1.5">
+              <button onClick={() => changeMonth(-1)} className="text-gray-500 hover:text-gray-700"><ChevronLeft className="w-4 h-4" /></button>
+              <span className="font-medium text-gray-800 min-w-[140px] text-center text-sm">{getMonthLabel(currentMonth)}</span>
+              <button onClick={() => changeMonth(1)} className="text-gray-500 hover:text-gray-700"><ChevronRight className="w-4 h-4" /></button>
+            </div>
           </div>
         </div>
 
@@ -397,7 +408,7 @@ export default function PagamentosPage() {
                                 <span className={`text-xs px-2 py-0.5 rounded-full ${p.payment_method === 'dinheiro' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
                                   {p.payment_method === 'dinheiro' ? '💵' : '🏦'}
                                 </span>
-                                <span className={`text-xs px-2 py-0.5 rounded-full ${p.tipo === 'caucao' ? 'bg-blue-100 text-blue-700' : p.tipo === 'extra' ? 'bg-orange-100 text-orange-700' : p.tipo === 'luz' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-600'}`}>
+                                <span className={`text-xs px-2 py-0.5 rounded-full ${p.tipo === 'caucao' ? 'bg-blue-100 text-blue-700' : p.tipo === 'extra' ? 'bg-orange-100 text-orange-700' : p.tipo === 'luz' ? 'bg-yellow-100 text-yellow-700' : p.tipo === 'adiantamento' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-600'}`}>
                                   {tipoLabels[p.tipo] ?? '🏠 Renda'}
                                 </span>
                               </div>
@@ -440,6 +451,12 @@ export default function PagamentosPage() {
         <PaymentModal lease={selectedLease} currentMonth={currentMonth}
           onClose={() => setShowModal(false)}
           onSaved={() => { setShowModal(false); fetchData() }} />
+      )}
+
+      {showAdvanceModal && isAdmin && (
+        <AdvancePaymentModal
+          onClose={() => setShowAdvanceModal(false)}
+          onSaved={() => { setShowAdvanceModal(false); fetchData() }} />
       )}
     </AppLayout>
   )
