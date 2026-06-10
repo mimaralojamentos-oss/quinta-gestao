@@ -57,6 +57,7 @@ export default function InquilinosPage() {
   const [editTenant, setEditTenant] = useState<Tenant | null>(null)
   const [selectedTenant, setSelectedTenant] = useState<Tenant | null>(null)
   const [allSpaceRefs, setAllSpaceRefs] = useState<string[]>([])
+  const [openTab, setOpenTab] = useState<'dados' | 'espacos' | 'conta'>('dados')
 
   // Modal de dívidas
   const [debtTenant, setDebtTenant] = useState<TenantWithLease | null>(null)
@@ -442,21 +443,21 @@ export default function InquilinosPage() {
                       <td className="table-cell font-medium">
                         {activeLease ? formatCurrency(activeLease.monthly_rent) : '—'}
                       </td>
-                     <td className="table-cell">
-  {hasDebt ? (
-    <button
-      onClick={() => { setEditTenant(tenant); setShowTenantModal(true) }}
-      className="inline-flex items-center gap-1 text-sm font-semibold text-red-600 bg-red-50 px-2 py-0.5 rounded-full hover:bg-red-100 transition-colors cursor-pointer">
-      {formatCurrency(tenant.debt!)}
-    </button>
-  ) : (
-    <button
-      onClick={() => { setEditTenant(tenant); setShowTenantModal(true) }}
-      className="inline-flex items-center text-sm text-emerald-600 font-medium hover:underline cursor-pointer">
-      ✓ Sem dívida
-    </button>
-  )}
-</td>
+                      <td className="table-cell">
+                        {hasDebt ? (
+                          <button
+                            onClick={() => { setEditTenant(tenant); setOpenTab('conta'); setShowTenantModal(true) }}
+                            className="inline-flex items-center gap-1 text-sm font-semibold text-red-600 bg-red-50 px-2 py-0.5 rounded-full hover:bg-red-100 transition-colors cursor-pointer">
+                            {formatCurrency(tenant.debt!)}
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => { setEditTenant(tenant); setOpenTab('conta'); setShowTenantModal(true) }}
+                            className="inline-flex items-center text-sm text-emerald-600 font-medium hover:underline cursor-pointer">
+                            ✓ Sem dívida
+                          </button>
+                        )}
+                      </td>
                       <td className="table-cell text-sm">
                         {activeLease?.start_date ? (
                           <div>
@@ -481,7 +482,7 @@ export default function InquilinosPage() {
                       {isAdmin && (
                         <td className="table-cell">
                           <div className="flex gap-2">
-                            <button onClick={() => { setEditTenant(tenant); setShowTenantModal(true) }}
+                            <button onClick={() => { setEditTenant(tenant); setOpenTab('dados'); setShowTenantModal(true) }}
                               className="text-xs text-emerald-600 hover:underline font-medium">Editar</button>
                             <button onClick={() => { setSelectedTenant(tenant); setShowLeaseModal(true) }}
                               className="text-xs text-blue-600 hover:underline font-medium">Contrato</button>
@@ -654,8 +655,9 @@ export default function InquilinosPage() {
       )}
 
       {showTenantModal && isAdmin && (
-        <TenantModal tenant={editTenant} onClose={() => setShowTenantModal(false)}
-          onSaved={() => { setShowTenantModal(false); fetchTenants() }} />
+        <TenantModal tenant={editTenant} onClose={() => { setShowTenantModal(false); setOpenTab('dados') }}
+          onSaved={() => { setShowTenantModal(false); fetchTenants(); setOpenTab('dados') }}
+          initialTab={openTab} />
       )}
 
       {showLeaseModal && selectedTenant && isAdmin && (
