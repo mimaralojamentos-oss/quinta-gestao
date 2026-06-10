@@ -68,11 +68,12 @@ export default function RelatoriosPage() {
     const endMonth = m === 12 ? 1 : m + 1
     const nextMonthDate = `${endYear}-${String(endMonth).padStart(2, '0')}-01`
 
-    // Buscar contratos ativos com inquilino e espaço
+    // Buscar contratos ativos cujo início é antes do fim do mês selecionado
     const { data: leasesData } = await supabase
       .from('leases')
-      .select('id, monthly_rent, space:spaces(ref), tenant:tenants(id, name)')
+      .select('id, monthly_rent, start_date, space:spaces(ref), tenant:tenants(id, name)')
       .eq('status', 'ativo')
+      .lt('start_date', nextMonthDate)
 
     // Buscar todos os pagamentos do mês selecionado
     const { data: allPayments } = await supabase
@@ -87,11 +88,21 @@ export default function RelatoriosPage() {
       leasesMap[l.id] = l
     }
 
+    // Buscar também leases não ativos para enriquecer outros pagamentos
+    const { data: allLeasesData } = await supabase
+      .from('leases')
+      .select('id, space:spaces(ref), tenant:tenants(name)')
+
+    const allLeasesMap: Record<string, any> = {}
+    for (const l of allLeasesData ?? []) {
+      allLeasesMap[l.id] = l
+    }
+
     // Separar rendas de outros pagamentos
     const rendaPayments = (allPayments ?? []).filter((p: any) => p.tipo === 'renda' || !p.tipo)
     const outrosPayments = (allPayments ?? [])
       .filter((p: any) => p.tipo && p.tipo !== 'renda')
-      .map((p: any) => ({ ...p, lease: leasesMap[p.lease_id] ?? null }))
+      .map((p: any) => ({ ...p, lease: allLeasesMap[p.lease_id] ?? null }))
 
     const totalEsperado = (leasesData ?? []).reduce((s: number, l: any) => s + (l.monthly_rent ?? 0), 0)
     const totalRecebido = rendaPayments.reduce((s: number, p: any) => s + (p.amount ?? 0), 0)
@@ -236,44 +247,42 @@ export default function RelatoriosPage() {
 
   return (
     <AppLayout>
-      <div className="p-8">
-        <div className="flex items-center gap-3 mb-6">
-          <BarChart3 className="w-6 h-6 text-emerald-600" />
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">Relatórios</h1>
-            <p className="text-sm text-gray-500 mt-0.5">Resumos e análises da quinta</p>
+      {/* Cabeçalho fixo */}
+      <div className="sticky top-0 z-10 bg-white border-b border-gray-100 px-8 py-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <BarChart3 className="w-5 h-5 text-emerald-600" />
+            <h1 className="text-xl font-bold text-gray-900">Relatórios</h1>
           </div>
-        </div>
-
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-          {REPORTS.map(r => (
-            <button key={r.key} onClick={() => setActiveReport(r.key)}
-              className={`flex items-center gap-3 p-4 rounded-xl border text-left transition-all ${activeReport === r.key ? 'border-emerald-500 bg-emerald-50 shadow-sm' : 'border-gray-200 bg-white hover:bg-gray-50'}`}>
-              <div className={`w-9 h-9 rounded-lg ${activeReport === r.key ? r.bg : 'bg-gray-100'} flex items-center justify-center flex-shrink-0`}>
-                <r.icon className={`w-4 h-4 ${activeReport === r.key ? r.color : 'text-gray-400'}`} />
+          <div className="flex items-center gap-3">
+            {showMonthPicker && (
+              <div className="flex items-center gap-2">
+                <label className="text-sm font-medium text-gray-600">Mês:</label>
+                <div className="relative">
+                  <select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)}
+                    className="appearance-none bg-white border border-gray-200 rounded-lg px-3 py-1.5 pr-8 text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                    {MONTHS.map(m => (
+                      <option key={m.value} value={m.value}>{m.label}</option>
+                    ))}
+                  </select>
+                  <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                </div>
               </div>
-              <span className={`text-sm font-medium ${activeReport === r.key ? 'text-gray-900' : 'text-gray-600'}`}>
-                {r.label}
-              </span>
-            </button>
-          ))}
-        </div>
-
-        {showMonthPicker && (
-          <div className="flex items-center gap-3 mb-5">
-            <label className="text-sm font-medium text-gray-600">Mês:</label>
-            <div className="relative">
-              <select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)}
-                className="appearance-none bg-white border border-gray-200 rounded-lg px-3 py-2 pr-8 text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-emerald-500">
-                {MONTHS.map(m => (
-                  <option key={m.value} value={m.value}>{m.label}</option>
-                ))}
-              </select>
-              <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+            )}
+            <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
+              {REPORTS.map(r => (
+                <button key={r.key} onClick={() => setActiveReport(r.key)}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${activeReport === r.key ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                  <r.icon className={`w-3.5 h-3.5 ${activeReport === r.key ? r.color : ''}`} />
+                  {r.label}
+                </button>
+              ))}
             </div>
           </div>
-        )}
+        </div>
+      </div>
 
+      <div className="p-8">
         {loading ? (
           <div className="flex justify-center py-16">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600" />
@@ -324,14 +333,14 @@ export default function RelatoriosPage() {
 
                 {rendas.emFalta.length > 0 && (
                   <div className="bg-white border border-gray-200 rounded-xl p-4">
-                    <h3 className="text-sm font-semibold text-gray-700 mb-3">⚠️ Rendas em falta</h3>
-                    <div className="space-y-2">
+                    <h3 className="text-sm font-semibold text-gray-700 mb-3">⚠️ Rendas em falta ({rendas.emFalta.length})</h3>
+                    <div className="space-y-1">
                       {rendas.emFalta.map((l: any) => (
                         <div key={l.id}
                           onClick={() => fetchContaCorrente({ name: l.tenant?.name, leaseId: l.id, spaceRef: l.space?.ref })}
                           className="flex justify-between items-center py-2 border-b border-gray-50 last:border-0 cursor-pointer hover:bg-gray-50 rounded-lg px-2 transition-colors">
                           <div>
-                            <p className="text-sm font-medium text-gray-800 hover:text-emerald-600">{l.tenant?.name ?? '—'}</p>
+                            <p className="text-sm font-medium text-gray-800">{l.tenant?.name ?? '—'}</p>
                             <p className="text-xs text-gray-400">{l.space?.ref}</p>
                           </div>
                           <span className="text-sm font-semibold text-red-500">{fmt(l.monthly_rent ?? 0)}</span>
@@ -343,8 +352,8 @@ export default function RelatoriosPage() {
 
                 {rendas.pagos.length > 0 && (
                   <div className="bg-white border border-gray-200 rounded-xl p-4">
-                    <h3 className="text-sm font-semibold text-gray-700 mb-3">✅ Rendas pagas</h3>
-                    <div className="space-y-2">
+                    <h3 className="text-sm font-semibold text-gray-700 mb-3">✅ Rendas pagas ({rendas.pagos.length})</h3>
+                    <div className="space-y-1">
                       {rendas.pagos.map((l: any) => {
                         const p = rendas.payments.find((pay: any) => String(pay.lease_id) === String(l.id))
                         return (
@@ -352,8 +361,12 @@ export default function RelatoriosPage() {
                             onClick={() => fetchContaCorrente({ name: l.tenant?.name, leaseId: l.id, spaceRef: l.space?.ref })}
                             className="flex justify-between items-center py-2 border-b border-gray-50 last:border-0 cursor-pointer hover:bg-gray-50 rounded-lg px-2 transition-colors">
                             <div>
-                              <p className="text-sm font-medium text-gray-800 hover:text-emerald-600">{l.tenant?.name ?? '—'}</p>
-                              <p className="text-xs text-gray-400">{l.space?.ref} · {p?.payment_method === 'dinheiro' ? '💵 Dinheiro' : '🏦 Banco'}</p>
+                              <p className="text-sm font-medium text-gray-800">{l.tenant?.name ?? '—'}</p>
+                              <p className="text-xs text-gray-400">
+                                {l.space?.ref}
+                                {p?.payment_date ? ` · Pago em ${formatDate(p.payment_date)}` : ''}
+                                {p?.payment_method ? ` · ${p.payment_method === 'dinheiro' ? '💵 Dinheiro' : '🏦 Banco'}` : ''}
+                              </p>
                             </div>
                             <span className="text-sm font-semibold text-emerald-600">{fmt(p?.amount ?? 0)}</span>
                           </div>
@@ -365,8 +378,8 @@ export default function RelatoriosPage() {
 
                 {rendas.outrosPayments?.length > 0 && (
                   <div className="bg-white border border-gray-200 rounded-xl p-4">
-                    <h3 className="text-sm font-semibold text-gray-700 mb-3">💡 Outros pagamentos do mês</h3>
-                    <div className="space-y-2">
+                    <h3 className="text-sm font-semibold text-gray-700 mb-3">💡 Outros pagamentos do mês ({rendas.outrosPayments.length})</h3>
+                    <div className="space-y-1">
                       {rendas.outrosPayments.map((p: any) => (
                         <div key={p.id} className="flex justify-between items-center py-2 border-b border-gray-50 last:border-0 px-2">
                           <div>
@@ -374,7 +387,9 @@ export default function RelatoriosPage() {
                               {p.lease?.tenant?.name ?? '—'}
                             </p>
                             <p className="text-xs text-gray-400">
-                              {p.lease?.space?.ref} · {TIPO_LABELS[p.tipo] ?? p.tipo} · {p.payment_method === 'dinheiro' ? '💵 Dinheiro' : '🏦 Banco'}
+                              {p.lease?.space?.ref} · {TIPO_LABELS[p.tipo] ?? p.tipo}
+                              {p.payment_date ? ` · Pago em ${formatDate(p.payment_date)}` : ''}
+                              {p.payment_method ? ` · ${p.payment_method === 'dinheiro' ? '💵 Dinheiro' : '🏦 Banco'}` : ''}
                             </p>
                           </div>
                           <span className={`text-sm font-semibold ${p.tipo === 'adiantamento' ? 'text-purple-600' : 'text-blue-600'}`}>
