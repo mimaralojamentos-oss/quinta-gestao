@@ -64,45 +64,54 @@ export default function RelatoriosPage() {
     setLoading(true)
     const startDate = `${selectedMonth}-01`
     const [y, m] = selectedMonth.split('-').map(Number)
-    const nextMonthDate = new Date(y, m, 1).toISOString().slice(0, 10)
+    const endYear = m === 12 ? y + 1 : y
+    const endMonth = m === 12 ? 1 : m + 1
+    const nextMonthDate = `${endYear}-${String(endMonth).padStart(2, '0')}-01`
 
-    const { data: leases } = await supabase
+    // Buscar contratos ativos com inquilino e espaço
+    const { data: leasesData } = await supabase
       .from('leases')
       .select('id, monthly_rent, space:spaces(ref), tenant:tenants(id, name)')
       .eq('status', 'ativo')
 
+    // Buscar todos os pagamentos do mês selecionado
     const { data: allPayments } = await supabase
       .from('rent_payments')
       .select('*')
       .gte('reference_month', startDate)
       .lt('reference_month', nextMonthDate)
 
-    const { data: leasesForOthers } = await supabase
-      .from('leases')
-      .select('id, space:spaces(ref), tenant:tenants(name)')
-
+    // leasesMap para enriquecer outros pagamentos
     const leasesMap: Record<string, any> = {}
-    for (const l of leasesForOthers ?? []) {
+    for (const l of leasesData ?? []) {
       leasesMap[l.id] = l
     }
 
+    // Separar rendas de outros pagamentos
     const rendaPayments = (allPayments ?? []).filter((p: any) => p.tipo === 'renda' || !p.tipo)
     const outrosPayments = (allPayments ?? [])
       .filter((p: any) => p.tipo && p.tipo !== 'renda')
-      .map((p: any) => ({
-        ...p,
-        lease: leasesMap[p.lease_id] ?? null,
-      }))
+      .map((p: any) => ({ ...p, lease: leasesMap[p.lease_id] ?? null }))
 
-    const totalEsperado = (leases ?? []).reduce((s: number, l: any) => s + (l.monthly_rent ?? 0), 0)
+    const totalEsperado = (leasesData ?? []).reduce((s: number, l: any) => s + (l.monthly_rent ?? 0), 0)
     const totalRecebido = rendaPayments.reduce((s: number, p: any) => s + (p.amount ?? 0), 0)
     const totalOutros = outrosPayments.reduce((s: number, p: any) => s + (p.amount ?? 0), 0)
 
-    const pagosIds = new Set(rendaPayments.map((p: any) => p.lease_id))
-    const emFalta = (leases ?? []).filter((l: any) => !pagosIds.has(l.id))
-    const pagos = (leases ?? []).filter((l: any) => pagosIds.has(l.id))
+    // Comparar lease_id dos pagamentos com id dos contratos ativos
+    const pagosLeaseIds = new Set(rendaPayments.map((p: any) => String(p.lease_id)))
+    const emFalta = (leasesData ?? []).filter((l: any) => !pagosLeaseIds.has(String(l.id)))
+    const pagos = (leasesData ?? []).filter((l: any) => pagosLeaseIds.has(String(l.id)))
 
-    setRendas({ totalEsperado, totalRecebido, totalOutros, emFalta, pagos, leases, payments: rendaPayments, outrosPayments })
+    setRendas({
+      totalEsperado,
+      totalRecebido,
+      totalOutros,
+      emFalta,
+      pagos,
+      leases: leasesData,
+      payments: rendaPayments,
+      outrosPayments,
+    })
     setLoading(false)
   }
 
@@ -138,7 +147,6 @@ export default function RelatoriosPage() {
   async function fetchFinanceiro() {
     setLoading(true)
     const [y, m] = selectedMonth.split('-').map(Number)
-    // Usar strings de data diretas para evitar problemas de timezone
     const startDate = `${selectedMonth}-01`
     const endYear = m === 12 ? y + 1 : y
     const endMonth = m === 12 ? 1 : m + 1
@@ -272,7 +280,6 @@ export default function RelatoriosPage() {
           </div>
         ) : (
           <div>
-
             {/* RENDAS */}
             {activeReport === 'rendas' && rendas && (
               <div className="space-y-5">
@@ -339,7 +346,7 @@ export default function RelatoriosPage() {
                     <h3 className="text-sm font-semibold text-gray-700 mb-3">✅ Rendas pagas</h3>
                     <div className="space-y-2">
                       {rendas.pagos.map((l: any) => {
-                        const p = rendas.payments.find((pay: any) => pay.lease_id === l.id)
+                        const p = rendas.payments.find((pay: any) => String(pay.lease_id) === String(l.id))
                         return (
                           <div key={l.id}
                             onClick={() => fetchContaCorrente({ name: l.tenant?.name, leaseId: l.id, spaceRef: l.space?.ref })}
