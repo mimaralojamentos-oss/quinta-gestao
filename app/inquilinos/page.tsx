@@ -86,7 +86,7 @@ export default function InquilinosPage() {
     const { data: tenantsData } = await supabase.from('tenants').select('*').order('name')
     const { data: leasesData } = await supabase.from('leases').select('*, space:spaces(*)')
     const { data: spacesData } = await supabase.from('spaces').select('ref, type, tenant_id').not('tenant_id', 'is', null)
-    const { data: paymentsData } = await supabase.from('rent_payments').select('amount, lease_id, payment_date, reference_month, tipo')
+    const { data: paymentsData } = await supabase.from('rent_payments').select('amount, lease_id, payment_date, reference_month, tipo, used')
     const { data: debtsData } = await supabase.from('debts').select('id, tenant_id, original_amount')
     const { data: debtPaymentsData } = await supabase.from('debt_payments').select('debt_id, amount')
 
@@ -146,7 +146,7 @@ export default function InquilinosPage() {
 
       // Adiantamentos disponíveis (crédito do inquilino)
       const totalAdvance = (paymentsData ?? [])
-        .filter(p => leaseIds.includes(p.lease_id) && p.tipo === 'adiantamento')
+        .filter(p => leaseIds.includes(p.lease_id) && p.tipo === 'adiantamento' && !p.used)
         .reduce((sum, p) => sum + (p.amount ?? 0), 0)
 
       return { ...t, leases, spaces, debt: explicitDebt + missingDebt + manualDebt + elecDebt - totalAdvance }

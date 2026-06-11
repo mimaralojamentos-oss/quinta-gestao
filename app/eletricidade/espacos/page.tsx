@@ -61,6 +61,8 @@ export default function QuadrosEspacosPage() {
     reading_value: '',
     notes: '',
   })
+  const [editLeaseId, setEditLeaseId] = useState<string | null>(null)
+  const [editAdvance, setEditAdvance] = useState(0)
 
   // Configurações
   const [config, setConfig] = useState<ElectricityConfig | null>(null)
@@ -79,11 +81,6 @@ export default function QuadrosEspacosPage() {
   const vatRate = config?.vat_rate ?? 0.23
   const priceWithVat = pricePerKwh * (1 + vatRate)
   const minCharge = config?.min_charge ?? 5
-
-  useEffect(() => {
-    fetchConfig()
-    fetchAll()
-  }, [])
 
   async function fetchConfig() {
     const { data } = await supabase.from('electricity_config').select('*').single()
@@ -135,6 +132,12 @@ export default function QuadrosEspacosPage() {
     setLoading(false)
   }
 
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchConfig()
+    fetchAll()
+  }, [])
+
   function getTenantName(tenant: any): string {
     if (!tenant) return ''
     if (Array.isArray(tenant)) return tenant[0]?.name ?? ''
@@ -165,13 +168,37 @@ export default function QuadrosEspacosPage() {
     })
   }
 
-  function openEditModal(reading: Reading) {
+  async function openEditModal(reading: Reading) {
     setEditReadingModal(reading)
     setEditForm({
       reading_date: reading.reading_date,
       reading_value: reading.reading_value.toString(),
       notes: reading.notes ?? '',
     })
+    setEditLeaseId(null)
+    setEditAdvance(0)
+
+    if (!reading.charged) {
+      const space = spaces.find(s => s.id === reading.space_id)
+      if (space?.tenant_id) {
+        const { data: lease } = await supabase
+          .from('leases')
+          .select('id')
+          .eq('space_id', space.id)
+          .eq('status', 'ativo')
+          .single()
+        if (lease) {
+          setEditLeaseId(lease.id)
+          const { data: advances } = await supabase
+            .from('rent_payments')
+            .select('amount')
+            .eq('lease_id', lease.id)
+            .eq('tipo', 'adiantamento')
+            .eq('used', false)
+          setEditAdvance((advances ?? []).reduce((sum, a) => sum + (a.amount ?? 0), 0))
+        }
+      }
+    }
   }
 
   async function saveEditReading() {
@@ -190,6 +217,68 @@ export default function QuadrosEspacosPage() {
       kwh_consumed: kwhConsumed,
       amount_calculated: amountCalc,
       notes: editForm.notes || null,
+    }).eq('id', editReadingModal.id)
+
+    setSaving(false)
+    setEditReadingModal(null)
+    fetchAll()
+  }
+
+  async function handleCobrarAgora() {
+    if (!editReadingModal || !editLeaseId) return
+    const amountDue = editReadingModal.amount_calculated ?? 0
+    if (amountDue <= 0) return
+
+    setSaving(true)
+
+    const { data: advances } = await supabase
+      .from('rent_payments')
+      .select('*')
+      .eq('lease_id', editLeaseId)
+      .eq('tipo', 'adiantamento')
+      .eq('used', false)
+      .order('payment_date', { ascending: true })
+
+    let remaining = amountDue
+    let totalApplied = 0
+
+    for (const adv of advances ?? []) {
+      if (remaining <= 0) break
+      if (adv.amount <= remaining) {
+        await supabase.from('rent_payments').update({ used: true }).eq('id', adv.id)
+        totalApplied += adv.amount
+        remaining = parseFloat((remaining - adv.amount).toFixed(2))
+      } else {
+        await supabase.from('rent_payments').update({ amount: remaining, used: true }).eq('id', adv.id)
+        await supabase.from('rent_payments').insert({
+          lease_id: adv.lease_id,
+          reference_month: adv.reference_month,
+          amount: parseFloat((adv.amount - remaining).toFixed(2)),
+          payment_date: adv.payment_date,
+          payment_method: adv.payment_method,
+          tipo: 'adiantamento',
+          notes: adv.notes,
+          used: false,
+        })
+        totalApplied += remaining
+        remaining = 0
+      }
+    }
+
+    await supabase.from('electricity_charges').insert({
+      lease_id: editLeaseId,
+      charge_date: new Date().toISOString().slice(0, 10),
+      reference_month: editReadingModal.reading_date.slice(0, 7) + '-01',
+      units: editReadingModal.kwh_consumed,
+      amount: remaining,
+      paid: remaining === 0,
+      payment_date: remaining === 0 ? new Date().toISOString().slice(0, 10) : null,
+      notes: totalApplied > 0 ? `Adiantamento de ${formatCurrency(totalApplied)} aplicado` : null,
+    })
+
+    await supabase.from('electricity_readings').update({
+      charged: true,
+      accumulated: false,
     }).eq('id', editReadingModal.id)
 
     setSaving(false)
@@ -613,9 +702,29 @@ export default function QuadrosEspacosPage() {
                 <textarea className="input" rows={2} value={editForm.notes}
                   onChange={e => setEditForm(f => ({ ...f, notes: e.target.value }))} />
               </div>
+
+              {!editReadingModal.charged && (editReadingModal.amount_calculated ?? 0) > 0 && editLeaseId && (
+                <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+                  {editAdvance > 0 ? (
+                    <p className="text-xs text-emerald-700">
+                      Adiantamento de {formatCurrency(Math.min(editAdvance, editReadingModal.amount_calculated ?? 0))} aplicado. Valor a cobrar: {formatCurrency(Math.max(0, (editReadingModal.amount_calculated ?? 0) - editAdvance))}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-emerald-700">
+                      Valor a cobrar ao inquilino: {formatCurrency(editReadingModal.amount_calculated ?? 0)}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="mt-6 space-y-2">
+              {!editReadingModal.charged && (editReadingModal.amount_calculated ?? 0) > 0 && editLeaseId && (
+                <button onClick={handleCobrarAgora} disabled={saving}
+                  className="w-full py-2.5 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50">
+                  {saving ? 'A processar...' : '✓ Cobrar agora'}
+                </button>
+              )}
               <button onClick={saveEditReading} disabled={saving || !editForm.reading_value}
                 className="w-full py-2.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
                 {saving ? 'A guardar...' : '✓ Guardar alterações'}

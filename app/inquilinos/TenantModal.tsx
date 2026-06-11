@@ -31,6 +31,7 @@ interface PaymentRow {
   payment_method: string | null
   tipo: string
   notes?: string | null
+  used?: boolean
   lease?: any
   isMissing?: boolean
   isManualDebt?: boolean
@@ -312,7 +313,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
 
   // totalDebt inclui: rendas em falta + dívidas manuais + eletricidade por pagar, deduzindo adiantamentos disponíveis (crédito do inquilino)
   const totalAdvance = payments
-    .filter(p => p.tipo === 'adiantamento')
+    .filter(p => p.tipo === 'adiantamento' && !p.used)
     .reduce((sum, p) => sum + (p.amount ?? 0), 0)
 
   const totalDebt = payments
@@ -637,7 +638,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                     return (
                       <div key={p.id ?? `row-${i}`}
                         className={`flex items-center justify-between p-3 rounded-lg border ${
-                          p.tipo === 'adiantamento' ? 'border-purple-200 bg-purple-50'
+                          p.tipo === 'adiantamento' ? (p.used ? 'border-gray-100 bg-gray-50' : 'border-purple-200 bg-purple-50')
                           : isPago || isLiquidada ? 'border-gray-100 bg-white'
                           : p.isMissing ? 'border-orange-200 bg-orange-50'
                           : p.isElecCharge ? 'border-red-200 bg-red-50'
@@ -660,7 +661,11 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                             </span>
                           </p>
                           {p.tipo === 'adiantamento' ? (
-                            <p className="text-xs text-purple-600 font-medium">💰 Crédito do inquilino · pago em {formatDate(p.payment_date!)} · {p.payment_method}</p>
+                            p.used ? (
+                              <p className="text-xs text-gray-400 font-medium">✓ Aplicado a uma fatura de eletricidade</p>
+                            ) : (
+                              <p className="text-xs text-purple-600 font-medium">💰 Crédito do inquilino · pago em {formatDate(p.payment_date!)} · {p.payment_method}</p>
+                            )
                           ) : p.isManualDebt ? (
                             <p className="text-xs text-gray-600">{p.notes}</p>
                           ) : p.isElecCharge ? (
@@ -680,11 +685,11 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                         </div>
                         <div className="flex items-center gap-2">
                           <span className={`font-semibold text-sm ${
-                            p.tipo === 'adiantamento' ? 'text-purple-700'
+                            p.tipo === 'adiantamento' ? (p.used ? 'text-gray-400' : 'text-purple-700')
                             : isPago || isLiquidada ? 'text-gray-900'
                             : 'text-red-600'
                           }`}>
-                            {p.tipo === 'adiantamento' ? '+' : ''}{formatCurrency(p.amount)}
+                            {p.tipo === 'adiantamento' && !p.used ? '+' : ''}{formatCurrency(p.amount)}
                           </span>
                           {!p.isMissing && !p.isManualDebt && !p.isElecCharge && p.id && (
                             <>
