@@ -99,7 +99,7 @@ export default function PerfilPage() {
             <p className="font-semibold text-gray-900">{profile?.name}</p>
             <p className="text-sm text-gray-500">{user?.email}</p>
             <p className="text-xs text-gray-400 mt-0.5">
-              {profile?.role === 'admin' ? '🔑 Administrador' : profile?.role === 'electrician' ? '⚡ Eletricista' : '👁 Visualizador'}
+              {profile?.role === 'admin' ? '🔑 Administrador' : profile?.role === 'coadmin' ? '🔑 Co-Administrador' : profile?.role === 'electrician' ? '⚡ Eletricista' : '👁 Visualizador'}
             </p>
           </div>
         </div>

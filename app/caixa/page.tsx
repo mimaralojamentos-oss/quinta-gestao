@@ -14,7 +14,7 @@ type SourceFilter = 'all' | 'manual' | 'renda' | 'despesa'
 
 export default function CaixaPage() {
   const supabase = createClient()
-  const { isAdmin } = useAuth()
+  const { isAdmin, isCoAdmin } = useAuth()
   const [movements, setMovements] = useState<CashFundMovement[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
@@ -125,7 +125,7 @@ export default function CaixaPage() {
             <h1 className="text-2xl font-bold text-gray-900">Fundo de Maneio</h1>
             <p className="text-sm text-gray-500 mt-0.5">Controlo de saldo em dinheiro</p>
           </div>
-          {isAdmin && (
+          {(isAdmin || isCoAdmin) && (
             <button className="btn-primary" onClick={() => setShowModal(true)}>
               <Plus className="w-4 h-4" /> Novo Movimento
             </button>
@@ -259,7 +259,7 @@ export default function CaixaPage() {
                   <th className="table-header">Origem</th>
                   <th className="table-header">Valor</th>
                   <th className="table-header">Notas</th>
-                  {isAdmin && <th className="table-header"></th>}
+                  {(isAdmin || isCoAdmin) && <th className="table-header"></th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
@@ -287,7 +287,7 @@ export default function CaixaPage() {
                       </span>
                     </td>
                     <td className="table-cell text-xs text-gray-500">{m.notes ?? '—'}</td>
-                    {isAdmin && (
+                    {(isAdmin || isCoAdmin) && (
                       <td className="table-cell">
                         <button onClick={() => handleDelete(m.id, (m as any).source ?? 'manual')}
                           className="text-gray-300 hover:text-red-500 transition-colors" title="Apagar">
@@ -298,7 +298,7 @@ export default function CaixaPage() {
                   </tr>
                 ))}
                 {filtered.length === 0 && (
-                  <tr><td colSpan={isAdmin ? 7 : 6} className="py-12 text-center text-gray-400 text-sm">Sem movimentos encontrados</td></tr>
+                  <tr><td colSpan={(isAdmin || isCoAdmin) ? 7 : 6} className="py-12 text-center text-gray-400 text-sm">Sem movimentos encontrados</td></tr>
                 )}
               </tbody>
             </table>
@@ -306,7 +306,7 @@ export default function CaixaPage() {
         )}
       </div>
 
-      {showModal && isAdmin && (
+      {showModal && (isAdmin || isCoAdmin) && (
         <CashModal
           onClose={() => setShowModal(false)}
           onSaved={() => { setShowModal(false); fetchData() }}

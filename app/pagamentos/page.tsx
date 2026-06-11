@@ -56,7 +56,7 @@ function getDateRange(period: string): { from: string; to: string } | null {
 }
 
 export default function PagamentosPage() {
-  const { isAdmin } = useAuth()
+  const { isAdmin, isCoAdmin } = useAuth()
   const [leases, setLeases] = useState<LeaseWithDetails[]>([])
   const [loading, setLoading] = useState(true)
   const [currentMonth, setCurrentMonth] = useState(getCurrentMonth())
@@ -228,7 +228,7 @@ export default function PagamentosPage() {
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-2xl font-bold text-gray-900">Rendas & Pagamentos</h1>
           <div className="flex items-center gap-3">
-            {isAdmin && (
+            {(isAdmin || isCoAdmin) && (
               <button onClick={() => setShowAdvanceModal(true)}
                 className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-purple-600 text-white hover:bg-purple-700 transition-colors">
                 <Plus className="w-4 h-4" /> Adiantamento
@@ -374,7 +374,7 @@ export default function PagamentosPage() {
                   <th className="table-header">Método</th>
                   <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('balance')}>Saldo mês <SortIcon field="balance" /></th>
                   <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('debt')}>Total dívida <SortIcon field="debt" /></th>
-                  {isAdmin && <th className="table-header"></th>}
+                  {(isAdmin || isCoAdmin) && <th className="table-header"></th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
@@ -428,7 +428,7 @@ export default function PagamentosPage() {
                           <span className="text-xs text-emerald-600 font-medium">✓</span>
                         )}
                       </td>
-                      {isAdmin && (
+                      {(isAdmin || isCoAdmin) && (
                         <td className="table-cell">
                           <button onClick={() => { setSelectedLease(lease); setShowModal(true) }} className="btn-primary text-xs py-1.5 px-3">
                             <Plus className="w-3 h-3" /> Registar
@@ -439,7 +439,7 @@ export default function PagamentosPage() {
                   )
                 })}
                 {filtered.length === 0 && (
-                  <tr><td colSpan={isAdmin ? 9 : 8} className="py-12 text-center text-gray-400 text-sm">Nenhum resultado encontrado</td></tr>
+                  <tr><td colSpan={(isAdmin || isCoAdmin) ? 9 : 8} className="py-12 text-center text-gray-400 text-sm">Nenhum resultado encontrado</td></tr>
                 )}
               </tbody>
             </table>
@@ -447,13 +447,13 @@ export default function PagamentosPage() {
         )}
       </div>
 
-      {showModal && selectedLease && isAdmin && (
+      {showModal && selectedLease && (isAdmin || isCoAdmin) && (
         <PaymentModal lease={selectedLease} currentMonth={currentMonth}
           onClose={() => setShowModal(false)}
           onSaved={() => { setShowModal(false); fetchData() }} />
       )}
 
-      {showAdvanceModal && isAdmin && (
+      {showAdvanceModal && (isAdmin || isCoAdmin) && (
         <AdvancePaymentModal
           onClose={() => setShowAdvanceModal(false)}
           onSaved={() => { setShowAdvanceModal(false); fetchData() }} />

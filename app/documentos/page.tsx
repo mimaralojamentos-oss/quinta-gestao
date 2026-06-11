@@ -79,7 +79,7 @@ function formatDateTime(dateStr: string): string {
 }
 
 export default function DocumentosPage() {
-  const { isAdmin } = useAuth()
+  const { isAdmin, isCoAdmin } = useAuth()
   const [documents, setDocuments] = useState<Document[]>([])
   const [contracts, setContracts] = useState<Contrato[]>([])
   const [loading, setLoading] = useState(true)
@@ -373,7 +373,7 @@ async function handleSaveEdit() {
             <h1 className="text-2xl font-bold text-gray-900">Documentos</h1>
             <p className="text-sm text-gray-500 mt-1">{allDocs.length} ficheiros guardados</p>
           </div>
-          {isAdmin && (
+          {(isAdmin || isCoAdmin) && (
             <button className="btn-primary" onClick={() => setShowUpload(true)}>
               <Plus className="w-4 h-4" /> Carregar Documento
             </button>
@@ -510,12 +510,12 @@ async function handleSaveEdit() {
                           className="flex items-center gap-1 text-xs text-emerald-600 hover:underline font-medium">
                           <Eye className="w-3.5 h-3.5" /> Abrir
                         </button>
-                        {isAdmin && doc._doc && (
+                        {(isAdmin || isCoAdmin) && doc._doc && (
                           <button onClick={() => openEditModal(doc._doc!)} className="text-gray-400 hover:text-blue-500 transition-colors">
                             <Edit2 className="w-3.5 h-3.5" />
                           </button>
                         )}
-                        {isAdmin && (
+                        {(isAdmin || isCoAdmin) && (
                           <button onClick={() => doc._contrato ? deleteContract(doc._contrato) : setDeleteConfirm({ doc: doc._doc!, hasExpense: !!doc._expense_id })}
                             className="text-gray-300 hover:text-red-500 transition-colors">
                             <Trash2 className="w-3.5 h-3.5" />

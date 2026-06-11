@@ -3,13 +3,13 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { useAuth } from '@/lib/auth-context'
-import { Shield, Plus, Trash2, Eye, Zap, ChevronLeft } from 'lucide-react'
+import { Shield, Plus, Trash2, Eye, Zap, Key, ChevronLeft } from 'lucide-react'
 import Link from 'next/link'
 
 type Profile = {
   id: string
   email: string
-  role: 'admin' | 'viewer' | 'electrician'
+  role: 'admin' | 'coadmin' | 'viewer' | 'electrician'
   created_at: string
 }
 
@@ -21,7 +21,7 @@ export default function UtilizadoresPage() {
   const [showCreate, setShowCreate] = useState(false)
   const [newEmail, setNewEmail] = useState('')
   const [newPassword, setNewPassword] = useState('')
-  const [newRole, setNewRole] = useState<'admin' | 'viewer' | 'electrician'>('viewer')
+  const [newRole, setNewRole] = useState<'admin' | 'coadmin' | 'viewer' | 'electrician'>('viewer')
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
 
@@ -83,7 +83,7 @@ export default function UtilizadoresPage() {
     setCreating(false)
   }
 
-  async function handleChangeRole(id: string, role: 'admin' | 'viewer' | 'electrician') {
+  async function handleChangeRole(id: string, role: 'admin' | 'coadmin' | 'viewer' | 'electrician') {
     await supabase.from('profiles').update({ role }).eq('id', id)
     fetchProfiles()
   }
@@ -100,18 +100,21 @@ export default function UtilizadoresPage() {
 
   function getRoleLabel(role: string) {
     if (role === 'admin') return 'Administrador'
+    if (role === 'coadmin') return 'Co-Administrador'
     if (role === 'electrician') return 'Eletricista'
     return 'Visualizador'
   }
 
   function getRoleIcon(role: string) {
     if (role === 'admin') return <Shield className="w-4 h-4 text-red-500" />
+    if (role === 'coadmin') return <Key className="w-4 h-4 text-orange-500" />
     if (role === 'electrician') return <Zap className="w-4 h-4 text-yellow-500" />
     return <Eye className="w-4 h-4 text-gray-400" />
   }
 
   function getRoleBadge(role: string) {
     if (role === 'admin') return 'bg-red-100 text-red-700'
+    if (role === 'coadmin') return 'bg-orange-100 text-orange-700'
     if (role === 'electrician') return 'bg-yellow-100 text-yellow-700'
     return 'bg-gray-100 text-gray-600'
   }
@@ -146,12 +149,19 @@ export default function UtilizadoresPage() {
       </div>
 
       {/* Legenda de roles */}
-      <div className="bg-gray-50 rounded-lg p-4 mb-6 grid grid-cols-3 gap-3 text-sm">
+      <div className="bg-gray-50 rounded-lg p-4 mb-6 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
         <div className="flex items-center gap-2">
           <Shield className="w-4 h-4 text-red-500" />
           <div>
             <div className="font-medium text-gray-700">Administrador</div>
             <div className="text-gray-500 text-xs">Acesso total</div>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Key className="w-4 h-4 text-orange-500" />
+          <div>
+            <div className="font-medium text-gray-700">Co-Administrador</div>
+            <div className="text-gray-500 text-xs">Acesso total, sem gerir utilizadores</div>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -195,6 +205,7 @@ export default function UtilizadoresPage() {
                   >
                     <option value="viewer">Visualizador</option>
                     <option value="electrician">Eletricista</option>
+                    <option value="coadmin">Co-Administrador</option>
                     <option value="admin">Administrador</option>
                   </select>
                   <button
@@ -245,6 +256,7 @@ export default function UtilizadoresPage() {
                 >
                   <option value="viewer">Visualizador — só leitura</option>
                   <option value="electrician">Eletricista — ver tudo + editar eletricidade</option>
+                  <option value="coadmin">Co-Administrador — acesso total, sem gerir utilizadores</option>
                   <option value="admin">Administrador — acesso total</option>
                 </select>
               </div>

@@ -6,20 +6,21 @@ import type { User } from '@supabase/supabase-js'
 interface Profile {
   id: string
   name: string
-  role: 'admin' | 'viewer' | 'electrician'
+  role: 'admin' | 'coadmin' | 'viewer' | 'electrician'
 }
 
 interface AuthContextType {
   user: User | null
   profile: Profile | null
   isAdmin: boolean
+  isCoAdmin: boolean
   isElectrician: boolean
   loading: boolean
   signOut: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextType>({
-  user: null, profile: null, isAdmin: false, isElectrician: false, loading: true, signOut: async () => {},
+  user: null, profile: null, isAdmin: false, isCoAdmin: false, isElectrician: false, loading: true, signOut: async () => {},
 })
 
 const supabaseClient = createClient()
@@ -107,6 +108,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       user,
       profile,
       isAdmin: profile?.role === 'admin',
+      isCoAdmin: profile?.role === 'coadmin',
       isElectrician: profile?.role === 'electrician',
       loading,
       signOut

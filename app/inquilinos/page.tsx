@@ -40,7 +40,7 @@ type SortField = 'name' | 'spaces' | 'rent' | 'debt' | 'contract' | null
 type SortDir = 'asc' | 'desc'
 
 export default function InquilinosPage() {
-  const { isAdmin } = useAuth()
+  const { isAdmin, isCoAdmin } = useAuth()
   const [tenants, setTenants] = useState<TenantWithLease[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -307,7 +307,7 @@ export default function InquilinosPage() {
             <h1 className="text-2xl font-bold text-gray-900">Inquilinos</h1>
             <p className="text-sm text-gray-500 mt-1">{tenants.length} inquilinos registados</p>
           </div>
-          {isAdmin && (
+          {(isAdmin || isCoAdmin) && (
             <button className="btn-primary" onClick={() => { setEditTenant(null); setShowTenantModal(true) }}>
               <Plus className="w-4 h-4" /> Novo Inquilino
             </button>
@@ -404,7 +404,7 @@ export default function InquilinosPage() {
                     Contrato <SortIcon field="contract" />
                   </th>
                   <th className="table-header">Notas</th>
-                  {isAdmin && <th className="table-header"></th>}
+                  {(isAdmin || isCoAdmin) && <th className="table-header"></th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
@@ -490,7 +490,7 @@ export default function InquilinosPage() {
                       <td className="table-cell max-w-[180px]">
                         <span className="text-xs text-gray-500 truncate block">{tenant.notes ?? '—'}</span>
                       </td>
-                      {isAdmin && (
+                      {(isAdmin || isCoAdmin) && (
                         <td className="table-cell">
                           <div className="flex gap-2">
                             <button onClick={() => { setEditTenant(tenant); setOpenTab('dados'); setShowTenantModal(true) }}
@@ -507,7 +507,7 @@ export default function InquilinosPage() {
                 })}
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={isAdmin ? 9 : 8} className="py-12 text-center text-gray-400 text-sm">
+                    <td colSpan={(isAdmin || isCoAdmin) ? 9 : 8} className="py-12 text-center text-gray-400 text-sm">
                       Nenhum inquilino encontrado
                     </td>
                   </tr>
@@ -665,13 +665,13 @@ export default function InquilinosPage() {
         </div>
       )}
 
-      {showTenantModal && isAdmin && (
+      {showTenantModal && (isAdmin || isCoAdmin) && (
         <TenantModal tenant={editTenant} onClose={() => { setShowTenantModal(false); setOpenTab('dados') }}
           onSaved={() => { setShowTenantModal(false); fetchTenants(); setOpenTab('dados') }}
           initialTab={openTab} />
       )}
 
-      {showLeaseModal && selectedTenant && isAdmin && (
+      {showLeaseModal && selectedTenant && (isAdmin || isCoAdmin) && (
         <LeaseModal tenant={selectedTenant} onClose={() => setShowLeaseModal(false)}
           onSaved={() => { setShowLeaseModal(false); fetchTenants() }} />
       )}

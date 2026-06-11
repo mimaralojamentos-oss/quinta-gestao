@@ -42,8 +42,8 @@ interface ReadingModal {
 }
 
 export default function QuadrosEspacosPage() {
-  const { isAdmin, profile } = useAuth()
-  const canEdit = isAdmin || profile?.role === 'electrician'
+  const { isAdmin, isCoAdmin, profile } = useAuth()
+  const canEdit = isAdmin || isCoAdmin || profile?.role === 'electrician'
   const [spaces, setSpaces] = useState<Space[]>([])
   const [readings, setReadings] = useState<Record<string, Reading[]>>({})
   const [loading, setLoading] = useState(true)

@@ -153,7 +153,7 @@ export default function Sidebar() {
             </div>
             <div className="min-w-0 flex-1">
               <p className="text-sm font-medium text-gray-800 truncate">{profile.name}</p>
-              <p className="text-xs text-gray-400">{profile.role === 'admin' ? '🔑 Administrador' : '👁 Visualizador'}</p>
+              <p className="text-xs text-gray-400">{profile.role === 'admin' ? '🔑 Administrador' : profile.role === 'coadmin' ? '🔑 Co-Administrador' : '👁 Visualizador'}</p>
             </div>
             <UserCircle className="w-4 h-4 text-gray-300 flex-shrink-0" />
           </Link>

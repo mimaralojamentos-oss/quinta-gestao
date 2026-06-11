@@ -15,7 +15,7 @@ interface SpaceWithDetails extends Space {
 }
 
 export default function EspacosPage() {
-  const { isAdmin } = useAuth()
+  const { isAdmin, isCoAdmin } = useAuth()
   const [spaces, setSpaces] = useState<SpaceWithDetails[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
@@ -141,7 +141,7 @@ export default function EspacosPage() {
             <h1 className="text-2xl font-bold text-gray-900">Espaços</h1>
             <p className="text-sm text-gray-500 mt-1">{spaces.length} espaços registados</p>
           </div>
-          {isAdmin && (
+          {(isAdmin || isCoAdmin) && (
             <button className="btn-primary" onClick={() => { setEditSpace(null); setShowModal(true) }}>
               <Plus className="w-4 h-4" /> Novo Espaço
             </button>
@@ -280,7 +280,7 @@ export default function EspacosPage() {
                   <th className="table-header">Renda Mensal</th>
                   <th className="table-header">Condição</th>
                   <th className="table-header">Notas</th>
-                  {isAdmin && <th className="table-header"></th>}
+                  {(isAdmin || isCoAdmin) && <th className="table-header"></th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
@@ -321,7 +321,7 @@ export default function EspacosPage() {
                       <td className="table-cell max-w-[200px]">
                         {space.notes ? <span className="text-xs text-gray-500 truncate block">{space.notes}</span> : <span className="text-gray-400">—</span>}
                       </td>
-                      {isAdmin && (
+                      {(isAdmin || isCoAdmin) && (
                         <td className="table-cell">
                           <button onClick={() => { setEditSpace(space); setShowModal(true) }}
                             className="text-xs text-emerald-600 hover:underline font-medium">
@@ -334,7 +334,7 @@ export default function EspacosPage() {
                 })}
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={isAdmin ? 8 : 7} className="py-12 text-center text-gray-400 text-sm">
+                    <td colSpan={(isAdmin || isCoAdmin) ? 8 : 7} className="py-12 text-center text-gray-400 text-sm">
                       Nenhum espaço encontrado
                     </td>
                   </tr>
@@ -345,7 +345,7 @@ export default function EspacosPage() {
         )}
       </div>
 
-      {showModal && isAdmin && (
+      {showModal && (isAdmin || isCoAdmin) && (
         <SpaceModal space={editSpace} onClose={() => setShowModal(false)}
           onSaved={() => { setShowModal(false); fetchSpaces() }} />
       )}

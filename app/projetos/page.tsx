@@ -79,7 +79,7 @@ const categoryLabels: Record<string, string> = {
 }
 
 export default function ProjetosPage() {
-  const { isAdmin } = useAuth()
+  const { isAdmin, isCoAdmin } = useAuth()
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -177,7 +177,7 @@ export default function ProjetosPage() {
               <h1 className="text-2xl font-bold text-gray-900">Projetos</h1>
               <p className="text-sm text-gray-500 mt-1">{projects.length} projetos registados</p>
             </div>
-            {isAdmin && (
+            {(isAdmin || isCoAdmin) && (
               <button className="btn-primary" onClick={() => { setEditProject(null); setShowModal(true) }}>
                 <Plus className="w-4 h-4" /> Novo Projeto
               </button>
@@ -261,7 +261,7 @@ export default function ProjetosPage() {
                         </div>
                         {project.description && <p className="text-sm text-gray-500">{project.description}</p>}
                       </div>
-                      {isAdmin && (
+                      {(isAdmin || isCoAdmin) && (
                         <button onClick={e => { e.stopPropagation(); setEditProject(project); setShowModal(true) }}
                           className="text-xs text-emerald-600 hover:underline font-medium ml-4">
                           Editar
@@ -401,7 +401,7 @@ export default function ProjetosPage() {
                         <span className="text-gray-200">|</span>
 
                         {/* Mover projeto */}
-                        {isAdmin && (
+                        {(isAdmin || isCoAdmin) && (
                           <div className="relative">
                             <button onClick={() => setMovingExpense(movingExpense === expense.id ? null : expense.id)}
                               className="flex items-center gap-1 text-xs text-blue-500 hover:underline font-medium">
@@ -437,7 +437,7 @@ export default function ProjetosPage() {
         )}
       </div>
 
-      {showModal && isAdmin && (
+      {showModal && (isAdmin || isCoAdmin) && (
         <ProjectModal
           project={editProject}
           onClose={() => setShowModal(false)}

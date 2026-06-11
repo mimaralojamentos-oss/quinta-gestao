@@ -3,7 +3,7 @@ export type SpaceStatus = 'arrendado' | 'disponivel'
 export type PaymentMethod = 'dinheiro' | 'banco' | 'transferencia'
 export type ExpenseCategory = 'obras' | 'edp' | 'pessoal' | 'contabilidade' | 'manutencao' | 'outros'
 export type ExpenseType = 'recorrente' | 'pontual'
-export type UserRole = 'admin' | 'viewer' | 'electrician'
+export type UserRole = 'admin' | 'coadmin' | 'viewer' | 'electrician'
 
 export interface Profile {
   id: string

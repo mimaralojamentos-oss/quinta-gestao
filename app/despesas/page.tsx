@@ -28,7 +28,7 @@ function getDateRange(period: string): { from: string; to: string } | null {
 }
 
 export default function DespesasPage() {
-  const { isAdmin } = useAuth()
+  const { isAdmin, isCoAdmin } = useAuth()
   const [expenses, setExpenses] = useState<any[]>([])
   const [projects, setProjects] = useState<any[]>([])
   const [documents, setDocuments] = useState<Record<string, any>>({})
@@ -92,7 +92,7 @@ export default function DespesasPage() {
   }
 
   async function handlePaymentMethodToggle(expense: any) {
-    if (!isAdmin) return
+    if (!(isAdmin || isCoAdmin)) return
     setTogglingPayment(expense.id)
     const newMethod = expense.payment_method === 'dinheiro' ? 'banco' : 'dinheiro'
     await supabase.from('expenses').update({ payment_method: newMethod }).eq('id', expense.id)
@@ -196,7 +196,7 @@ export default function DespesasPage() {
             <h1 className="text-2xl font-bold text-gray-900">Despesas</h1>
             <p className="text-sm text-gray-500 mt-0.5">{expenses.length} registos</p>
           </div>
-          {isAdmin && (
+          {(isAdmin || isCoAdmin) && (
             <button className="btn-primary" onClick={() => { setEditExpense(null); setShowModal(true) }}>
               <Plus className="w-4 h-4" /> Nova Despesa
             </button>
@@ -365,7 +365,7 @@ export default function DespesasPage() {
                   <th className="table-header">Pagamento</th>
                   <th className="table-header">Projeto</th>
                   <th className="table-header">Fatura</th>
-                  {isAdmin && <th className="table-header"></th>}
+                  {(isAdmin || isCoAdmin) && <th className="table-header"></th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
@@ -386,7 +386,7 @@ export default function DespesasPage() {
                       <td className="table-cell text-sm">{expense.supplier ?? '—'}</td>
                       <td className="table-cell font-semibold text-red-600">{formatCurrency(expense.amount)}</td>
                       <td className="table-cell">
-                        {isAdmin ? (
+                        {(isAdmin || isCoAdmin) ? (
                           <button onClick={() => handlePaymentMethodToggle(expense)} disabled={togglingPayment === expense.id}
                             className={`text-xs px-2 py-1 rounded-full font-medium transition-all hover:opacity-70 cursor-pointer ${expense.payment_method === 'dinheiro' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'} ${togglingPayment === expense.id ? 'opacity-50' : ''}`}>
                             {togglingPayment === expense.id ? '...' : expense.payment_method === 'dinheiro' ? '💵 Dinheiro' : '🏦 Banco'}
@@ -398,7 +398,7 @@ export default function DespesasPage() {
                         )}
                       </td>
                       <td className="table-cell">
-                        {isAdmin ? (
+                        {(isAdmin || isCoAdmin) ? (
                           <select value={expense.project_id ?? ''} onChange={e => handleProjectChange(expense.id, e.target.value)}
                             className={`text-xs border rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-emerald-500 max-w-[180px] ${expense.project_id ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-yellow-200 bg-yellow-50 text-yellow-700'}`}>
                             <option value="">— Sem projeto —</option>
@@ -415,7 +415,7 @@ export default function DespesasPage() {
                           </button>
                         ) : <span className="text-gray-300 text-xs">—</span>}
                       </td>
-                      {isAdmin && (
+                      {(isAdmin || isCoAdmin) && (
                         <td className="table-cell">
                           <div className="flex items-center gap-2">
                             <button onClick={() => { setEditExpense(expense); setShowModal(true) }} className="text-xs text-emerald-600 hover:underline font-medium">Editar</button>
@@ -427,7 +427,7 @@ export default function DespesasPage() {
                   )
                 })}
                 {filtered.length === 0 && (
-                  <tr><td colSpan={isAdmin ? 9 : 8} className="py-12 text-center text-gray-400 text-sm">
+                  <tr><td colSpan={(isAdmin || isCoAdmin) ? 9 : 8} className="py-12 text-center text-gray-400 text-sm">
                     {hasActiveFilters ? 'Nenhuma despesa encontrada com estes filtros' : 'Nenhuma despesa encontrada'}
                   </td></tr>
                 )}
@@ -466,7 +466,7 @@ export default function DespesasPage() {
         </div>
       )}
 
-      {showModal && isAdmin && (
+      {showModal && (isAdmin || isCoAdmin) && (
         <ExpenseModal expense={editExpense} onClose={() => setShowModal(false)} onSaved={() => { setShowModal(false); fetchAll() }} />
       )}
     </AppLayout>

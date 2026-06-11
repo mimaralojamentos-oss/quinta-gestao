@@ -26,7 +26,7 @@ interface ChargeWithDetails {
 }
 
 export default function EletricidadePage() {
-  const { isAdmin } = useAuth()
+  const { isAdmin, isCoAdmin } = useAuth()
   const [charges, setCharges] = useState<ChargeWithDetails[]>([])
   const [readings, setReadings] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -72,7 +72,7 @@ export default function EletricidadePage() {
             <h1 className="text-2xl font-bold text-gray-900">Eletricidade</h1>
             <p className="text-sm text-gray-500 mt-1">Cobranças e leituras de contadores</p>
           </div>
-          {isAdmin && (
+          {(isAdmin || isCoAdmin) && (
             <button className="btn-primary" onClick={() => { setEditCharge(null); setShowModal(true) }}>
               <Plus className="w-4 h-4" />
               Nova Cobrança
@@ -124,7 +124,7 @@ export default function EletricidadePage() {
                   <th className="table-header">Valor</th>
                   <th className="table-header">Estado</th>
                   <th className="table-header">Notas</th>
-                  {isAdmin && <th className="table-header"></th>}
+                  {(isAdmin || isCoAdmin) && <th className="table-header"></th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
@@ -147,7 +147,7 @@ export default function EletricidadePage() {
                       )}
                     </td>
                     <td className="table-cell text-xs text-gray-500">{charge.notes ?? '—'}</td>
-                    {isAdmin && (
+                    {(isAdmin || isCoAdmin) && (
                       <td className="table-cell">
                         {!charge.paid && (
                           <button onClick={() => markPaid(charge)}
@@ -160,7 +160,7 @@ export default function EletricidadePage() {
                   </tr>
                 ))}
                 {charges.length === 0 && (
-                  <tr><td colSpan={isAdmin ? 8 : 7} className="py-12 text-center text-gray-400 text-sm">Sem cobranças registadas</td></tr>
+                  <tr><td colSpan={(isAdmin || isCoAdmin) ? 8 : 7} className="py-12 text-center text-gray-400 text-sm">Sem cobranças registadas</td></tr>
                 )}
               </tbody>
             </table>
@@ -194,7 +194,7 @@ export default function EletricidadePage() {
         )}
       </div>
 
-      {showModal && isAdmin && (
+      {showModal && (isAdmin || isCoAdmin) && (
         <ElectricityModal
           onClose={() => setShowModal(false)}
           onSaved={() => { setShowModal(false); fetchData() }}

@@ -38,7 +38,7 @@ interface Debt {
 export default function TenantDetailPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
-  const { isAdmin } = useAuth()
+  const { isAdmin, isCoAdmin } = useAuth()
 
   const [tenant, setTenant] = useState<Tenant | null>(null)
   const [loading, setLoading] = useState(true)
@@ -238,36 +238,36 @@ export default function TenantDetailPage() {
                 <label className="text-xs font-medium text-gray-500 block mb-1">Nome completo *</label>
                 <input className="input w-full" value={form.name}
                   onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                  disabled={!isAdmin} />
+                  disabled={!(isAdmin || isCoAdmin)} />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-medium text-gray-500 block mb-1">Telefone</label>
                   <input className="input w-full" value={form.phone}
                     onChange={e => setForm(f => ({ ...f, phone: e.target.value }))}
-                    disabled={!isAdmin} />
+                    disabled={!(isAdmin || isCoAdmin)} />
                 </div>
                 <div>
                   <label className="text-xs font-medium text-gray-500 block mb-1">NIF</label>
                   <input className="input w-full" value={form.nif}
                     onChange={e => setForm(f => ({ ...f, nif: e.target.value }))}
-                    disabled={!isAdmin} />
+                    disabled={!(isAdmin || isCoAdmin)} />
                 </div>
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-500 block mb-1">Email</label>
                 <input className="input w-full" type="email" value={form.email}
                   onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
-                  disabled={!isAdmin} />
+                  disabled={!(isAdmin || isCoAdmin)} />
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-500 block mb-1">Notas</label>
                 <textarea className="input w-full" rows={3} value={form.notes}
                   onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
-                  disabled={!isAdmin} />
+                  disabled={!(isAdmin || isCoAdmin)} />
               </div>
             </div>
-            {isAdmin && (
+            {(isAdmin || isCoAdmin) && (
               <button onClick={saveTenant} disabled={saving}
                 className="mt-4 w-full flex items-center justify-center gap-2 bg-emerald-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50">
                 <Save className="w-4 h-4" />
@@ -283,7 +283,7 @@ export default function TenantDetailPage() {
                 <Phone className="w-4 h-4 text-blue-600" />
                 <h2 className="font-semibold text-gray-900">Contactos Adicionais</h2>
               </div>
-              {isAdmin && contacts.length < 5 && (
+              {(isAdmin || isCoAdmin) && contacts.length < 5 && (
                 <button onClick={addContact}
                   className="flex items-center gap-1 text-xs text-blue-600 hover:underline font-medium">
                   <Plus className="w-3.5 h-3.5" /> Adicionar
@@ -295,7 +295,7 @@ export default function TenantDetailPage() {
               <div className="text-center py-6 text-gray-400">
                 <Phone className="w-8 h-8 mx-auto mb-2 text-gray-200" />
                 <p className="text-sm">Sem contactos adicionais</p>
-                {isAdmin && (
+                {(isAdmin || isCoAdmin) && (
                   <button onClick={addContact} className="mt-2 text-xs text-blue-600 hover:underline">
                     + Adicionar contacto
                   </button>
@@ -305,7 +305,7 @@ export default function TenantDetailPage() {
               <div className="space-y-4">
                 {contacts.map((contact, i) => (
                   <div key={i} className="border border-gray-100 rounded-lg p-3 relative">
-                    {isAdmin && (
+                    {(isAdmin || isCoAdmin) && (
                       <button onClick={() => removeContact(i)}
                         className="absolute top-2 right-2 text-gray-300 hover:text-red-400">
                         <Trash2 className="w-3.5 h-3.5" />
@@ -316,25 +316,25 @@ export default function TenantDetailPage() {
                         <label className="text-xs text-gray-500 block mb-0.5">Nome *</label>
                         <input className="input text-sm w-full" value={contact.name}
                           onChange={e => updateContact(i, 'name', e.target.value)}
-                          disabled={!isAdmin} placeholder="Nome" />
+                          disabled={!(isAdmin || isCoAdmin)} placeholder="Nome" />
                       </div>
                       <div>
                         <label className="text-xs text-gray-500 block mb-0.5">Relação</label>
                         <input className="input text-sm w-full" value={contact.relationship}
                           onChange={e => updateContact(i, 'relationship', e.target.value)}
-                          disabled={!isAdmin} placeholder="ex: Cônjuge, Filho..." />
+                          disabled={!(isAdmin || isCoAdmin)} placeholder="ex: Cônjuge, Filho..." />
                       </div>
                       <div>
                         <label className="text-xs text-gray-500 block mb-0.5">Telefone</label>
                         <input className="input text-sm w-full" value={contact.phone}
                           onChange={e => updateContact(i, 'phone', e.target.value)}
-                          disabled={!isAdmin} placeholder="9XX XXX XXX" />
+                          disabled={!(isAdmin || isCoAdmin)} placeholder="9XX XXX XXX" />
                       </div>
                       <div>
                         <label className="text-xs text-gray-500 block mb-0.5">Email</label>
                         <input className="input text-sm w-full" value={contact.email}
                           onChange={e => updateContact(i, 'email', e.target.value)}
-                          disabled={!isAdmin} placeholder="email@exemplo.com" />
+                          disabled={!(isAdmin || isCoAdmin)} placeholder="email@exemplo.com" />
                       </div>
                     </div>
                   </div>
@@ -342,7 +342,7 @@ export default function TenantDetailPage() {
               </div>
             )}
 
-            {isAdmin && contacts.length > 0 && (
+            {(isAdmin || isCoAdmin) && contacts.length > 0 && (
               <button onClick={saveContacts} disabled={savingContacts}
                 className="mt-4 w-full flex items-center justify-center gap-2 bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
                 <Save className="w-4 h-4" />

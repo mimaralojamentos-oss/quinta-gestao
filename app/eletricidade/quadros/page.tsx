@@ -48,8 +48,8 @@ type FilterType = 'all' | 'year' | 'semester' | 'trimester' | 'custom'
 const METER_COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6']
 
 export default function QuadrosPage() {
-  const { isAdmin, profile } = useAuth()
-  const canEdit = isAdmin || profile?.role === 'electrician'
+  const { isAdmin, isCoAdmin, profile } = useAuth()
+  const canEdit = isAdmin || isCoAdmin || profile?.role === 'electrician'
   const [meters, setMeters] = useState<Meter[]>([])
   const [readings, setReadings] = useState<Record<string, MeterReading[]>>({})
   const [documents, setDocuments] = useState<Document[]>([])
