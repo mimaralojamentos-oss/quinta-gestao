@@ -343,9 +343,38 @@ export default function QuadrosEspacosPage() {
     setExpanded(prev => ({ ...prev, [id]: !prev[id] }))
   }
 
-  async function deleteReading(id: string) {
-    if (!confirm('Apagar esta leitura?')) return
-    await supabase.from('electricity_readings').delete().eq('id', id)
+  async function deleteReading(reading: Reading) {
+    const { data: spaceLeases } = await supabase
+      .from('leases')
+      .select('id')
+      .eq('space_id', reading.space_id)
+
+    const leaseIds = (spaceLeases ?? []).map(l => l.id)
+    const referenceMonth = reading.reading_date.slice(0, 7) + '-01'
+
+    let unpaidCharges: { id: string }[] = []
+    if (leaseIds.length > 0) {
+      const { data: charges } = await supabase
+        .from('electricity_charges')
+        .select('id')
+        .in('lease_id', leaseIds)
+        .eq('paid', false)
+        .or(`charge_date.eq.${reading.reading_date},reference_month.eq.${referenceMonth}`)
+      unpaidCharges = charges ?? []
+    }
+
+    const n = unpaidCharges.length
+    const extra = n > 0
+      ? ` Também vai${n > 1 ? 'o' : ''} ser apagada${n > 1 ? 's' : ''} ${n} cobrança${n > 1 ? 's' : ''} de eletricidade associada${n > 1 ? 's' : ''} (não paga${n > 1 ? 's' : ''}).`
+      : ''
+
+    if (!confirm(`Apagar esta leitura?${extra}`)) return
+
+    if (n > 0) {
+      await supabase.from('electricity_charges').delete().in('id', unpaidCharges.map(c => c.id))
+    }
+
+    await supabase.from('electricity_readings').delete().eq('id', reading.id)
     fetchAll()
   }
 
@@ -590,7 +619,7 @@ export default function QuadrosEspacosPage() {
                                           <Pencil className="w-3.5 h-3.5" />
                                         </button>
                                       )}
-                                      <button onClick={() => deleteReading(r.id)} className="text-gray-300 hover:text-red-500 transition-colors">
+                                      <button onClick={() => deleteReading(r)} className="text-gray-300 hover:text-red-500 transition-colors">
                                         <Trash2 className="w-3.5 h-3.5" />
                                       </button>
                                     </div>
