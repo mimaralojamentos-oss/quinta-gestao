@@ -4,7 +4,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Zap, Trash2, X, ChevronDown, ChevronRight, Settings, Save, Pencil } from 'lucide-react'
+import { Zap, Trash2, X, ChevronDown, ChevronRight, Settings, Save, Pencil, Search } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 
 interface ElectricityConfig {
@@ -63,6 +63,10 @@ export default function QuadrosEspacosPage() {
   })
   const [editLeaseId, setEditLeaseId] = useState<string | null>(null)
   const [editAdvance, setEditAdvance] = useState(0)
+
+  // Filtros
+  const [filterTenant, setFilterTenant] = useState('')
+  const [filterSpace, setFilterSpace] = useState('')
 
   // Configurações
   const [config, setConfig] = useState<ElectricityConfig | null>(null)
@@ -351,6 +355,12 @@ export default function QuadrosEspacosPage() {
     .reduce((s, r) => s + (r.amount_calculated ?? 0), 0)
   const totalAcumulado = spaces.reduce((s, sp) => s + getAccumulatedAmount(sp.id), 0)
 
+  const filteredSpaces = spaces.filter(space => {
+    const matchesTenant = !filterTenant || getTenantName(space.tenant).toLowerCase().includes(filterTenant.toLowerCase())
+    const matchesSpace = !filterSpace || space.ref.toLowerCase().includes(filterSpace.toLowerCase())
+    return matchesTenant && matchesSpace
+  })
+
   return (
     <AppLayout>
       <div className="p-8">
@@ -413,19 +423,19 @@ export default function QuadrosEspacosPage() {
           </div>
         )}
 
-        <div className="grid grid-cols-3 gap-4 mb-6">
-          <div className="card">
-            <p className="text-sm text-gray-500 mb-1">Espaços com contador</p>
-            <p className="text-xl font-bold text-gray-900">{spaces.length}</p>
-            <p className="text-xs text-gray-400 mt-1">H34 tem contador próprio (excluído)</p>
+        <div className="grid grid-cols-3 gap-3 mb-4">
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-3">
+            <p className="text-xs text-gray-500 mb-0.5">Espaços com contador</p>
+            <p className="text-lg font-bold text-gray-900">{spaces.length}</p>
+            <p className="text-[10px] text-gray-400 mt-0.5">H34 tem contador próprio (excluído)</p>
           </div>
-          <div className="card">
-            <p className="text-sm text-gray-500 mb-1">Total cobrado</p>
-            <p className="text-xl font-bold text-emerald-600">{formatCurrency(totalCobrado)}</p>
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-3">
+            <p className="text-xs text-gray-500 mb-0.5">Total cobrado</p>
+            <p className="text-lg font-bold text-emerald-600">{formatCurrency(totalCobrado)}</p>
           </div>
-          <div className="card">
-            <p className="text-sm text-gray-500 mb-1">Por acumular</p>
-            <p className="text-xl font-bold text-yellow-600">{formatCurrency(totalAcumulado)}</p>
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-3">
+            <p className="text-xs text-gray-500 mb-0.5">Por acumular</p>
+            <p className="text-lg font-bold text-yellow-600">{formatCurrency(totalAcumulado)}</p>
           </div>
         </div>
 
@@ -435,13 +445,56 @@ export default function QuadrosEspacosPage() {
           </div>
         )}
 
+        <div className="flex flex-wrap items-center gap-3 mb-4">
+          <div className="relative flex-1 min-w-[180px]">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <input
+              type="text"
+              value={filterTenant}
+              onChange={e => setFilterTenant(e.target.value)}
+              placeholder="Filtrar por inquilino..."
+              className="input pl-8 pr-8"
+            />
+            {filterTenant && (
+              <button onClick={() => setFilterTenant('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+          <div className="relative flex-1 min-w-[180px]">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <input
+              type="text"
+              value={filterSpace}
+              onChange={e => setFilterSpace(e.target.value)}
+              placeholder="Filtrar por espaço (ex: P01, H33)..."
+              className="input pl-8 pr-8"
+            />
+            {filterSpace && (
+              <button onClick={() => setFilterSpace('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+          {(filterTenant || filterSpace) && (
+            <button onClick={() => { setFilterTenant(''); setFilterSpace('') }} className="text-xs text-red-500 hover:text-red-700 font-medium">
+              Limpar filtros
+            </button>
+          )}
+        </div>
+
         {loading ? (
           <div className="flex justify-center py-12">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600" />
           </div>
         ) : (
           <div className="space-y-3">
-            {spaces.map(space => {
+            {filteredSpaces.length === 0 && (
+              <div className="card text-center py-6 text-sm text-gray-500">
+                Nenhum espaço encontrado com os filtros aplicados.
+              </div>
+            )}
+            {filteredSpaces.map(space => {
               const spaceReadings = readings[space.id] ?? []
               const lastReading = spaceReadings[0]
               const isOpen = expanded[space.id]
