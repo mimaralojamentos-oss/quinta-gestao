@@ -120,7 +120,7 @@ export default function PagamentosPage() {
         const start = new Date(Math.max(contractStart.getTime(), mayStart.getTime()))
         const cursor = new Date(start)
         while (cursor <= today) {
-          const monthStr = cursor.toISOString().slice(0, 7)
+          const monthStr = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`
           const hasPayment = (allPayments ?? []).some(p => p.lease_id === l.id && p.reference_month?.slice(0, 7) === monthStr && p.payment_date && (p.tipo === 'renda' || !p.tipo))
           if (!hasPayment) rentDebt += l.monthly_rent
           cursor.setMonth(cursor.getMonth() + 1)

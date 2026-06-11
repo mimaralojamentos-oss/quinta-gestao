@@ -84,7 +84,7 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
       const start = contractStart > mayStart ? contractStart : mayStart
       const cursor = new Date(start)
       while (cursor <= today) {
-        const monthStr = cursor.toISOString().slice(0, 7)
+        const monthStr = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`
         const hasPayment = (allPayments ?? []).some(p =>
           p.reference_month?.slice(0, 7) === monthStr &&
           p.payment_date &&

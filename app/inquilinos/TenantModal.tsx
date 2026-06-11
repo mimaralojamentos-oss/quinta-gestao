@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Tenant } from '@/lib/types'
 import { X, User, Home, FileText, Plus, Trash2, Pencil, ChevronRight, ChevronLeft, Upload, Loader2, Sparkles } from 'lucide-react'
-import { formatCurrency, formatDate } from '@/lib/utils'
+import { formatCurrency, formatDate, getCurrentMonth } from '@/lib/utils'
 
 interface Props {
   tenant: Tenant | null
@@ -78,7 +78,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
   const [showPaymentForm, setShowPaymentForm] = useState(false)
   const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null)
   const [paymentForm, setPaymentForm] = useState({
-    lease_id: '', reference_month: new Date().toISOString().slice(0, 7), amount: '',
+    lease_id: '', reference_month: getCurrentMonth().slice(0, 7), amount: '',
     payment_date: new Date().toISOString().slice(0, 10), payment_method: 'dinheiro',
     tipo: 'renda', notes: '', is_debt: false,
   })
@@ -133,7 +133,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
       const start = contractStart > mayStart ? contractStart : mayStart
       const cursor = new Date(start)
       while (cursor <= today) {
-        const monthStr = cursor.toISOString().slice(0, 7)
+        const monthStr = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`
         const hasPayment = enriched.some(p => p.lease_id === lease.id && p.reference_month?.slice(0, 7) === monthStr && (p.tipo === 'renda' || !p.tipo))
         if (!hasPayment) missingRows.push({
           reference_month: monthStr + '-01', amount: lease.monthly_rent,
@@ -282,7 +282,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
   function handleNewPayment() {
     setEditingPaymentId(null)
     const activeLease = leases.find(l => l.status === 'ativo')
-    setPaymentForm({ lease_id: activeLease?.id ?? '', reference_month: new Date().toISOString().slice(0, 7), amount: String(activeLease?.monthly_rent ?? ''), payment_date: new Date().toISOString().slice(0, 10), payment_method: 'dinheiro', tipo: 'renda', notes: '', is_debt: false })
+    setPaymentForm({ lease_id: activeLease?.id ?? '', reference_month: getCurrentMonth().slice(0, 7), amount: String(activeLease?.monthly_rent ?? ''), payment_date: new Date().toISOString().slice(0, 10), payment_method: 'dinheiro', tipo: 'renda', notes: '', is_debt: false })
     setShowPaymentForm(true); setPaymentError('')
   }
 
