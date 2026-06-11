@@ -166,12 +166,16 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
       const { type, referenceMonth, debtId, chargeId } = entry.debtItem
 
       if (type === 'renda') {
+        const debtAmount = entry.debtItem.remainingAmount
+        const rendaAmount = Math.min(amount, debtAmount)
+        const adiantamentoAmount = Math.max(0, amount - debtAmount)
+
         // Registar pagamento de renda
         const { data: newPayment } = await supabase.from('rent_payments').insert({
           lease_id: lease.id,
           reference_month: referenceMonth + '-01',
           payment_date: entry.payment_date,
-          amount,
+          amount: rendaAmount,
           payment_method: entry.payment_method,
           tipo: 'renda',
         }).select().single()
@@ -181,11 +185,34 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
           await supabase.from('cash_fund_movements').insert({
             movement_date: entry.payment_date,
             description: `🏠 Renda ${referenceMonth} — ${lease.space?.ref} (${lease.tenant?.name})`,
-            amount,
+            amount: rendaAmount,
             type: 'entrada',
             source: 'renda',
             source_id: newPayment.id,
           })
+        }
+
+        // Diferença paga a mais fica registada como adiantamento
+        if (adiantamentoAmount > 0) {
+          const { data: newAdvance } = await supabase.from('rent_payments').insert({
+            lease_id: lease.id,
+            reference_month: referenceMonth + '-01',
+            payment_date: entry.payment_date,
+            amount: adiantamentoAmount,
+            payment_method: entry.payment_method,
+            tipo: 'adiantamento',
+          }).select().single()
+
+          if (entry.payment_method === 'dinheiro' && newAdvance) {
+            await supabase.from('cash_fund_movements').insert({
+              movement_date: entry.payment_date,
+              description: `💰 Adiantamento — ${lease.space?.ref} (${lease.tenant?.name})`,
+              amount: adiantamentoAmount,
+              type: 'entrada',
+              source: 'renda',
+              source_id: newAdvance.id,
+            })
+          }
         }
       } else if (type === 'manual' && debtId) {
         // Registar pagamento de dívida manual
@@ -391,8 +418,9 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
                         <div>
                           <label className="text-xs text-gray-500 block mb-1">Valor pago (€)</label>
                           <input
-                            type="number" step="0.01" min="0" max={entry.debtItem.remainingAmount}
-                            placeholder={`max ${formatCurrency(entry.debtItem.remainingAmount)}`}
+                            type="number" step="0.01" min="0"
+                            max={entry.debtItem.type === 'renda' ? undefined : entry.debtItem.remainingAmount}
+                            placeholder={entry.debtItem.type === 'renda' ? formatCurrency(entry.debtItem.remainingAmount) : `max ${formatCurrency(entry.debtItem.remainingAmount)}`}
                             className="input text-sm w-full"
                             value={entry.amount}
                             onChange={e => updateEntry(i, 'amount', e.target.value)}
@@ -421,6 +449,11 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
                       )}
                       {entry.amount && parseFloat(entry.amount) >= entry.debtItem.remainingAmount && (
                         <p className="text-xs text-emerald-600 mt-1.5">✓ Dívida liquidada</p>
+                      )}
+                      {entry.debtItem.type === 'renda' && entry.amount && parseFloat(entry.amount) > entry.debtItem.remainingAmount && (
+                        <p className="text-xs text-purple-600 mt-1.5">
+                          💰 Os {formatCurrency(parseFloat(entry.amount) - entry.debtItem.remainingAmount)} extra serão guardados como adiantamento
+                        </p>
                       )}
                     </div>
                   ))}
