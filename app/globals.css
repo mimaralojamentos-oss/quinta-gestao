@@ -142,3 +142,23 @@ body {
 }
 .sidebar-link:hover { background: #ecfdf5; color: #065f46; }
 .sidebar-link.active { background: #d1fae5; color: #065f46; }
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .print-area, .print-area * {
+    visibility: visible;
+  }
+  .print-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    margin: 0;
+  }
+  @page {
+    size: A4;
+    margin: 1.5cm;
+  }
+}

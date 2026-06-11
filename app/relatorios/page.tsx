@@ -4,7 +4,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatDate } from '@/lib/utils'
-import { BarChart3, TrendingUp, Home, FileText, Calendar, ChevronDown, ChevronUp, Edit2, X, Save } from 'lucide-react'
+import { BarChart3, TrendingUp, Home, FileText, Calendar, ChevronDown, ChevronUp, Edit2, X, Save, ClipboardList } from 'lucide-react'
 
 interface MonthOption { label: string; value: string }
 
@@ -53,8 +53,10 @@ export default function RelatoriosPage() {
   const [editForm, setEditForm] = useState<any>({})
   const [savingExpense, setSavingExpense] = useState(false)
 
+  const [cobrancasSort, setCobrancasSort] = useState<'nome' | 'espaco'>('nome')
+
   useEffect(() => {
-    if (activeReport === 'rendas') fetchRendas()
+    if (activeReport === 'rendas' || activeReport === 'cobrancas') fetchRendas()
     if (activeReport === 'ocupacao') fetchOcupacao()
     if (activeReport === 'financeiro') fetchFinanceiro()
     if (activeReport === 'contratos') fetchContratos()
@@ -241,9 +243,10 @@ export default function RelatoriosPage() {
     { key: 'ocupacao', label: 'Ocupação', icon: Home, color: 'text-blue-600', bg: 'bg-blue-50' },
     { key: 'financeiro', label: 'Financeiro', icon: TrendingUp, color: 'text-purple-600', bg: 'bg-purple-50' },
     { key: 'contratos', label: 'Contratos a Expirar', icon: Calendar, color: 'text-orange-600', bg: 'bg-orange-50' },
+    { key: 'cobrancas', label: 'Lista de Cobranças', icon: ClipboardList, color: 'text-rose-600', bg: 'bg-rose-50' },
   ]
 
-  const showMonthPicker = activeReport === 'rendas' || activeReport === 'financeiro'
+  const showMonthPicker = activeReport === 'rendas' || activeReport === 'financeiro' || activeReport === 'cobrancas'
 
   return (
     <AppLayout>
@@ -634,6 +637,89 @@ export default function RelatoriosPage() {
                 </div>
               </div>
             )}
+
+            {/* LISTA DE COBRANÇAS */}
+            {activeReport === 'cobrancas' && rendas && (() => {
+              const totalEmFalta = rendas.emFalta.reduce((s: number, l: any) => s + (l.monthly_rent ?? 0), 0)
+              const sortedEmFalta = [...rendas.emFalta].sort((a: any, b: any) => {
+                if (cobrancasSort === 'espaco') return (a.space?.ref ?? '').localeCompare(b.space?.ref ?? '')
+                return (a.tenant?.name ?? '').localeCompare(b.tenant?.name ?? '')
+              })
+              const monthLabel = MONTHS.find(m => m.value === selectedMonth)?.label ?? selectedMonth
+
+              return (
+                <div className="space-y-5">
+                  <div className="grid grid-cols-2 gap-4 print:hidden">
+                    <div className="bg-white border border-gray-200 rounded-xl p-4">
+                      <p className="text-xs text-gray-500 mb-1">Total em Falta</p>
+                      <p className="text-2xl font-bold text-red-500">{fmt(totalEmFalta)}</p>
+                    </div>
+                    <div className="bg-white border border-gray-200 rounded-xl p-4">
+                      <p className="text-xs text-gray-500 mb-1">Inquilinos em Falta</p>
+                      <p className="text-2xl font-bold text-gray-900">{sortedEmFalta.length}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between print:hidden">
+                    <div className="flex gap-2">
+                      <button onClick={() => setCobrancasSort('nome')}
+                        className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${cobrancasSort === 'nome' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
+                        Ordenar por Nome
+                      </button>
+                      <button onClick={() => setCobrancasSort('espaco')}
+                        className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${cobrancasSort === 'espaco' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
+                        Ordenar por Espaço
+                      </button>
+                    </div>
+                    <button onClick={() => window.print()}
+                      className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-medium bg-gray-800 text-white hover:bg-gray-900 transition-colors">
+                      🖨️ Imprimir
+                    </button>
+                  </div>
+
+                  <div className="print-area bg-white border border-gray-200 rounded-xl p-4 print:border-0 print:rounded-none print:p-0">
+                    <div className="hidden print:block mb-4">
+                      <h1 className="text-lg font-bold text-gray-900">Gestão da Quinta — Évora</h1>
+                      <h2 className="text-sm text-gray-700">Cobranças de {monthLabel}</h2>
+                    </div>
+
+                    {sortedEmFalta.length === 0 ? (
+                      <div className="text-center py-8 text-gray-400">
+                        <p className="text-sm">✅ Sem rendas em falta para {monthLabel}.</p>
+                      </div>
+                    ) : (
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-gray-200">
+                            <th className="text-left py-2 px-2 text-xs font-semibold text-gray-500 uppercase">Espaço</th>
+                            <th className="text-left py-2 px-2 text-xs font-semibold text-gray-500 uppercase">Inquilino</th>
+                            <th className="text-right py-2 px-2 text-xs font-semibold text-gray-500 uppercase">Renda</th>
+                            <th className="text-center py-2 px-2 text-xs font-semibold text-gray-500 uppercase w-20">Pago</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sortedEmFalta.map((l: any) => (
+                            <tr key={l.id} className="border-b border-gray-50 last:border-0">
+                              <td className="py-2 px-2 font-medium text-gray-800">{l.space?.ref}</td>
+                              <td className="py-2 px-2 text-gray-700">{l.tenant?.name ?? '—'}</td>
+                              <td className="py-2 px-2 text-right font-semibold text-gray-900">{fmt(l.monthly_rent ?? 0)}</td>
+                              <td className="py-2 px-2">
+                                <div className="w-5 h-5 mx-auto border-2 border-gray-400 print:border-black rounded-sm" />
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+
+                    <div className="hidden print:flex justify-between items-center mt-6 pt-3 border-t border-gray-300 text-xs text-gray-600">
+                      <span>Impresso em {new Date().toLocaleDateString('pt-PT')}</span>
+                      <span className="font-bold">Total em falta: {fmt(totalEmFalta)}</span>
+                    </div>
+                  </div>
+                </div>
+              )
+            })()}
           </div>
         )}
       </div>
