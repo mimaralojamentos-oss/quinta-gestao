@@ -149,16 +149,11 @@ export default function QuadrosEspacosPage() {
   }
 
   function getAccumulatedAmount(spaceId: string): number {
-    const spaceReadings = readings[spaceId] ?? []
-    let total = 0
-    for (const r of [...spaceReadings].reverse()) {
-      if (r.accumulated && !r.charged) {
-        total += r.amount_calculated ?? 0
-      } else if (r.charged) {
-        total = 0
-      }
+    const latest = (readings[spaceId] ?? [])[0]
+    if (latest && latest.accumulated && !latest.charged) {
+      return latest.amount_calculated ?? 0
     }
-    return total
+    return 0
   }
 
   function openReadingModal(space: Space) {
@@ -298,9 +293,9 @@ export default function QuadrosEspacosPage() {
     const newValue = parseFloat(readingForm.reading_value)
     const prevValue = lastReading?.reading_value ?? null
     const kwhConsumed = prevValue != null ? newValue - prevValue : null
-    const accumulated = getAccumulatedAmount(space.id)
-    const amountCalc = kwhConsumed != null ? parseFloat((kwhConsumed * priceWithVat + accumulated).toFixed(2)) : null
-    const shouldCharge = charge && amountCalc != null && amountCalc >= minCharge
+    const accumulatedSoFar = getAccumulatedAmount(space.id)
+    const amountCalc = kwhConsumed != null ? parseFloat((kwhConsumed * priceWithVat + accumulatedSoFar).toFixed(2)) : null
+    const charged = charge && amountCalc != null && amountCalc >= minCharge
 
     await supabase.from('electricity_readings').insert({
       space_id: space.id,
@@ -309,12 +304,12 @@ export default function QuadrosEspacosPage() {
       previous_value: prevValue,
       kwh_consumed: kwhConsumed,
       amount_calculated: amountCalc,
-      charged: shouldCharge,
-      accumulated: !shouldCharge,
+      charged,
+      accumulated: !charged,
       notes: readingForm.notes || null,
     })
 
-    if (shouldCharge && space.tenant_id && amountCalc) {
+    if (charged && space.tenant_id && amountCalc) {
       const { data: lease } = await supabase
         .from('leases')
         .select('id')
