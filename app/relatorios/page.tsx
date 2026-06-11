@@ -13,7 +13,7 @@ function getLastMonths(n: number): MonthOption[] {
   const now = new Date()
   for (let i = 0; i < n; i++) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
-    const value = d.toISOString().slice(0, 7)
+    const value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
     const label = d.toLocaleDateString('pt-PT', { month: 'long', year: 'numeric' })
     result.push({ value, label: label.charAt(0).toUpperCase() + label.slice(1) })
   }
