@@ -439,12 +439,6 @@ export default function QuadrosEspacosPage() {
           </div>
         </div>
 
-        {semInquilino > 0 && (
-          <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-4 py-2 mb-4">
-            <p className="text-sm text-yellow-700">⚠ <strong>{semInquilino}</strong> espaço(s) sem inquilino — leituras não geram cobrança</p>
-          </div>
-        )}
-
         <div className="flex flex-wrap items-center gap-3 mb-4">
           <div className="relative flex-1 min-w-[180px]">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -482,6 +476,12 @@ export default function QuadrosEspacosPage() {
             </button>
           )}
         </div>
+
+        {semInquilino > 0 && (
+          <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-4 py-2 mb-4">
+            <p className="text-sm text-yellow-700">⚠ <strong>{semInquilino}</strong> espaço(s) sem inquilino — leituras não geram cobrança</p>
+          </div>
+        )}
 
         {loading ? (
           <div className="flex justify-center py-12">
