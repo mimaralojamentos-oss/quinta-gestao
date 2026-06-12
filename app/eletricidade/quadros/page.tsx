@@ -84,6 +84,7 @@ export default function QuadrosPage() {
   const [filterTrimester, setFilterTrimester] = useState('1')
   const [filterStart, setFilterStart] = useState('2026-01-01')
   const [filterEnd, setFilterEnd] = useState(new Date().toISOString().slice(0, 10))
+  const [chartData, setChartData] = useState<Record<string, any>[]>([])
 
   const supabase = createClient()
 
@@ -134,7 +135,13 @@ export default function QuadrosPage() {
     )
   })
 
-  function getChartData() {
+  // Recarrega os dados do gráfico sempre que as leituras, quadros ou filtros mudam
+  // (fetchAll() atualiza readings/meters após apagar, adicionar ou editar)
+  useEffect(() => {
+    loadChartData()
+  }, [readings, meters, filterType, filterYear, filterSemester, filterTrimester, filterStart, filterEnd])
+
+  function loadChartData() {
     // Para 'all', usar a leitura mais antiga disponível
     const allReadingDates = Object.values(readings).flat().map(r => r.reading_date).sort()
     const oldestDate = allReadingDates[0] ?? '2026-01-01'
@@ -168,7 +175,7 @@ export default function QuadrosPage() {
       cur.setMonth(cur.getMonth() + 1)
     }
 
-    return months.map(month => {
+    const data = months.map(month => {
       const point: Record<string, any> = {
         month: new Date(month + '-01').toLocaleDateString('pt-PT', { month: 'short', year: '2-digit' })
       }
@@ -180,6 +187,8 @@ export default function QuadrosPage() {
       }
       return point
     })
+
+    setChartData(data)
   }
 
   async function saveMeter() {
@@ -304,7 +313,6 @@ export default function QuadrosPage() {
   }
 
   const totalFaturas = Object.values(readings).flat().reduce((s, r) => s + (r.invoice_amount ?? 0), 0)
-  const chartData = getChartData()
   const years = ['2025', '2026', '2027', '2028']
 
   return (
