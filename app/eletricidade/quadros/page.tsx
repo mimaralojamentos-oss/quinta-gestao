@@ -417,7 +417,7 @@ export default function QuadrosPage() {
                   {meters.map((meter, i) => (
                     <Line key={meter.id} type="monotone" dataKey={meter.name}
                       stroke={METER_COLORS[i % METER_COLORS.length]} strokeWidth={2}
-                      dot={{ r: 4 }} activeDot={{ r: 6 }} connectNulls={false} />
+                      dot={{ r: 4 }} activeDot={{ r: 6 }} connectNulls={true} />
                   ))}
                 </LineChart>
               </ResponsiveContainer>
