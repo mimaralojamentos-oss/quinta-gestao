@@ -108,7 +108,14 @@ Primeiro identifica o tipo de documento e depois extrai os campos correspondente
   "category": "uma de: obras, edp, pessoal, contabilidade, manutencao, outros"
 }`
 
-        const prompt = isAutomatic ? promptAuto : (tipo === 'fatura_luz' ? promptEdp : promptNormal)
+        const promptTransferenciaInterna = `Extrai os seguintes dados deste documento de transferência interna (do Fundo de Maneio para o banco) em JSON (sem markdown, só JSON puro):
+{
+  "amount": valor numérico da transferência sem símbolo (null se não existir),
+  "doc_date": "data da transferência no formato YYYY-MM-DD (null se não existir)",
+  "items_summary": "descrição breve da transferência em português, ex: Transferência para banco (máximo 200 caracteres)"
+}`
+
+        const prompt = isAutomatic ? promptAuto : (tipo === 'fatura_luz' ? promptEdp : tipo === 'transferencia_interna' ? promptTransferenciaInterna : promptNormal)
 
         const response = await anthropic.messages.create({
           model: 'claude-sonnet-4-5',
@@ -202,6 +209,21 @@ Primeiro identifica o tipo de documento e depois extrai os campos correspondente
       }
     }
 
+    // ── TRANSFERÊNCIA INTERNA: criar movimento de saída no Fundo de Maneio ──
+    let cashMovementCreated = false
+    if (tipo === 'transferencia_interna' && doc && extracted.amount && extracted.doc_date) {
+      await supabase.from('cash_fund_movements').insert({
+        movement_date: extracted.doc_date,
+        description: `Transferência para banco - ${extracted.doc_date}`,
+        amount: -Math.abs(extracted.amount),
+        type: 'saida',
+        source: 'documento',
+        source_id: doc.id,
+        notes: 'Criado automaticamente a partir de documento de transferência interna',
+      })
+      cashMovementCreated = true
+    }
+
     // ── CRIAR DESPESA automaticamente para faturas ──
     const isFatura = ['fatura', 'fatura_luz', 'fatura_agua'].includes(tipo)
     let autoExpense = false
@@ -255,7 +277,7 @@ Primeiro identifica o tipo de documento e depois extrai os campos correspondente
       }
     }
 
-    return NextResponse.json({ success: true, document: doc, autoExpense, duplicate: false, expenseId, meterReadingCreated, detectedTipo: tipo })
+    return NextResponse.json({ success: true, document: doc, autoExpense, duplicate: false, expenseId, meterReadingCreated, cashMovementCreated, detectedTipo: tipo })
 
   } catch (e: any) {
     console.error(e)

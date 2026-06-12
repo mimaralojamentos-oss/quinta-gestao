@@ -44,6 +44,7 @@ interface UploadResult {
   status: 'pending' | 'processing' | 'success' | 'error' | 'duplicate' | 'skipped'
   error?: string
   autoExpense?: boolean
+  cashMovementCreated?: boolean
   duplicate?: any
   detectedTipo?: string
 }
@@ -59,6 +60,7 @@ const tipoLabels: Record<string, string> = {
   carta: '✉️ Carta',
   outro: '📦 Outro',
   contrato: '📄 Contrato',
+  transferencia_interna: '🔄 Transferência Interna',
 }
 
 const tipoColors: Record<string, string> = {
@@ -69,6 +71,7 @@ const tipoColors: Record<string, string> = {
   carta: 'bg-gray-100 text-gray-700',
   outro: 'bg-gray-100 text-gray-600',
   contrato: 'bg-blue-100 text-blue-700',
+  transferencia_interna: 'bg-indigo-100 text-indigo-700',
 }
 
 function formatDateTime(dateStr: string): string {
@@ -182,6 +185,23 @@ async function handleSaveEdit() {
     }).eq('id', editDoc.expense_id)
   }
 
+  // Transferência interna: criar movimento de saída no Fundo de Maneio se ainda não existir
+  if (editForm.tipo === 'transferencia_interna' && editForm.amount && editForm.doc_date) {
+    const { data: existingMovement } = await supabase.from('cash_fund_movements')
+      .select('id').eq('source', 'documento').eq('source_id', editDoc.id).maybeSingle()
+    if (!existingMovement) {
+      await supabase.from('cash_fund_movements').insert({
+        movement_date: editForm.doc_date,
+        description: `Transferência para banco - ${editForm.doc_date}`,
+        amount: -Math.abs(parseFloat(editForm.amount)),
+        type: 'saida',
+        source: 'documento',
+        source_id: editDoc.id,
+        notes: 'Criado automaticamente a partir de documento de transferência interna',
+      })
+    }
+  }
+
   setSaving(false)
   setEditDoc(null)
   fetchAll()
@@ -203,7 +223,7 @@ async function handleSaveEdit() {
     if (data.error) {
       setUploadResults(prev => prev.map((r, i) => i === index ? { ...r, status: 'error', error: data.error } : r))
     } else {
-      setUploadResults(prev => prev.map((r, i) => i === index ? { ...r, status: 'success', autoExpense: data.autoExpense, detectedTipo: data.detectedTipo } : r))
+      setUploadResults(prev => prev.map((r, i) => i === index ? { ...r, status: 'success', autoExpense: data.autoExpense, cashMovementCreated: data.cashMovementCreated, detectedTipo: data.detectedTipo } : r))
     }
     return 'done'
   }
@@ -271,6 +291,9 @@ async function handleSaveEdit() {
         await supabase.from('expenses').delete().eq('id', doc.expense_id)
       } else if (doc.expense_id) {
         await supabase.from('expenses').update({ invoice_id: null }).eq('id', doc.expense_id)
+      }
+      if (doc.tipo === 'transferencia_interna') {
+        await supabase.from('cash_fund_movements').delete().eq('source', 'documento').eq('source_id', doc.id)
       }
       if (doc.file_path) await supabase.storage.from('documents').remove([doc.file_path])
       await supabase.from('documents').delete().eq('id', doc.id)
@@ -363,6 +386,7 @@ async function handleSaveEdit() {
     { tipo: 'registo_predial', emoji: '🏠', label: 'Prediais', color: 'text-purple-600' },
     { tipo: 'carta', emoji: '✉️', label: 'Cartas', color: 'text-gray-600' },
     { tipo: 'outro', emoji: '📦', label: 'Outros', color: 'text-gray-500' },
+    { tipo: 'transferencia_interna', emoji: '🔄', label: 'Transferências', color: 'text-indigo-600' },
   ]
 
   return (
@@ -549,6 +573,7 @@ async function handleSaveEdit() {
                   <option value="registo_predial">🏠 Registo Predial</option>
                   <option value="carta">✉️ Carta</option>
                   <option value="outro">📦 Outro</option>
+                  <option value="transferencia_interna">🔄 Transferência Interna</option>
                 </select>
               </div>
               {editForm.tipo === 'outro' && (
@@ -630,6 +655,7 @@ async function handleSaveEdit() {
                     <option value="registo_predial">🏠 Registo Predial</option>
                     <option value="carta">✉️ Carta</option>
                     <option value="outro">📦 Outro</option>
+                    <option value="transferencia_interna">🔄 Transferência Interna</option>
                   </select>
                   {uploadTipo === 'automatico' && (
                     <p className="text-xs text-blue-600 mt-1.5">✨ A IA vai identificar automaticamente se é fatura, fatura de luz, água, etc.</p>
@@ -719,7 +745,8 @@ async function handleSaveEdit() {
                         <p className="text-xs text-blue-600">🤖 Detetado: {tipoLabels[r.detectedTipo] ?? r.detectedTipo}</p>
                       )}
                       {r.status === 'success' && r.autoExpense && <p className="text-xs text-emerald-600">✓ Despesa criada automaticamente</p>}
-                      {r.status === 'success' && !r.autoExpense && !r.detectedTipo && <p className="text-xs text-gray-500">✓ Documento guardado</p>}
+                      {r.status === 'success' && r.cashMovementCreated && <p className="text-xs text-emerald-600">✓ Movimento criado no Fundo de Maneio</p>}
+                      {r.status === 'success' && !r.autoExpense && !r.cashMovementCreated && !r.detectedTipo && <p className="text-xs text-gray-500">✓ Documento guardado</p>}
                       {r.status === 'skipped' && <p className="text-xs text-gray-500">Saltado</p>}
                       {r.error && <p className="text-xs text-red-600">{r.error}</p>}
                     </div>

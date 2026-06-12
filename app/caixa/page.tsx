@@ -10,7 +10,7 @@ import CashModal from './CashModal'
 import { useAuth } from '@/lib/auth-context'
 
 type PeriodFilter = 'all' | 'today' | 'week' | 'month' | 'year' | 'range'
-type SourceFilter = 'all' | 'manual' | 'renda' | 'despesa'
+type SourceFilter = 'all' | 'manual' | 'renda' | 'despesa' | 'documento'
 
 export default function CaixaPage() {
   const supabase = createClient()
@@ -97,6 +97,7 @@ export default function CaixaPage() {
   const sourceLabel = (source: string) => {
     if (source === 'renda') return '🏠 Renda'
     if (source === 'despesa') return '💸 Despesa'
+    if (source === 'documento') return '📄 Documento'
     return '✋ Manual'
   }
 
@@ -114,6 +115,7 @@ export default function CaixaPage() {
     { key: 'manual', label: '✋ Manual' },
     { key: 'renda', label: '🏠 Renda' },
     { key: 'despesa', label: '💸 Despesa' },
+    { key: 'documento', label: '📄 Documento' },
   ]
 
   return (
