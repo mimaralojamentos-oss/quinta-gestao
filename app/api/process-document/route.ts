@@ -56,7 +56,9 @@ export async function POST(request: Request) {
         const base64 = buffer.toString('base64')
         const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
 
-        const promptAuto = `Analisa este documento e extrai os dados em JSON (sem markdown, só JSON puro).
+        const jsonOnlyInstruction = 'Responde APENAS com um objeto JSON válido. Não incluas markdown, não incluas ```json, não incluas nenhum texto antes ou depois do JSON.\n\n'
+
+        const promptAuto = jsonOnlyInstruction + `Analisa este documento e extrai os dados em JSON (sem markdown, só JSON puro).
 Primeiro identifica o tipo de documento e depois extrai os campos correspondentes.
 
 Atenção especial ao tipo "transferencia_interna": usa este tipo quando o documento for um comprovativo/recibo emitido por um banco (ex: Crédito Agrícola) referente a um depósito em numerário, entrega de valores ao banco ou transferência entre contas próprias. Estes documentos tipicamente têm termos como "Dep. Numerário", "Entrega para Depósito" ou "Total Depositado", indicam um valor depositado em euros e o nome do depositante.
@@ -78,7 +80,7 @@ Atenção especial ao tipo "transferencia_interna": usa este tipo quando o docum
   "edp_kwh_consumed": número de kWh consumidos se for fatura de luz (null caso contrário)
 }`
 
-        const promptEdp = `Extrai os seguintes dados desta fatura EDP em JSON (sem markdown, só JSON puro):
+        const promptEdp = jsonOnlyInstruction + `Extrai os seguintes dados desta fatura EDP em JSON (sem markdown, só JSON puro):
 {
   "doc_number": "número da fatura",
   "supplier_name": "nome do fornecedor",
@@ -97,7 +99,7 @@ Atenção especial ao tipo "transferencia_interna": usa este tipo quando o docum
   "edp_kwh_consumed": número total de kWh consumidos faturados
 }`
 
-        const promptNormal = `Extrai os seguintes dados deste documento em JSON (sem markdown, só JSON puro):
+        const promptNormal = jsonOnlyInstruction + `Extrai os seguintes dados deste documento em JSON (sem markdown, só JSON puro):
 {
   "doc_number": "número do documento/fatura se existir",
   "supplier_name": "nome do fornecedor/entidade emissora",
@@ -110,7 +112,7 @@ Atenção especial ao tipo "transferencia_interna": usa este tipo quando o docum
   "category": "uma de: obras, edp, pessoal, contabilidade, manutencao, outros"
 }`
 
-        const promptTransferenciaInterna = `Extrai os seguintes dados deste documento de transferência interna (do Fundo de Maneio para o banco) em JSON (sem markdown, só JSON puro):
+        const promptTransferenciaInterna = jsonOnlyInstruction + `Extrai os seguintes dados deste documento de transferência interna (do Fundo de Maneio para o banco) em JSON (sem markdown, só JSON puro):
 {
   "amount": valor numérico da transferência sem símbolo (null se não existir),
   "doc_date": "data da transferência no formato YYYY-MM-DD (null se não existir)",
@@ -139,7 +141,12 @@ Atenção especial ao tipo "transferencia_interna": usa este tipo quando o docum
 
         const text = response.content[0].type === 'text' ? response.content[0].text : ''
         const clean = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-        extracted = JSON.parse(clean)
+
+        try {
+          extracted = JSON.parse(clean)
+        } catch {
+          throw new Error(`Resposta da IA não é JSON válido: ${clean.slice(0, 300)}`)
+        }
 
         // Se for automático, usar o tipo detetado pela IA
         if (isAutomatic && extracted.doc_type) {
