@@ -264,7 +264,7 @@ export default function QuadrosEspacosPage() {
       }
     }
 
-    await supabase.from('electricity_charges').insert({
+    const { error: chargeError } = await supabase.from('electricity_charges').insert({
       lease_id: editLeaseId,
       charge_date: new Date().toISOString().slice(0, 10),
       reference_month: editReadingModal.reading_date.slice(0, 7) + '-01',
@@ -272,8 +272,15 @@ export default function QuadrosEspacosPage() {
       amount: remaining,
       paid: remaining === 0,
       payment_date: remaining === 0 ? new Date().toISOString().slice(0, 10) : null,
+      payment_method: null,
       notes: totalApplied > 0 ? `Adiantamento de ${formatCurrency(totalApplied)} aplicado` : null,
     })
+
+    if (chargeError) {
+      alert(`Erro ao criar a cobrança de eletricidade: ${chargeError.message}`)
+      setSaving(false)
+      return
+    }
 
     await supabase.from('electricity_readings').update({
       charged: true,
