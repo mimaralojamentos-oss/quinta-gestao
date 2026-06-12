@@ -59,8 +59,10 @@ export async function POST(request: Request) {
         const promptAuto = `Analisa este documento e extrai os dados em JSON (sem markdown, só JSON puro).
 Primeiro identifica o tipo de documento e depois extrai os campos correspondentes.
 
+Atenção especial ao tipo "transferencia_interna": usa este tipo quando o documento for um comprovativo/recibo emitido por um banco (ex: Crédito Agrícola) referente a um depósito em numerário, entrega de valores ao banco ou transferência entre contas próprias. Estes documentos tipicamente têm termos como "Dep. Numerário", "Entrega para Depósito" ou "Total Depositado", indicam um valor depositado em euros e o nome do depositante.
+
 {
-  "doc_type": "um de: fatura, fatura_luz, fatura_agua, registo_predial, carta, outro",
+  "doc_type": "um de: fatura, fatura_luz, fatura_agua, registo_predial, carta, transferencia_interna, outro",
   "doc_number": "número do documento/fatura se existir",
   "supplier_name": "nome do fornecedor/entidade emissora",
   "supplier_nif": "NIF do fornecedor (só números, null se não existir)",
