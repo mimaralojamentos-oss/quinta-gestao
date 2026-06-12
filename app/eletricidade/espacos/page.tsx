@@ -304,7 +304,7 @@ export default function QuadrosEspacosPage() {
     const amountCalc = kwhConsumed != null ? parseFloat((kwhConsumed * priceWithVat + accumulatedSoFar).toFixed(2)) : null
     const charged = charge && amountCalc != null && amountCalc >= minCharge
 
-    await supabase.from('electricity_readings').insert({
+    const { data: inserted, error: readingError } = await supabase.from('electricity_readings').insert({
       space_id: space.id,
       reading_date: readingForm.reading_date,
       reading_value: newValue,
@@ -314,7 +314,13 @@ export default function QuadrosEspacosPage() {
       charged,
       accumulated: !charged,
       notes: readingForm.notes || null,
-    })
+    }).select('id').single()
+
+    if (readingError || !inserted) {
+      alert(`Erro ao guardar a leitura: ${readingError?.message ?? 'erro desconhecido'}`)
+      setSaving(false)
+      return
+    }
 
     if (charged && space.tenant_id && amountCalc) {
       const { data: lease } = await supabase
@@ -325,14 +331,24 @@ export default function QuadrosEspacosPage() {
         .single()
 
       if (lease) {
-        await supabase.from('electricity_charges').insert({
+        const { error: chargeError } = await supabase.from('electricity_charges').insert({
           lease_id: lease.id,
           charge_date: readingForm.reading_date,
           reference_month: readingForm.reading_date.slice(0, 7) + '-01',
           units: kwhConsumed,
           amount: amountCalc,
           paid: false,
+          payment_date: null,
+          payment_method: null,
+          notes: null,
         })
+
+        if (chargeError) {
+          alert(`Erro ao criar a cobrança de eletricidade: ${chargeError.message}`)
+          await supabase.from('electricity_readings').update({ charged: false, accumulated: true }).eq('id', inserted.id)
+        }
+      } else {
+        await supabase.from('electricity_readings').update({ charged: false, accumulated: true }).eq('id', inserted.id)
       }
     }
 
