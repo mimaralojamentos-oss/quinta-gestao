@@ -164,14 +164,13 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
       }
     })
 
-    // Cobranças de eletricidade por pagar
+    // Cobranças de eletricidade (pagas e por pagar)
     const elecChargeRows: PaymentRow[] = []
     if (leaseIds.length > 0) {
       const { data: elecData } = await supabase
         .from('electricity_charges')
-        .select('id, lease_id, amount, charge_date, reference_month')
+        .select('id, lease_id, amount, charge_date, reference_month, paid, payment_date, payment_method')
         .in('lease_id', leaseIds)
-        .eq('paid', false)
 
       for (const ec of elecData ?? []) {
         const lease = (leasesData ?? []).find(l => l.id === ec.lease_id)
@@ -181,10 +180,10 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
           lease_id: ec.lease_id,
           reference_month: refDate,
           amount: ec.amount,
-          payment_date: null,
-          payment_method: null,
+          payment_date: ec.paid ? ec.payment_date : null,
+          payment_method: ec.paid ? ec.payment_method : null,
           tipo: 'eletricidade',
-          notes: 'Cobrança de eletricidade por pagar',
+          notes: ec.paid ? 'Cobrança de eletricidade paga' : 'Cobrança de eletricidade por pagar',
           lease,
           isMissing: false,
           isManualDebt: false,
@@ -634,7 +633,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                 <div className="space-y-2">
                   {payments.map((p, i) => {
                     const isLiquidada = p.isManualDebt && p.payment_date === 'liquidada'
-                    const isPago = !p.isManualDebt && !p.isElecCharge && p.payment_date
+                    const isPago = !p.isManualDebt && !!p.payment_date && p.payment_date !== 'liquidada'
                     return (
                       <div key={p.id ?? `row-${i}`}
                         className={`flex items-center justify-between p-3 rounded-lg border ${
@@ -669,7 +668,11 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                           ) : p.isManualDebt ? (
                             <p className="text-xs text-gray-600">{p.notes}</p>
                           ) : p.isElecCharge ? (
-                            <p className="text-xs text-red-600 font-medium">⚡ Eletricidade por pagar</p>
+                            p.payment_date ? (
+                              <p className="text-xs text-gray-500">⚡ Pago em {formatDate(p.payment_date)} · {p.payment_method}</p>
+                            ) : (
+                              <p className="text-xs text-red-600 font-medium">⚡ Eletricidade por pagar</p>
+                            )
                           ) : p.payment_date ? (
                             <p className="text-xs text-gray-500">Pago em {formatDate(p.payment_date)} · {p.payment_method}</p>
                           ) : p.isMissing ? (
