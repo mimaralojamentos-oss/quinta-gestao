@@ -1,7 +1,7 @@
 'use client'
 
 import AppLayout from '@/components/layout/AppLayout'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { Zap, Trash2, X, ChevronDown, ChevronRight, Settings, Save, Pencil, Search } from 'lucide-react'
@@ -66,7 +66,9 @@ export default function QuadrosEspacosPage() {
 
   // Filtros
   const [filterTenant, setFilterTenant] = useState('')
-  const [filterSpace, setFilterSpace] = useState('')
+  const [filterSpaces, setFilterSpaces] = useState<string[]>([])
+  const [showSpaceDropdown, setShowSpaceDropdown] = useState(false)
+  const spaceDropdownRef = useRef<HTMLDivElement>(null)
 
   // Configurações
   const [config, setConfig] = useState<ElectricityConfig | null>(null)
@@ -141,6 +143,20 @@ export default function QuadrosEspacosPage() {
     fetchConfig()
     fetchAll()
   }, [])
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (spaceDropdownRef.current && !spaceDropdownRef.current.contains(e.target as Node)) {
+        setShowSpaceDropdown(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  function toggleSpace(ref: string) {
+    setFilterSpaces(prev => prev.includes(ref) ? prev.filter(r => r !== ref) : [...prev, ref])
+  }
 
   function getTenantName(tenant: any): string {
     if (!tenant) return ''
@@ -404,7 +420,7 @@ export default function QuadrosEspacosPage() {
 
   const filteredSpaces = spaces.filter(space => {
     const matchesTenant = !filterTenant || getTenantName(space.tenant).toLowerCase().includes(filterTenant.toLowerCase())
-    const matchesSpace = !filterSpace || space.ref.toLowerCase().includes(filterSpace.toLowerCase())
+    const matchesSpace = filterSpaces.length === 0 || filterSpaces.includes(space.ref)
     return matchesTenant && matchesSpace
   })
 
@@ -502,23 +518,35 @@ export default function QuadrosEspacosPage() {
               </button>
             )}
           </div>
-          <div className="relative flex-1 min-w-[180px]">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <input
-              type="text"
-              value={filterSpace}
-              onChange={e => setFilterSpace(e.target.value)}
-              placeholder="Filtrar por espaço (ex: P01, H33)..."
-              className="input pl-8 pr-8"
-            />
-            {filterSpace && (
-              <button onClick={() => setFilterSpace('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                <X className="w-4 h-4" />
-              </button>
+          <div className="relative flex-1 min-w-[180px]" ref={spaceDropdownRef}>
+            <button
+              onClick={() => setShowSpaceDropdown(!showSpaceDropdown)}
+              className={`input w-full flex items-center justify-between text-left text-sm ${filterSpaces.length > 0 ? 'border-emerald-400 text-emerald-700' : 'text-gray-500'}`}>
+              <span className="truncate">
+                {filterSpaces.length === 0 ? 'Filtrar por espaço' : filterSpaces.length === 1 ? `${filterSpaces.length} espaço` : `${filterSpaces.length} espaços`}
+              </span>
+              <ChevronDown className="w-4 h-4 flex-shrink-0 ml-2" />
+            </button>
+            {showSpaceDropdown && (
+              <div className="absolute z-20 top-full mt-1 w-64 bg-white border border-gray-200 rounded-xl shadow-lg max-h-64 overflow-y-auto">
+                <div className="p-2 border-b border-gray-100">
+                  <button onClick={() => setFilterSpaces([])} className="text-xs text-gray-500 hover:text-emerald-600 hover:underline">
+                    Limpar
+                  </button>
+                </div>
+                <div className="p-2 grid grid-cols-3 gap-1">
+                  {spaces.map(s => (
+                    <label key={s.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-50 cursor-pointer">
+                      <input type="checkbox" checked={filterSpaces.includes(s.ref)} onChange={() => toggleSpace(s.ref)} className="accent-emerald-600 w-3.5 h-3.5 flex-shrink-0" />
+                      <span className="text-sm text-gray-700">{s.ref}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
-          {(filterTenant || filterSpace) && (
-            <button onClick={() => { setFilterTenant(''); setFilterSpace('') }} className="text-xs text-red-500 hover:text-red-700 font-medium">
+          {(filterTenant || filterSpaces.length > 0) && (
+            <button onClick={() => { setFilterTenant(''); setFilterSpaces([]) }} className="text-xs text-red-500 hover:text-red-700 font-medium">
               Limpar filtros
             </button>
           )}
