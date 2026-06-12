@@ -6,7 +6,7 @@ import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import {
   Upload, CheckCircle, Clock, XCircle, ArrowUpRight,
-  ArrowDownRight, ChevronLeft, Loader2, X, ArrowRight, Link2, Edit2, Search, SlidersHorizontal, Sparkles
+  ArrowDownRight, ChevronLeft, Loader2, X, ArrowRight, Link2, Edit2, Search, SlidersHorizontal, Sparkles, RefreshCw
 } from 'lucide-react'
 import Link from 'next/link'
 import * as XLSX from 'xlsx'
@@ -81,9 +81,11 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
   const [tenants, setTenants] = useState<any[]>([])
   const [expenses, setExpenses] = useState<any[]>([])
   const [leases, setLeases] = useState<any[]>([])
+  const [allLeases, setAllLeases] = useState<any[]>([])
   const [rentPayments, setRentPayments] = useState<any[]>([])
   const [txMatches, setTxMatches] = useState<Record<string, AutoMatch[]>>({})
   const [showFilters, setShowFilters] = useState(false)
+  const [syncing, setSyncing] = useState(false)
 
   const [search, setSearch] = useState('')
   const [filterDateFrom, setFilterDateFrom] = useState('')
@@ -111,6 +113,9 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
       const { data: leasesData } = await supabase
         .from('leases').select('id, monthly_rent, tenant:tenants(id, name), space:spaces(ref)').eq('status', 'ativo')
       setLeases(leasesData ?? [])
+      const { data: allLeasesData } = await supabase
+        .from('leases').select('id, monthly_rent, tenant:tenants(id, name), space:spaces(ref)')
+      setAllLeases(allLeasesData ?? [])
       const { data: expensesData } = await supabase
         .from('expenses').select('id, expense_date, description, amount, supplier, payment_method')
         .eq('payment_method', 'banco')
@@ -229,15 +234,115 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     return null
   }
 
+  // Cria o rent_payment correspondente a uma transação bancária confirmada como "renda".
+  // Devolve 'created' se criou, 'skipped' se já existia pagamento de renda para o mês, ou 'no_lease' se não há contrato associado.
+  async function processRendaTransaction(tx: Transaction): Promise<'created' | 'skipped' | 'no_lease'> {
+    if (tx.confirmed_type !== 'renda' || !tx.confirmed_lease_id || tx.amount <= 0) return 'no_lease'
+
+    const lease = allLeases.find(l => l.id === tx.confirmed_lease_id)
+    if (!lease) return 'no_lease'
+
+    const referenceMonth = tx.transaction_date.slice(0, 7) + '-01'
+
+    const { data: existingPayments } = await supabase
+      .from('rent_payments')
+      .select('id, tipo')
+      .eq('lease_id', tx.confirmed_lease_id)
+      .eq('reference_month', referenceMonth)
+
+    if ((existingPayments ?? []).some(p => p.tipo === 'renda' || !p.tipo)) return 'skipped'
+
+    const monthlyRent = lease.monthly_rent
+    const rendaAmount = Math.min(tx.amount, monthlyRent)
+
+    await supabase.from('rent_payments').insert({
+      lease_id: tx.confirmed_lease_id,
+      reference_month: referenceMonth,
+      payment_date: tx.transaction_date,
+      amount: rendaAmount,
+      payment_method: 'banco',
+      tipo: 'renda',
+    })
+
+    let excess = parseFloat((tx.amount - monthlyRent).toFixed(2))
+
+    if (excess > 0) {
+      // a. Paga cobranças de eletricidade em dívida, mais antigas primeiro
+      const { data: elecCharges } = await supabase
+        .from('electricity_charges')
+        .select('id, amount')
+        .eq('lease_id', tx.confirmed_lease_id)
+        .eq('paid', false)
+        .order('charge_date', { ascending: true })
+
+      for (const charge of elecCharges ?? []) {
+        if (excess <= 0) break
+        if (charge.amount <= excess) {
+          await supabase.from('electricity_charges').update({
+            paid: true, payment_date: tx.transaction_date, payment_method: 'banco',
+          }).eq('id', charge.id)
+          excess = parseFloat((excess - charge.amount).toFixed(2))
+        }
+      }
+
+      // b. Abate outras dívidas, mais antigas primeiro
+      const tenantId = tx.confirmed_tenant_id ?? lease.tenant?.id
+      if (excess > 0 && tenantId) {
+        const { data: debtsData } = await supabase
+          .from('debts')
+          .select('id, original_amount, payments:debt_payments(amount)')
+          .eq('tenant_id', tenantId)
+          .order('reference_date', { ascending: true })
+
+        for (const debt of debtsData ?? []) {
+          if (excess <= 0) break
+          const paid = (debt.payments ?? []).reduce((s: number, p: any) => s + p.amount, 0)
+          const remaining = parseFloat((debt.original_amount - paid).toFixed(2))
+          if (remaining <= 0) continue
+          const toApply = Math.min(remaining, excess)
+          await supabase.from('debt_payments').insert({
+            debt_id: debt.id, payment_date: tx.transaction_date, amount: toApply,
+            payment_method: 'banco', notes: 'Aplicado automaticamente via transação bancária',
+          })
+          excess = parseFloat((excess - toApply).toFixed(2))
+        }
+      }
+
+      // c. Sobra fica registada como adiantamento
+      if (excess > 0) {
+        await supabase.from('rent_payments').insert({
+          lease_id: tx.confirmed_lease_id,
+          reference_month: referenceMonth,
+          payment_date: tx.transaction_date,
+          amount: excess,
+          payment_method: 'banco',
+          tipo: 'adiantamento',
+          used: false,
+        })
+      }
+    }
+
+    return 'created'
+  }
+
+  function warnIfSkipped(result: 'created' | 'skipped' | 'no_lease') {
+    if (result === 'skipped') {
+      alert('⚠️ Já existe um pagamento de renda registado para este mês. A transação foi validada, mas não foi criado um novo registo de pagamento.')
+    }
+  }
+
   async function confirmAutoMatch(tx: Transaction) {
     const autoMatches = txMatches[tx.id]
     if (!autoMatches || autoMatches.length === 0) return
     const best = autoMatches[0]
     if (best.type === 'renda') {
+      const confirmedLeaseId = best.lease?.id ?? null
       await supabase.from('bank_transactions').update({
         confirmed_type: 'renda', confirmed_tenant_id: best.tenant?.id ?? null,
-        confirmed_lease_id: best.lease?.id ?? null, status: 'validado',
+        confirmed_lease_id: confirmedLeaseId, status: 'validado',
       }).eq('id', tx.id)
+      const result = await processRendaTransaction({ ...tx, confirmed_type: 'renda', confirmed_tenant_id: best.tenant?.id ?? null, confirmed_lease_id: confirmedLeaseId })
+      warnIfSkipped(result)
     } else if (best.type === 'despesa') {
       await supabase.from('bank_transactions').update({
         confirmed_type: 'despesa', confirmed_expense_id: best.expense?.id ?? null, status: 'validado',
@@ -247,14 +352,19 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
   }
 
   async function saveManualMatch(tx: Transaction, type: string, tenantId: string, expenseId: string, notes: string) {
+    const confirmedLeaseId = tenantId ? (leases.find(l => (l.tenant as any)?.id === tenantId)?.id ?? null) : null
     await supabase.from('bank_transactions').update({
       confirmed_type: type,
       confirmed_tenant_id: tenantId || null,
-      confirmed_lease_id: tenantId ? (leases.find(l => (l.tenant as any)?.id === tenantId)?.id ?? null) : null,
+      confirmed_lease_id: confirmedLeaseId,
       confirmed_expense_id: expenseId || null,
       notes: notes || null, status: 'validado',
     }).eq('id', tx.id)
     setMatchModal(null)
+    if (type === 'renda' && confirmedLeaseId) {
+      const result = await processRendaTransaction({ ...tx, confirmed_type: 'renda', confirmed_tenant_id: tenantId || null, confirmed_lease_id: confirmedLeaseId })
+      warnIfSkipped(result)
+    }
     fetchData()
   }
 
@@ -263,12 +373,46 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     if (pending.length === 0) return
     setValidatingAll(true)
     await supabase.from('bank_transactions').update({ status: 'validado' }).eq('bank_id', bankId).eq('status', 'por_validar')
+
+    let created = 0, skipped = 0
+    for (const tx of pending) {
+      if (tx.confirmed_type === 'renda' && tx.confirmed_lease_id) {
+        const result = await processRendaTransaction(tx)
+        if (result === 'created') created++
+        else if (result === 'skipped') skipped++
+      }
+    }
+    if (created > 0 || skipped > 0) {
+      alert(`✅ ${created} pagamento(s) de renda criado(s) automaticamente.${skipped > 0 ? `\n⚠️ ${skipped} transação(ões) já tinham pagamento de renda registado para o mês correspondente.` : ''}`)
+    }
+
     await fetchData()
     setValidatingAll(false)
   }
 
+  async function syncRentPayments() {
+    const candidates = transactions.filter(t =>
+      t.status === 'validado' && t.confirmed_type === 'renda' && t.confirmed_lease_id && t.amount > 0
+    )
+    if (candidates.length === 0) { alert('Não há transações de renda validadas para sincronizar.'); return }
+    setSyncing(true)
+    let created = 0, skipped = 0
+    for (const tx of candidates) {
+      const result = await processRendaTransaction(tx)
+      if (result === 'created') created++
+      else if (result === 'skipped') skipped++
+    }
+    await fetchData()
+    setSyncing(false)
+    alert(`🔄 Sincronização concluída!\n\n${created} pagamento(s) de renda criado(s)\n${skipped} já existiam`)
+  }
+
   async function updateStatus(id: string, status: 'validado' | 'ignorado' | 'por_validar') {
     await supabase.from('bank_transactions').update({ status }).eq('id', id)
+    if (status === 'validado') {
+      const tx = transactions.find(t => t.id === id)
+      if (tx) warnIfSkipped(await processRendaTransaction(tx))
+    }
     fetchData()
   }
 
@@ -440,6 +584,9 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
                 {validatingAll ? <><Loader2 className="w-4 h-4 animate-spin" /> A validar...</> : <><CheckCircle className="w-4 h-4" /> Validar Todas ({pending})</>}
               </button>
             )}
+            <button onClick={syncRentPayments} disabled={syncing} className="btn-secondary">
+              {syncing ? <><Loader2 className="w-4 h-4 animate-spin" /> A sincronizar...</> : <><RefreshCw className="w-4 h-4" /> Sincronizar pagamentos</>}
+            </button>
             <button className="btn-primary" onClick={() => { setShowImport(true); setImportStep('upload') }}>
               <Upload className="w-4 h-4" /> Importar Extrato
             </button>
