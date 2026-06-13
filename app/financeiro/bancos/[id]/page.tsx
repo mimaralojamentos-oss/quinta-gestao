@@ -4,6 +4,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, formatDate } from '@/lib/utils'
+import { buildRentPaymentPlan, applyRentPaymentPlan } from '@/lib/rentPaymentPlan'
 import {
   Upload, CheckCircle, Clock, XCircle, ArrowUpRight,
   ArrowDownRight, ChevronLeft, Loader2, X, ArrowRight, Link2, Edit2, Search, SlidersHorizontal, Sparkles, RefreshCw
@@ -56,16 +57,6 @@ function parsePortugueseNumber(raw: any): number {
   if (typeof raw === 'number') return raw
   const str = String(raw).replace(/[€\s]/g, '').replace(/\./g, '').replace(',', '.')
   return parseFloat(str)
-}
-
-const MESES_PT = [
-  'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
-  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
-]
-
-function formatReferenceMonthPT(referenceMonth: string): string {
-  const [year, month] = referenceMonth.split('-').map(Number)
-  return `${MESES_PT[month - 1]} ${year}`
 }
 
 export default function BankDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -250,9 +241,11 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     return null
   }
 
-  // Cria o rent_payment correspondente a uma transação bancária confirmada como "renda".
-  // Devolve 'created' se criou, 'skipped' se já existia pagamento de renda para o mês, ou 'no_lease' se não há contrato associado.
-  async function processRendaTransaction(tx: Transaction): Promise<'created' | 'skipped' | 'no_lease'> {
+  // Cria o(s) rent_payment(s) correspondente(s) a uma transação bancária confirmada como "renda",
+  // aplicando o valor por ordem de prioridade: renda > eletricidade em dívida > dívidas abertas > adiantamento.
+  // Devolve 'created' se criou, 'skipped' se já existia pagamento de renda para o mês,
+  // 'cancelled' se o utilizador rejeitou o resumo, ou 'no_lease' se não há contrato associado.
+  async function processRendaTransaction(tx: Transaction): Promise<'created' | 'skipped' | 'no_lease' | 'cancelled'> {
     if (tx.confirmed_type !== 'renda' || !tx.confirmed_lease_id || tx.amount <= 0) return 'no_lease'
 
     const lease = allLeases.find(l => l.id === tx.confirmed_lease_id)
@@ -268,94 +261,34 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
 
     if ((existingPayments ?? []).some(p => p.tipo === 'renda' || !p.tipo)) return 'skipped'
 
-    const monthlyRent = lease.monthly_rent
-    const rendaAmount = Math.min(tx.amount, monthlyRent)
-
-    await supabase.from('rent_payments').insert({
-      lease_id: tx.confirmed_lease_id,
-      reference_month: referenceMonth,
-      payment_date: tx.transaction_date,
-      amount: rendaAmount,
-      payment_method: 'banco',
-      tipo: 'renda',
-    })
-
-    let excess = parseFloat((tx.amount - monthlyRent).toFixed(2))
     const tenantId = tx.confirmed_tenant_id ?? lease.tenant?.id
 
-    if (excess > 0) {
-      // a. Paga cobranças de eletricidade em dívida, mais antigas primeiro
-      const { data: elecCharges } = await supabase
-        .from('electricity_charges')
-        .select('id, amount')
-        .eq('lease_id', tx.confirmed_lease_id)
-        .eq('paid', false)
-        .order('charge_date', { ascending: true })
+    const plan = await buildRentPaymentPlan(supabase, {
+      leaseId: tx.confirmed_lease_id,
+      tenantId,
+      monthlyRent: lease.monthly_rent,
+      amount: tx.amount,
+      referenceMonth,
+    })
 
-      for (const charge of elecCharges ?? []) {
-        if (excess <= 0) break
-        if (charge.amount <= excess) {
-          await supabase.from('electricity_charges').update({
-            paid: true, payment_date: tx.transaction_date, payment_method: 'banco',
-          }).eq('id', charge.id)
-          excess = parseFloat((excess - charge.amount).toFixed(2))
-        }
-      }
+    if (!window.confirm(`${plan.summary}\n\nConfirmar processamento deste pagamento?`)) return 'cancelled'
 
-      // b. Abate outras dívidas, mais antigas primeiro
-      if (excess > 0 && tenantId) {
-        const { data: debtsData } = await supabase
-          .from('debts')
-          .select('id, original_amount, payments:debt_payments(amount)')
-          .eq('tenant_id', tenantId)
-          .order('reference_date', { ascending: true })
-
-        for (const debt of debtsData ?? []) {
-          if (excess <= 0) break
-          const paid = (debt.payments ?? []).reduce((s: number, p: any) => s + p.amount, 0)
-          const remaining = parseFloat((debt.original_amount - paid).toFixed(2))
-          if (remaining <= 0) continue
-          const toApply = Math.min(remaining, excess)
-          await supabase.from('debt_payments').insert({
-            debt_id: debt.id, payment_date: tx.transaction_date, amount: toApply,
-            payment_method: 'banco', notes: 'Aplicado automaticamente via transação bancária',
-          })
-          excess = parseFloat((excess - toApply).toFixed(2))
-        }
-      }
-
-      // c. Sobra fica registada como adiantamento
-      if (excess > 0) {
-        await supabase.from('rent_payments').insert({
-          lease_id: tx.confirmed_lease_id,
-          reference_month: referenceMonth,
-          payment_date: tx.transaction_date,
-          amount: excess,
-          payment_method: 'banco',
-          tipo: 'adiantamento',
-          used: false,
-        })
-      }
-    } else if (excess < 0 && tenantId) {
-      // Pagamento parcial: regista a diferença como dívida do inquilino
-      const diferenca = Math.abs(excess)
-      const aviso = `⚠️ Pagamento parcial de renda\n\nValor pago: ${formatCurrency(tx.amount)}\nValor esperado: ${formatCurrency(monthlyRent)}\nDiferença: ${formatCurrency(diferenca)}\n\nVai ser criado um registo de dívida de ${formatCurrency(diferenca)} para este inquilino. Pretende continuar?`
-      if (window.confirm(aviso)) {
-        await supabase.from('debts').insert({
-          tenant_id: tenantId,
-          original_amount: diferenca,
-          description: `Pagamento parcial - renda de ${formatReferenceMonthPT(referenceMonth)}`,
-          created_at: new Date().toISOString(),
-        })
-      }
-    }
+    await applyRentPaymentPlan(supabase, plan, {
+      leaseId: tx.confirmed_lease_id,
+      tenantId,
+      referenceMonth,
+      paymentDate: tx.transaction_date,
+      paymentMethod: 'banco',
+    })
 
     return 'created'
   }
 
-  function warnIfSkipped(result: 'created' | 'skipped' | 'no_lease') {
+  function warnIfSkipped(result: 'created' | 'skipped' | 'no_lease' | 'cancelled') {
     if (result === 'skipped') {
       alert('⚠️ Já existe um pagamento de renda registado para este mês. A transação foi validada, mas não foi criado um novo registo de pagamento.')
+    } else if (result === 'cancelled') {
+      alert('ℹ️ Processamento cancelado. A transação foi validada, mas não foi criado nenhum registo de pagamento.')
     }
   }
 
@@ -402,16 +335,17 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     setValidatingAll(true)
     await supabase.from('bank_transactions').update({ status: 'validado' }).eq('bank_id', bankId).eq('status', 'por_validar')
 
-    let created = 0, skipped = 0
+    let created = 0, skipped = 0, cancelled = 0
     for (const tx of pending) {
       if (tx.confirmed_type === 'renda' && tx.confirmed_lease_id) {
         const result = await processRendaTransaction(tx)
         if (result === 'created') created++
         else if (result === 'skipped') skipped++
+        else if (result === 'cancelled') cancelled++
       }
     }
-    if (created > 0 || skipped > 0) {
-      alert(`✅ ${created} pagamento(s) de renda criado(s) automaticamente.${skipped > 0 ? `\n⚠️ ${skipped} transação(ões) já tinham pagamento de renda registado para o mês correspondente.` : ''}`)
+    if (created > 0 || skipped > 0 || cancelled > 0) {
+      alert(`✅ ${created} pagamento(s) de renda criado(s) automaticamente.${skipped > 0 ? `\n⚠️ ${skipped} transação(ões) já tinham pagamento de renda registado para o mês correspondente.` : ''}${cancelled > 0 ? `\nℹ️ ${cancelled} transação(ões) ficaram sem registo de pagamento (processamento cancelado).` : ''}`)
     }
 
     await fetchData()
@@ -424,15 +358,16 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     )
     if (candidates.length === 0) { alert('Não há transações de renda validadas para sincronizar.'); return }
     setSyncing(true)
-    let created = 0, skipped = 0
+    let created = 0, skipped = 0, cancelled = 0
     for (const tx of candidates) {
       const result = await processRendaTransaction(tx)
       if (result === 'created') created++
       else if (result === 'skipped') skipped++
+      else if (result === 'cancelled') cancelled++
     }
     await fetchData()
     setSyncing(false)
-    alert(`🔄 Sincronização concluída!\n\n${created} pagamento(s) de renda criado(s)\n${skipped} já existiam`)
+    alert(`🔄 Sincronização concluída!\n\n${created} pagamento(s) de renda criado(s)\n${skipped} já existiam${cancelled > 0 ? `\n${cancelled} cancelado(s)` : ''}`)
   }
 
   async function updateStatus(id: string, status: 'validado' | 'ignorado' | 'por_validar') {

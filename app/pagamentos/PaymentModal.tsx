@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency, formatDate, getMonthLabel } from '@/lib/utils'
+import { buildRentPaymentPlan, applyRentPaymentPlan } from '@/lib/rentPaymentPlan'
 import { X, Pencil, Trash2, AlertTriangle } from 'lucide-react'
 
 interface Props {
@@ -323,6 +324,72 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
         }
       } else {
         if (existingCash.data) await supabase.from('cash_fund_movements').delete().eq('id', existingCash.data.id)
+      }
+    } else if (form.tipo === 'renda') {
+      const amount = parseFloat(form.amount)
+      const plan = await buildRentPaymentPlan(supabase, {
+        leaseId: lease.id,
+        tenantId: lease.tenant?.id,
+        monthlyRent: lease.monthly_rent,
+        amount,
+        referenceMonth: currentMonth,
+      })
+
+      if (!window.confirm(`${plan.summary}\n\nConfirmar registo deste pagamento?`)) {
+        setSaving(false)
+        return
+      }
+
+      const result = await applyRentPaymentPlan(supabase, plan, {
+        leaseId: lease.id,
+        tenantId: lease.tenant?.id,
+        referenceMonth: currentMonth,
+        paymentDate: form.payment_date,
+        paymentMethod: form.payment_method,
+        notes: form.notes,
+      })
+
+      if (form.payment_method === 'dinheiro') {
+        if (result.rendaPayment) {
+          await supabase.from('cash_fund_movements').insert({
+            movement_date: form.payment_date,
+            description: `🏠 Renda ${getMonthLabel(currentMonth)} — ${lease.space?.ref} (${lease.tenant?.name})`,
+            amount: plan.rendaAmount,
+            type: 'entrada',
+            source: 'renda',
+            source_id: result.rendaPayment.id,
+          })
+        }
+        for (const charge of plan.electricityCharges) {
+          await supabase.from('cash_fund_movements').insert({
+            movement_date: form.payment_date,
+            description: `⚡ Eletricidade ${charge.chargeDate?.slice(0, 7) ?? ''} — ${lease.space?.ref} (${lease.tenant?.name})`,
+            amount: charge.amount,
+            type: 'entrada',
+            source: 'eletricidade',
+            source_id: charge.id,
+          })
+        }
+        for (const dp of plan.debtPayments) {
+          await supabase.from('cash_fund_movements').insert({
+            movement_date: form.payment_date,
+            description: `⚠️ ${dp.description} — ${lease.tenant?.name}`,
+            amount: dp.amount,
+            type: 'entrada',
+            source: 'divida',
+            source_id: dp.debtId,
+          })
+        }
+        if (result.adiantamentoPayment) {
+          await supabase.from('cash_fund_movements').insert({
+            movement_date: form.payment_date,
+            description: `💰 Adiantamento — ${lease.space?.ref} (${lease.tenant?.name})`,
+            amount: plan.adiantamento,
+            type: 'entrada',
+            source: 'renda',
+            source_id: result.adiantamentoPayment.id,
+          })
+        }
       }
     } else {
       const { data: newPayment, error: err } = await supabase.from('rent_payments').insert({
