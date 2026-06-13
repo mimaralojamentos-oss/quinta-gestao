@@ -163,8 +163,7 @@ export default function RelatoriosPage() {
     setLoading(false)
   }
 
-  async function fetchFinanceiro() {
-    setLoading(true)
+  async function fetchFinanceiroData() {
     const [y, m] = selectedMonth.split('-').map(Number)
     const startDate = `${selectedMonth}-01`
     const endYear = m === 12 ? y + 1 : y
@@ -196,7 +195,12 @@ export default function RelatoriosPage() {
       porCategoria[cat].items.push(e)
     })
 
-    setFinanceiro({ receitas, totalDespesas, saldo, porCategoria, despesas })
+    return { receitas, totalDespesas, saldo, porCategoria, despesas }
+  }
+
+  async function fetchFinanceiro() {
+    setLoading(true)
+    setFinanceiro(await fetchFinanceiroData())
     setLoading(false)
   }
 
@@ -247,7 +251,7 @@ export default function RelatoriosPage() {
   async function handleExportPDF() {
     setExportingPDF(true)
     try {
-      const data = await fetchRendasData()
+      const [data, fin] = await Promise.all([fetchRendasData(), fetchFinanceiroData()])
       const { default: jsPDF } = await import('jspdf')
 
       const pdf = new jsPDF('p', 'mm', 'a4')
@@ -286,14 +290,29 @@ export default function RelatoriosPage() {
       y += 7
       pdf.setFont('helvetica', 'normal')
       pdf.setFontSize(10)
-      pdf.text(`Valor Esperado: ${fmt(data.totalEsperado)}`, margin, y)
+      pdf.text(`Total Receitas: ${fmt(fin.receitas)}`, margin, y)
       y += 6
-      pdf.text(`Rendas Recebidas: ${fmt(data.totalRecebido)}`, margin, y)
+      pdf.text(`Total Despesas: ${fmt(fin.totalDespesas)}`, margin, y)
       y += 6
-      pdf.text(`Em Falta: ${fmt(Math.max(0, data.totalEsperado - data.totalRecebido))}`, margin, y)
+      pdf.setFont('helvetica', 'bold')
+      if (fin.saldo >= 0) pdf.setTextColor(16, 122, 86)
+      else pdf.setTextColor(200, 40, 40)
+      pdf.text(`Saldo: ${fmt(fin.saldo)}`, margin, y)
+      pdf.setTextColor(0)
+      pdf.setFont('helvetica', 'normal')
+      y += 6
+
+      pdf.setFontSize(9)
+      pdf.setTextColor(120)
+      pdf.text(
+        `Rendas: esperado ${fmt(data.totalEsperado)} · recebido ${fmt(data.totalRecebido)} · em falta ${fmt(Math.max(0, data.totalEsperado - data.totalRecebido))}`,
+        margin, y
+      )
+      pdf.setTextColor(0)
+      pdf.setFontSize(10)
       y += 10
 
-      function drawList(title: string, items: any[], getValue: (l: any) => number, getExtra?: (l: any) => string) {
+      function drawList(title: string, items: any[], getValue: (l: any) => number, getExtra?: (l: any) => string, totalLabel?: string, totalValue?: number) {
         checkPageBreak(14)
         pdf.setFont('helvetica', 'bold')
         pdf.setFontSize(12)
@@ -336,12 +355,70 @@ export default function RelatoriosPage() {
             y += 5
           }
         }
+
+        if (totalLabel !== undefined && totalValue !== undefined) {
+          checkPageBreak(8)
+          pdf.setDrawColor(200)
+          pdf.line(margin, y, pageWidth - margin, y)
+          y += 5
+          pdf.setFont('helvetica', 'bold')
+          pdf.setFontSize(9)
+          pdf.text(totalLabel, margin, y)
+          pdf.text(fmt(totalValue), pageWidth - margin, y, { align: 'right' })
+          y += 6
+        }
+
         y += 6
       }
 
-      drawList('Rendas em Falta', data.emFalta, (l: any) => l.monthly_rent ?? 0)
+      function drawCategoriaTable(title: string, porCategoria: Record<string, { total: number; items: any[] }>, total: number) {
+        const entries = Object.entries(porCategoria).sort(([, a], [, b]) => b.total - a.total)
 
-      drawList('Rendas Pagas', data.pagos,
+        checkPageBreak(14)
+        pdf.setFont('helvetica', 'bold')
+        pdf.setFontSize(12)
+        pdf.text(`${title} (${entries.length})`, margin, y)
+        y += 7
+
+        if (entries.length === 0) {
+          pdf.setFont('helvetica', 'normal')
+          pdf.setFontSize(10)
+          pdf.text('Sem despesas registadas.', margin, y)
+          y += 10
+          return
+        }
+
+        pdf.setFont('helvetica', 'bold')
+        pdf.setFontSize(9)
+        pdf.text('Categoria', margin, y)
+        pdf.text('Registos', margin + 110, y, { align: 'center' })
+        pdf.text('Total', pageWidth - margin, y, { align: 'right' })
+        y += 4
+        pdf.setDrawColor(200)
+        pdf.line(margin, y, pageWidth - margin, y)
+        y += 5
+
+        pdf.setFont('helvetica', 'normal')
+        for (const [cat, catData] of entries) {
+          checkPageBreak(6)
+          pdf.setFontSize(9)
+          pdf.text(cat.charAt(0).toUpperCase() + cat.slice(1), margin, y)
+          pdf.text(String(catData.items.length), margin + 110, y, { align: 'center' })
+          pdf.text(fmt(catData.total), pageWidth - margin, y, { align: 'right' })
+          y += 6
+        }
+
+        checkPageBreak(8)
+        pdf.setDrawColor(200)
+        pdf.line(margin, y, pageWidth - margin, y)
+        y += 5
+        pdf.setFont('helvetica', 'bold')
+        pdf.text('Total Despesas', margin, y)
+        pdf.text(fmt(total), pageWidth - margin, y, { align: 'right' })
+        y += 10
+      }
+
+      drawList('Receitas - Rendas Recebidas por Inquilino', data.pagos,
         (l: any) => data.payments.find((pay: any) => String(pay.lease_id) === String(l.id))?.amount ?? 0,
         (l: any) => {
           const p = data.payments.find((pay: any) => String(pay.lease_id) === String(l.id))
@@ -349,7 +426,12 @@ export default function RelatoriosPage() {
           if (p?.payment_date) parts.push(`Pago em ${formatDate(p.payment_date)}`)
           if (p?.payment_method) parts.push(p.payment_method === 'dinheiro' ? 'Dinheiro' : 'Banco')
           return parts.join(' · ')
-        })
+        },
+        'Total Rendas Recebidas', data.totalRecebido)
+
+      drawList('Rendas em Falta', data.emFalta, (l: any) => l.monthly_rent ?? 0)
+
+      drawCategoriaTable('Despesas por Categoria', fin.porCategoria, fin.totalDespesas)
 
       pdf.save(`relatorio-${selectedMonth}.pdf`)
     } catch (e) {
