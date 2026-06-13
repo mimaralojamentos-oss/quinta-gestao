@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { useAuth } from '@/lib/auth-context'
-import { Shield, Plus, Trash2, Eye, Zap, Key, ChevronLeft } from 'lucide-react'
+import { Shield, Plus, Trash2, Eye, Zap, Key, ChevronLeft, History } from 'lucide-react'
 import Link from 'next/link'
 
 type Profile = {
@@ -11,6 +11,39 @@ type Profile = {
   email: string
   role: 'admin' | 'coadmin' | 'viewer' | 'electrician'
   created_at: string
+}
+
+type AccessLog = {
+  id: string
+  user_id: string | null
+  user_email: string | null
+  action: string
+  page: string | null
+  details: string | null
+  created_at: string
+}
+
+const actionLabels: Record<string, string> = {
+  criar: 'Criar',
+  editar: 'Editar',
+  apagar: 'Apagar',
+  login: 'Login',
+  logout: 'Logout',
+}
+
+const actionColors: Record<string, string> = {
+  criar: 'bg-green-100 text-green-700',
+  editar: 'bg-blue-100 text-blue-700',
+  apagar: 'bg-red-100 text-red-700',
+  login: 'bg-emerald-100 text-emerald-700',
+  logout: 'bg-gray-100 text-gray-600',
+}
+
+function formatDateTime(dateStr: string): string {
+  if (!dateStr) return '—'
+  const d = new Date(dateStr)
+  return d.toLocaleDateString('pt-PT', { day: '2-digit', month: '2-digit', year: 'numeric' }) +
+    ' ' + d.toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' })
 }
 
 export default function UtilizadoresPage() {
@@ -25,8 +58,12 @@ export default function UtilizadoresPage() {
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
 
+  const [accessLogs, setAccessLogs] = useState<AccessLog[]>([])
+  const [loadingLogs, setLoadingLogs] = useState(true)
+
   useEffect(() => {
     fetchProfiles()
+    fetchAccessLogs()
   }, [])
 
   async function fetchProfiles() {
@@ -59,6 +96,17 @@ export default function UtilizadoresPage() {
 
     setProfiles(combined)
     setLoading(false)
+  }
+
+  async function fetchAccessLogs() {
+    const { data } = await supabase
+      .from('access_logs')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(100)
+
+    setAccessLogs(data ?? [])
+    setLoadingLogs(false)
   }
 
   async function handleCreate() {
@@ -280,6 +328,48 @@ export default function UtilizadoresPage() {
           </div>
         </div>
       )}
+
+      {/* Log de Acessos */}
+      <div className="mt-10">
+        <div className="flex items-center gap-2 mb-3">
+          <History className="w-5 h-5 text-gray-400" />
+          <h2 className="text-lg font-bold text-gray-900">Log de Acessos</h2>
+        </div>
+        {loadingLogs ? (
+          <p className="text-gray-500">A carregar...</p>
+        ) : accessLogs.length === 0 ? (
+          <p className="text-gray-500 text-sm">Sem registos de acesso</p>
+        ) : (
+          <div className="bg-white border rounded-lg overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50 text-left text-gray-500 text-xs uppercase">
+                  <th className="px-4 py-2 whitespace-nowrap">Data/Hora</th>
+                  <th className="px-4 py-2">Utilizador</th>
+                  <th className="px-4 py-2">Ação</th>
+                  <th className="px-4 py-2">Página</th>
+                  <th className="px-4 py-2">Detalhes</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {accessLogs.map(log => (
+                  <tr key={log.id}>
+                    <td className="px-4 py-2 whitespace-nowrap text-gray-600">{formatDateTime(log.created_at)}</td>
+                    <td className="px-4 py-2 text-gray-900">{log.user_email ?? '—'}</td>
+                    <td className="px-4 py-2">
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${actionColors[log.action] ?? 'bg-gray-100 text-gray-600'}`}>
+                        {actionLabels[log.action] ?? log.action}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2 text-gray-600 whitespace-nowrap">{log.page ?? '—'}</td>
+                    <td className="px-4 py-2 text-gray-600">{log.details ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
