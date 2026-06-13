@@ -2,10 +2,14 @@ import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { createHash } from 'crypto'
+import { requireRole } from '@/lib/require-role'
 
 const CASH_FUND_START_DATE = '2026-06-01'
 
 export async function POST(request: Request) {
+  const auth = await requireRole(['admin', 'coadmin', 'electrician'])
+  if (auth.error) return auth.error
+
   try {
     const formData = await request.formData()
     const file = formData.get('file') as File
