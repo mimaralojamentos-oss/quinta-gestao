@@ -37,7 +37,7 @@ const financeItems = [
 
 export default function Sidebar() {
   const pathname = usePathname()
-  const { profile, isAdmin, signOut } = useAuth()
+  const { profile, isAdmin, isCoAdmin, isElectrician, signOut } = useAuth()
   const [financeOpen, setFinanceOpen] = useState(
     pathname.startsWith('/pagamentos') ||
     pathname.startsWith('/despesas') ||
@@ -47,6 +47,10 @@ export default function Sidebar() {
   const [eletricidadeOpen, setEletricidadeOpen] = useState(
     pathname.startsWith('/eletricidade')
   )
+
+  const canSeeFinanceiro = isAdmin
+  const canSeeEletricidade = isAdmin || isCoAdmin || isElectrician
+  const canSeeUtilizadores = isAdmin
 
   return (
     <aside className="w-64 bg-white border-r border-gray-100 min-h-screen flex flex-col">
@@ -75,62 +79,66 @@ export default function Sidebar() {
           )
         })}
 
-        {/* Eletricidade */}
-        <div className="pt-1">
-          <button onClick={() => setEletricidadeOpen(v => !v)}
-            className="w-full flex items-center justify-between px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-emerald-50 hover:text-emerald-700 transition-colors">
-            <div className="flex items-center gap-3">
-              <Zap className="w-4 h-4 flex-shrink-0" />
-              <span>Eletricidade</span>
-            </div>
-            {eletricidadeOpen ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-          </button>
-          {eletricidadeOpen && (
-            <div className="ml-4 mt-1 space-y-1 border-l-2 border-gray-100 pl-3">
-              {eletricidadeItems.map((item) => {
-                const Icon = item.icon
-                const isActive = pathname === item.href || pathname.startsWith(item.href + '/')
-                return (
-                  <Link key={item.href} href={item.href} prefetch={false}
-                    className={cn('sidebar-link text-xs py-2', isActive ? 'active' : '')}>
-                    <Icon className="w-3.5 h-3.5 flex-shrink-0" />
-                    {item.label}
-                  </Link>
-                )
-              })}
-            </div>
-          )}
-        </div>
+        {/* Eletricidade — admin, coadmin, electrician */}
+        {canSeeEletricidade && (
+          <div className="pt-1">
+            <button onClick={() => setEletricidadeOpen(v => !v)}
+              className="w-full flex items-center justify-between px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-emerald-50 hover:text-emerald-700 transition-colors">
+              <div className="flex items-center gap-3">
+                <Zap className="w-4 h-4 flex-shrink-0" />
+                <span>Eletricidade</span>
+              </div>
+              {eletricidadeOpen ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+            </button>
+            {eletricidadeOpen && (
+              <div className="ml-4 mt-1 space-y-1 border-l-2 border-gray-100 pl-3">
+                {eletricidadeItems.map((item) => {
+                  const Icon = item.icon
+                  const isActive = pathname === item.href || pathname.startsWith(item.href + '/')
+                  return (
+                    <Link key={item.href} href={item.href} prefetch={false}
+                      className={cn('sidebar-link text-xs py-2', isActive ? 'active' : '')}>
+                      <Icon className="w-3.5 h-3.5 flex-shrink-0" />
+                      {item.label}
+                    </Link>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
 
-        {/* Financeiro */}
-        <div className="pt-1">
-          <button onClick={() => setFinanceOpen(v => !v)}
-            className="w-full flex items-center justify-between px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-emerald-50 hover:text-emerald-700 transition-colors">
-            <div className="flex items-center gap-3">
-              <TrendingUp className="w-4 h-4 flex-shrink-0" />
-              <span>Financeiro</span>
-            </div>
-            {financeOpen ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-          </button>
-          {financeOpen && (
-            <div className="ml-4 mt-1 space-y-1 border-l-2 border-gray-100 pl-3">
-              {financeItems.map((item) => {
-                const Icon = item.icon
-                const isActive = pathname === item.href || pathname.startsWith(item.href + '/')
-                return (
-                  <Link key={item.href} href={item.href} prefetch={false}
-                    className={cn('sidebar-link text-xs py-2', isActive ? 'active' : '')}>
-                    <Icon className="w-3.5 h-3.5 flex-shrink-0" />
-                    {item.label}
-                  </Link>
-                )
-              })}
-            </div>
-          )}
-        </div>
+        {/* Financeiro — só admin */}
+        {canSeeFinanceiro && (
+          <div className="pt-1">
+            <button onClick={() => setFinanceOpen(v => !v)}
+              className="w-full flex items-center justify-between px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-emerald-50 hover:text-emerald-700 transition-colors">
+              <div className="flex items-center gap-3">
+                <TrendingUp className="w-4 h-4 flex-shrink-0" />
+                <span>Financeiro</span>
+              </div>
+              {financeOpen ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+            </button>
+            {financeOpen && (
+              <div className="ml-4 mt-1 space-y-1 border-l-2 border-gray-100 pl-3">
+                {financeItems.map((item) => {
+                  const Icon = item.icon
+                  const isActive = pathname === item.href || pathname.startsWith(item.href + '/')
+                  return (
+                    <Link key={item.href} href={item.href} prefetch={false}
+                      className={cn('sidebar-link text-xs py-2', isActive ? 'active' : '')}>
+                      <Icon className="w-3.5 h-3.5 flex-shrink-0" />
+                      {item.label}
+                    </Link>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
 
-        {/* Admin */}
-        {isAdmin && (
+        {/* Utilizadores — só admin */}
+        {canSeeUtilizadores && (
           <>
             <div className="pt-3 pb-1">
               <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider px-4">Administração</p>
@@ -153,7 +161,7 @@ export default function Sidebar() {
             </div>
             <div className="min-w-0 flex-1">
               <p className="text-sm font-medium text-gray-800 truncate">{profile.name}</p>
-              <p className="text-xs text-gray-400">{profile.role === 'admin' ? '🔑 Administrador' : profile.role === 'coadmin' ? '🔑 Co-Administrador' : '👁 Visualizador'}</p>
+              <p className="text-xs text-gray-400">{profile.role === 'admin' ? '🔑 Administrador' : profile.role === 'coadmin' ? '🔑 Co-Administrador' : profile.role === 'electrician' ? '⚡ Eletricista' : '👁 Visualizador'}</p>
             </div>
             <UserCircle className="w-4 h-4 text-gray-300 flex-shrink-0" />
           </Link>
