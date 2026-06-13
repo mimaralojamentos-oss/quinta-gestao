@@ -1,10 +1,10 @@
 'use client'
 
 import AppLayout from '@/components/layout/AppLayout'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatDate } from '@/lib/utils'
-import { BarChart3, TrendingUp, Home, FileText, Calendar, ChevronDown, ChevronUp, Edit2, X, Save, ClipboardList } from 'lucide-react'
+import { BarChart3, TrendingUp, Home, FileText, Calendar, ChevronDown, ChevronUp, Edit2, X, Save, ClipboardList, Download, Loader2 } from 'lucide-react'
 
 interface MonthOption { label: string; value: string }
 
@@ -54,6 +54,9 @@ export default function RelatoriosPage() {
   const [savingExpense, setSavingExpense] = useState(false)
 
   const [cobrancasSort, setCobrancasSort] = useState<'nome' | 'espaco'>('nome')
+
+  const [exportingPDF, setExportingPDF] = useState(false)
+  const reportContentRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (activeReport === 'rendas' || activeReport === 'cobrancas') fetchRendas()
@@ -238,6 +241,64 @@ export default function RelatoriosPage() {
     return Math.ceil(diff / (1000 * 60 * 60 * 24))
   }
 
+  async function handleExportPDF() {
+    if (!reportContentRef.current) return
+    setExportingPDF(true)
+    try {
+      const [{ default: jsPDF }, { default: html2canvas }] = await Promise.all([
+        import('jspdf'),
+        import('html2canvas'),
+      ])
+
+      const canvas = await html2canvas(reportContentRef.current, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#ffffff',
+        ignoreElements: (el) => el.classList?.contains('print:hidden'),
+      })
+
+      const pdf = new jsPDF('p', 'mm', 'a4')
+      const pageWidth = pdf.internal.pageSize.getWidth()
+      const pageHeight = pdf.internal.pageSize.getHeight()
+      const margin = 10
+
+      const monthLabel = MONTHS.find(m => m.value === selectedMonth)?.label ?? selectedMonth
+
+      pdf.setFontSize(14)
+      pdf.text(`Relatório Financeiro - ${monthLabel}`, margin, 15)
+      pdf.setFontSize(9)
+      pdf.setTextColor(120)
+      pdf.text(
+        `Gerado em ${new Date().toLocaleDateString('pt-PT')} às ${new Date().toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' })}`,
+        margin, 21
+      )
+      pdf.setTextColor(0)
+
+      const imgData = canvas.toDataURL('image/png')
+      const imgWidth = pageWidth - margin * 2
+      const imgHeight = (canvas.height * imgWidth) / canvas.width
+
+      const topOffset = 26
+      const usableHeight = pageHeight - margin * 2
+
+      let heightLeft = imgHeight
+      pdf.addImage(imgData, 'PNG', margin, topOffset, imgWidth, imgHeight)
+      heightLeft -= (pageHeight - topOffset - margin)
+
+      while (heightLeft > 0) {
+        pdf.addPage()
+        const position = margin - (imgHeight - heightLeft)
+        pdf.addImage(imgData, 'PNG', margin, position, imgWidth, imgHeight)
+        heightLeft -= usableHeight
+      }
+
+      pdf.save(`relatorio-${selectedMonth}.pdf`)
+    } catch (e) {
+      console.error('Erro ao gerar PDF:', e)
+    }
+    setExportingPDF(false)
+  }
+
   const REPORTS = [
     { key: 'rendas', label: 'Rendas do Mês', icon: FileText, color: 'text-emerald-600', bg: 'bg-emerald-50' },
     { key: 'ocupacao', label: 'Ocupação', icon: Home, color: 'text-blue-600', bg: 'bg-blue-50' },
@@ -256,6 +317,11 @@ export default function RelatoriosPage() {
           <div className="flex items-center gap-3">
             <BarChart3 className="w-5 h-5 text-emerald-600" />
             <h1 className="text-xl font-bold text-gray-900">Relatórios</h1>
+            <button onClick={handleExportPDF} disabled={exportingPDF || loading}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-800 text-white hover:bg-gray-900 disabled:opacity-50 transition-colors">
+              {exportingPDF ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+              {exportingPDF ? 'A gerar PDF...' : 'Exportar PDF'}
+            </button>
           </div>
           <div className="flex items-center gap-3">
             {showMonthPicker && (
@@ -285,7 +351,7 @@ export default function RelatoriosPage() {
         </div>
       </div>
 
-      <div className="p-8">
+      <div className="p-8" ref={reportContentRef}>
         {loading ? (
           <div className="flex justify-center py-16">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600" />
