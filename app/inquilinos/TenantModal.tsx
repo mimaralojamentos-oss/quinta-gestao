@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase'
 import { Tenant } from '@/lib/types'
 import { X, User, Home, FileText, Plus, Trash2, Pencil, ChevronRight, ChevronLeft, Upload, Loader2, Sparkles } from 'lucide-react'
 import { formatCurrency, formatDate, getCurrentMonth } from '@/lib/utils'
+import { logAccess } from '@/lib/logAccess'
 
 interface Props {
   tenant: Tenant | null
@@ -223,11 +224,13 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
       const { data, error: err } = await supabase.from('tenants').insert(payload).select().single()
       setSaving(false)
       if (err) { setError(err.message); return }
+      await logAccess({ action: 'criar', page: '/inquilinos', details: `Criou inquilino "${form.name.trim()}"` })
       setNewTenantId(data.id); setStep(2)
     } else {
       const { error: err } = await supabase.from('tenants').update(payload).eq('id', tenant!.id)
       setSaving(false)
       if (err) { setError(err.message); return }
+      await logAccess({ action: 'editar', page: '/inquilinos', details: `Editou inquilino "${form.name.trim()}"` })
       onSaved()
     }
   }
@@ -255,19 +258,24 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
     if (!err) await supabase.from('spaces').update({ status: 'arrendado', tenant_id: tenantId }).eq('id', contractForm.space_id)
     setSavingContract(false)
     if (err) { setContractError(err.message); return }
+    const space = spaces.find(s => s.id === contractForm.space_id)
+    await logAccess({ action: 'criar', page: '/inquilinos', details: `Criou contrato para "${form.name}" no espaço ${space?.ref ?? ''} (${formatCurrency(parseFloat(contractForm.monthly_rent))}/mês)` })
     onSaved()
   }
 
   async function handleToggleSpace(spaceId: string) {
     if (!tenant) return
     const isAssigned = assignedSpaces.includes(spaceId)
+    const space = allSpaces.find(s => s.id === spaceId)
     setSavingSpaces(true)
     if (isAssigned) {
       await supabase.from('spaces').update({ tenant_id: null, status: 'disponivel' }).eq('id', spaceId)
       setAssignedSpaces(prev => prev.filter(id => id !== spaceId))
+      await logAccess({ action: 'editar', page: '/inquilinos', details: `Desassociou espaço ${space?.ref ?? ''} de "${tenant.name}"` })
     } else {
       await supabase.from('spaces').update({ tenant_id: tenant.id, status: 'arrendado' }).eq('id', spaceId)
       setAssignedSpaces(prev => [...prev, spaceId])
+      await logAccess({ action: 'editar', page: '/inquilinos', details: `Associou espaço ${space?.ref ?? ''} a "${tenant.name}"` })
     }
     setSavingSpaces(false)
     await fetchSpaces()
@@ -300,13 +308,21 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
     }
     setSavingPayment(false)
     if (err) { setPaymentError(err.message); return }
+    const tipoLabel = tipoConfig[paymentForm.tipo as keyof typeof tipoConfig]?.label ?? paymentForm.tipo
+    await logAccess({
+      action: editingPaymentId ? 'editar' : 'criar',
+      page: '/inquilinos',
+      details: `${editingPaymentId ? 'Editou' : 'Registou'} ${tipoLabel} (${formatCurrency(parseFloat(paymentForm.amount))}) de "${tenant?.name}" — ${paymentForm.reference_month}`,
+    })
     setShowPaymentForm(false); setEditingPaymentId(null)
     await fetchPayments()
   }
 
   async function handleDeletePayment(id: string) {
     if (!confirm('Tens a certeza que queres apagar este pagamento?')) return
+    const payment = payments.find(p => p.id === id)
     await supabase.from('rent_payments').delete().eq('id', id)
+    await logAccess({ action: 'apagar', page: '/inquilinos', details: `Apagou pagamento (${formatCurrency(payment?.amount ?? 0)}) de "${tenant?.name}"` })
     await fetchPayments()
   }
 

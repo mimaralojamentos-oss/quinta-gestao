@@ -2,8 +2,9 @@
 
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
-import { getCurrentMonth } from '@/lib/utils'
+import { getCurrentMonth, formatCurrency } from '@/lib/utils'
 import { X } from 'lucide-react'
+import { logAccess } from '@/lib/logAccess'
 
 interface Props {
   onClose: () => void
@@ -62,6 +63,8 @@ export default function AdvancePaymentModal({ onClose, onSaved }: Props) {
         source_id: newPayment.id,
       })
     }
+
+    await logAccess({ action: 'criar', page: '/pagamentos', details: `Registou adiantamento (${formatCurrency(value)}) para ${lease?.space?.ref} (${lease?.tenant?.name})` })
 
     setSaving(false)
     onSaved()

@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { Search, FileText, Eye, FolderOpen, Trash2, X, Plus, Upload, Loader2, CheckCircle, AlertCircle, Edit2, Filter, ChevronDown, ChevronUp, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
+import { logAccess } from '@/lib/logAccess'
 
 interface Document {
   id: string
@@ -202,6 +203,8 @@ async function handleSaveEdit() {
     }
   }
 
+  await logAccess({ action: 'editar', page: '/documentos', details: `Editou documento "${editDoc.original_name ?? editDoc.file_path}"` })
+
   setSaving(false)
   setEditDoc(null)
   fetchAll()
@@ -224,6 +227,7 @@ async function handleSaveEdit() {
       setUploadResults(prev => prev.map((r, i) => i === index ? { ...r, status: 'error', error: data.error } : r))
     } else {
       setUploadResults(prev => prev.map((r, i) => i === index ? { ...r, status: 'success', autoExpense: data.autoExpense, cashMovementCreated: data.cashMovementCreated, detectedTipo: data.detectedTipo } : r))
+      await logAccess({ action: 'criar', page: '/documentos', details: `Carregou documento "${file.name}"` })
     }
     return 'done'
   }
@@ -297,6 +301,7 @@ async function handleSaveEdit() {
       }
       if (doc.file_path) await supabase.storage.from('documents').remove([doc.file_path])
       await supabase.from('documents').delete().eq('id', doc.id)
+      await logAccess({ action: 'apagar', page: '/documentos', details: `Apagou documento "${doc.original_name ?? doc.file_path}"${deleteExpense ? ' e despesa associada' : ''}` })
     } catch (e: any) { console.error('Erro ao apagar:', e) }
     setDeleting(false); setDeleteConfirm(null); fetchAll()
   }
@@ -305,6 +310,7 @@ async function handleSaveEdit() {
     if (!confirm(`Apagar o contrato de ${getTenantName(lease.tenant)}?`)) return
     if (lease.contract_file_path) await supabase.storage.from('documents').remove([lease.contract_file_path])
     await supabase.from('leases').update({ contract_file_path: null }).eq('id', lease.id)
+    await logAccess({ action: 'apagar', page: '/documentos', details: `Apagou contrato de ${getTenantName(lease.tenant)}` })
     fetchAll()
   }
 

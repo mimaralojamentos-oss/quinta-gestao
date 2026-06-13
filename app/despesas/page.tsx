@@ -8,6 +8,7 @@ import { formatCurrency, formatDate, categoryLabel } from '@/lib/utils'
 import { Plus, Search, Trash2, X, SlidersHorizontal, ChevronUp, ChevronDown, ChevronsUpDown, Eye, ChevronDown as ChevronDownIcon } from 'lucide-react'
 import ExpenseModal from './ExpenseModal'
 import { useAuth } from '@/lib/auth-context'
+import { logAccess } from '@/lib/logAccess'
 
 interface DeleteConfirm {
   expense: any
@@ -101,6 +102,7 @@ export default function DespesasPage() {
       if (existingCash) { await supabase.from('cash_fund_movements').update({ amount: -Math.abs(expense.amount), movement_date: expense.expense_date, description: `💸 ${expense.description}${expense.supplier ? ` — ${expense.supplier}` : ''}` }).eq('id', existingCash.id) }
       else { await supabase.from('cash_fund_movements').insert({ movement_date: expense.expense_date, description: `💸 ${expense.description}${expense.supplier ? ` — ${expense.supplier}` : ''}`, amount: -Math.abs(expense.amount), type: 'saida', source: 'despesa', source_id: expense.id }) }
     } else { if (existingCash) await supabase.from('cash_fund_movements').delete().eq('id', existingCash.id) }
+    await logAccess({ action: 'editar', page: '/despesas', details: `Alterou método de pagamento da despesa "${expense.description}" para ${newMethod === 'dinheiro' ? 'Dinheiro' : 'Banco'}` })
     setExpenses(prev => prev.map(e => e.id === expense.id ? { ...e, payment_method: newMethod } : e))
     setExpenses(prev => { const total = prev.reduce((s, e) => s + e.amount, 0); const cash = prev.filter(e => e.payment_method === 'dinheiro').reduce((s, e) => s + e.amount, 0); setSummary({ total, cash, bank: total - cash }); return prev })
     setTogglingPayment(null)
@@ -108,6 +110,9 @@ export default function DespesasPage() {
 
   async function handleProjectChange(expenseId: string, projectId: string) {
     await supabase.from('expenses').update({ project_id: projectId || null }).eq('id', expenseId)
+    const expense = expenses.find(e => e.id === expenseId)
+    const project = projects.find(p => p.id === projectId)
+    await logAccess({ action: 'editar', page: '/despesas', details: projectId ? `Associou despesa "${expense?.description}" ao projeto "${project?.name}"` : `Removeu projeto da despesa "${expense?.description}"` })
     setExpenses(prev => prev.map(e => { if (e.id !== expenseId) return e; const project = projects.find(p => p.id === projectId) ?? null; return { ...e, project_id: projectId || null, project } }))
   }
 
@@ -127,6 +132,7 @@ export default function DespesasPage() {
       await supabase.from('cash_fund_movements').delete().eq('source_id', expense.id)
       if (deleteInvoice && documents[expense.id]) { const doc = documents[expense.id]; await supabase.storage.from('documents').remove([doc.file_path]); await supabase.from('documents').delete().eq('id', doc.id) }
       await supabase.from('expenses').delete().eq('id', expense.id)
+      await logAccess({ action: 'apagar', page: '/despesas', details: `Apagou despesa "${expense.description}" (${formatCurrency(expense.amount)})` })
     } catch (e: any) { console.error('Erro ao apagar:', e) }
     setDeleting(false); setDeleteConfirm(null); fetchAll()
   }

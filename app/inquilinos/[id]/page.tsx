@@ -7,6 +7,7 @@ import { formatCurrency, formatDate } from '@/lib/utils'
 import { useParams, useRouter } from 'next/navigation'
 import { ArrowLeft, Save, Plus, Trash2, Phone, Mail, User, Home, FileText, Zap } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
+import { logAccess } from '@/lib/logAccess'
 
 interface Tenant {
   id: string
@@ -113,6 +114,7 @@ export default function TenantDetailPage() {
       nif: form.nif || null,
       notes: form.notes || null,
     }).eq('id', id)
+    await logAccess({ action: 'editar', page: `/inquilinos/${id}`, details: `Editou dados do inquilino "${form.name.trim()}"` })
     setSaving(false)
     setSavedMsg(true)
     setTimeout(() => setSavedMsg(false), 3000)
@@ -135,6 +137,7 @@ export default function TenantDetailPage() {
     if (toInsert.length > 0) {
       await supabase.from('tenant_contacts').insert(toInsert)
     }
+    await logAccess({ action: 'editar', page: `/inquilinos/${id}`, details: `Atualizou contactos adicionais de "${tenant?.name}"` })
     setSavingContacts(false)
     setSavedMsg(true)
     setTimeout(() => setSavedMsg(false), 3000)

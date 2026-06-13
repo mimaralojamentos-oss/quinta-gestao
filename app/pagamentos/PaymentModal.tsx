@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase'
 import { formatCurrency, formatDate, getMonthLabel } from '@/lib/utils'
 import { buildRentPaymentPlan, applyRentPaymentPlan } from '@/lib/rentPaymentPlan'
 import { X, Pencil, Trash2, AlertTriangle } from 'lucide-react'
+import { logAccess } from '@/lib/logAccess'
 
 interface Props {
   lease: any
@@ -193,6 +194,8 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
           })
         }
 
+        await logAccess({ action: 'criar', page: '/pagamentos', details: `Registou pagamento de ${entry.debtItem.label} (${formatCurrency(rendaAmount)}) de ${lease.tenant?.name} (${lease.space?.ref})` })
+
         // Diferença paga a mais fica registada como adiantamento
         if (adiantamentoAmount > 0) {
           const { data: newAdvance } = await supabase.from('rent_payments').insert({
@@ -214,6 +217,8 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
               source_id: newAdvance.id,
             })
           }
+
+          await logAccess({ action: 'criar', page: '/pagamentos', details: `Registou adiantamento (${formatCurrency(adiantamentoAmount)}) de ${lease.tenant?.name} (${lease.space?.ref})` })
         }
       } else if (type === 'manual' && debtId) {
         // Registar pagamento de dívida manual
@@ -235,6 +240,8 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
             source_id: debtId,
           })
         }
+
+        await logAccess({ action: 'criar', page: '/pagamentos', details: `Registou pagamento de "${entry.debtItem.label}" (${formatCurrency(amount)}) de ${lease.tenant?.name}` })
       } else if (type === 'eletricidade' && chargeId) {
         // Marcar cobrança de eletricidade como paga
         await supabase.from('electricity_charges').update({
@@ -253,6 +260,8 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
             source_id: chargeId,
           })
         }
+
+        await logAccess({ action: 'criar', page: '/pagamentos', details: `Registou pagamento de ${entry.debtItem.label} (${formatCurrency(amount)}) de ${lease.tenant?.name} (${lease.space?.ref})` })
       }
     }
 
@@ -287,6 +296,7 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
     if (!confirm('Tens a certeza que queres apagar este pagamento?')) return
     await supabase.from('cash_fund_movements').delete().eq('source_id', p.id)
     await supabase.from('rent_payments').delete().eq('id', p.id)
+    await logAccess({ action: 'apagar', page: '/pagamentos', details: `Apagou pagamento de ${tipoLabels[p.tipo] ?? p.tipo} (${formatCurrency(p.amount)}) de ${lease.tenant?.name} (${lease.space?.ref})` })
     onSaved()
   }
 
@@ -325,6 +335,8 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
       } else {
         if (existingCash.data) await supabase.from('cash_fund_movements').delete().eq('id', existingCash.data.id)
       }
+
+      await logAccess({ action: 'editar', page: '/pagamentos', details: `Editou pagamento de ${tipoLabels[form.tipo] ?? form.tipo} (${formatCurrency(parseFloat(form.amount))}) de ${lease.tenant?.name} (${lease.space?.ref})` })
     } else if (form.tipo === 'renda') {
       const amount = parseFloat(form.amount)
       const plan = await buildRentPaymentPlan(supabase, {
@@ -391,6 +403,8 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
           })
         }
       }
+
+      await logAccess({ action: 'criar', page: '/pagamentos', details: `Registou pagamento de renda (${formatCurrency(amount)}) de ${lease.tenant?.name} (${lease.space?.ref}) — ${getMonthLabel(currentMonth)}` })
     } else {
       const { data: newPayment, error: err } = await supabase.from('rent_payments').insert({
         lease_id: lease.id,
@@ -412,6 +426,8 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
           source_id: newPayment.id,
         })
       }
+
+      await logAccess({ action: 'criar', page: '/pagamentos', details: `Registou pagamento de ${tipoLabels[form.tipo] ?? form.tipo} (${formatCurrency(parseFloat(form.amount))}) de ${lease.tenant?.name} (${lease.space?.ref})` })
     }
 
     setSaving(false)

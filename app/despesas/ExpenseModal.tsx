@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { Expense } from '@/lib/types'
 import { X, Upload, FileText, Loader2, Sparkles } from 'lucide-react'
+import { formatCurrency } from '@/lib/utils'
+import { logAccess } from '@/lib/logAccess'
 
 interface Props {
   expense: Expense | null
@@ -140,6 +142,8 @@ export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
         }
       }
 
+      await logAccess({ action: 'editar', page: '/despesas', details: `Editou despesa "${form.description}" (${formatCurrency(parseFloat(form.amount))})` })
+
     } else {
       // Nova despesa
       const { data: newExpense, error: err } = await supabase
@@ -167,6 +171,8 @@ export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
           await supabase.from('documents').update({ expense_id: newExpense.id }).eq('id', docId)
         }
       }
+
+      await logAccess({ action: 'criar', page: '/despesas', details: `Criou despesa "${form.description}" (${formatCurrency(parseFloat(form.amount))})` })
     }
 
     setSaving(false)

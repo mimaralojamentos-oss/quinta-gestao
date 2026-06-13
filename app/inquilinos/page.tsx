@@ -9,6 +9,7 @@ import { Plus, Search, FileText, Phone, Mail, X, AlertTriangle, ArrowUpDown, Arr
 import TenantModal from './TenantModal'
 import LeaseModal from './LeaseModal'
 import { useAuth } from '@/lib/auth-context'
+import { logAccess } from '@/lib/logAccess'
 import Link from 'next/link'
 
 interface TenantWithLease extends Tenant {
@@ -184,6 +185,7 @@ export default function InquilinosPage() {
       original_amount: parseFloat(newDebt.original_amount),
       reference_date: newDebt.reference_date,
     })
+    await logAccess({ action: 'criar', page: '/inquilinos', details: `Criou dívida "${newDebt.description}" (${formatCurrency(parseFloat(newDebt.original_amount))}) para ${debtTenant.name}` })
     setSavingDebt(false)
     setShowNewDebt(false)
     setNewDebt({ description: '', original_amount: '', reference_date: new Date().toISOString().slice(0, 10) })
@@ -201,6 +203,7 @@ export default function InquilinosPage() {
       payment_method: newPayment.payment_method,
       notes: newPayment.notes || null,
     })
+    await logAccess({ action: 'criar', page: '/inquilinos', details: `Registou pagamento de dívida (${formatCurrency(parseFloat(newPayment.amount))}) para ${debtTenant?.name}` })
     setSavingDebt(false)
     setShowNewPayment(null)
     setNewPayment({ payment_date: new Date().toISOString().slice(0, 10), amount: '', payment_method: 'dinheiro', notes: '' })
@@ -210,8 +213,10 @@ export default function InquilinosPage() {
 
   async function deleteDebt(id: string) {
     if (!confirm('Apagar esta dívida e todos os seus pagamentos?')) return
+    const debt = debts.find(d => d.id === id)
     await supabase.from('debt_payments').delete().eq('debt_id', id)
     await supabase.from('debts').delete().eq('id', id)
+    await logAccess({ action: 'apagar', page: '/inquilinos', details: `Apagou dívida "${debt?.description ?? ''}" de ${debtTenant?.name}` })
     if (debtTenant) fetchDebts(debtTenant.id)
     fetchTenants()
   }
@@ -219,6 +224,7 @@ export default function InquilinosPage() {
   async function deletePayment(id: string) {
     if (!confirm('Apagar este pagamento?')) return
     await supabase.from('debt_payments').delete().eq('id', id)
+    await logAccess({ action: 'apagar', page: '/inquilinos', details: `Apagou pagamento de dívida de ${debtTenant?.name}` })
     if (debtTenant) fetchDebts(debtTenant.id)
     fetchTenants()
   }

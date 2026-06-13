@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase-client'
+import { logAccess } from '@/lib/logAccess'
 import { Home, Eye, EyeOff, Loader2 } from 'lucide-react'
 
 const images = ['/QdBC1.jpeg', '/QdBC2.jpeg']
@@ -28,6 +29,7 @@ export default function LoginPage() {
     setError('')
     const { error: err } = await supabase.auth.signInWithPassword({ email, password })
     if (err) { setError('Email ou password incorretos. Tenta novamente.'); setLoading(false); return }
+    await logAccess({ action: 'login', page: '/login' })
     window.location.href = '/dashboard'
   }
 

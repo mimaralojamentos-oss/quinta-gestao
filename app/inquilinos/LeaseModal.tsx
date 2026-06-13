@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Tenant, Lease, Space } from '@/lib/types'
 import { X, Upload, FileText, Loader2, Sparkles } from 'lucide-react'
+import { formatCurrency } from '@/lib/utils'
+import { logAccess } from '@/lib/logAccess'
 
 interface Props {
   tenant: Tenant
@@ -154,6 +156,12 @@ export default function LeaseModal({ tenant, onClose, onSaved }: Props) {
 
     setSaving(false)
     if (err) { setError(err.message); return }
+    const space = spaces.find(s => s.id === form.space_id)
+    await logAccess({
+      action: existingLease ? 'editar' : 'criar',
+      page: '/inquilinos',
+      details: `${existingLease ? 'Editou' : 'Criou'} contrato de "${tenant.name}" no espaço ${space?.ref ?? ''} (${formatCurrency(parseFloat(form.monthly_rent))}/mês)`,
+    })
     onSaved()
   }
 

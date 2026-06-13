@@ -1,6 +1,7 @@
 'use client'
 import { createContext, useContext, useEffect, useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase-client'
+import { logAccess } from '@/lib/logAccess'
 import type { User } from '@supabase/supabase-js'
 
 interface Profile {
@@ -44,6 +45,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     warningTimer.current = setTimeout(() => setShowWarning(true), INACTIVITY_TIMEOUT - WARNING_BEFORE)
     inactivityTimer.current = setTimeout(async () => {
       setShowWarning(false)
+      await logAccess({ action: 'logout', page: window.location.pathname, details: 'Sessão expirada por inatividade' })
       await supabaseClient.auth.signOut()
       sessionStorage.clear()
       window.location.href = '/login'
@@ -98,6 +100,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   async function signOut() {
     clearInactivityTimer()
     userRef.current = null
+    await logAccess({ action: 'logout', page: window.location.pathname })
     await supabaseClient.auth.signOut()
     sessionStorage.clear()
     window.location.href = '/login'
