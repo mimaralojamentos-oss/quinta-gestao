@@ -1,7 +1,7 @@
 'use client'
 
 import AppLayout from '@/components/layout/AppLayout'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatDate } from '@/lib/utils'
 import { BarChart3, TrendingUp, Home, FileText, Calendar, ChevronDown, ChevronUp, Edit2, X, Save, ClipboardList, Download, Loader2 } from 'lucide-react'
@@ -56,7 +56,6 @@ export default function RelatoriosPage() {
   const [cobrancasSort, setCobrancasSort] = useState<'nome' | 'espaco'>('nome')
 
   const [exportingPDF, setExportingPDF] = useState(false)
-  const reportContentRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (activeReport === 'rendas' || activeReport === 'cobrancas') fetchRendas()
@@ -65,8 +64,7 @@ export default function RelatoriosPage() {
     if (activeReport === 'contratos') fetchContratos()
   }, [activeReport, selectedMonth])
 
-  async function fetchRendas() {
-    setLoading(true)
+  async function fetchRendasData() {
     const startDate = `${selectedMonth}-01`
     const [y, m] = selectedMonth.split('-').map(Number)
     const endYear = m === 12 ? y + 1 : y
@@ -118,7 +116,7 @@ export default function RelatoriosPage() {
     const emFalta = (leasesData ?? []).filter((l: any) => !pagosLeaseIds.has(String(l.id)))
     const pagos = (leasesData ?? []).filter((l: any) => pagosLeaseIds.has(String(l.id)))
 
-    setRendas({
+    return {
       totalEsperado,
       totalRecebido,
       totalOutros,
@@ -127,7 +125,12 @@ export default function RelatoriosPage() {
       leases: leasesData,
       payments: rendaPayments,
       outrosPayments,
-    })
+    }
+  }
+
+  async function fetchRendas() {
+    setLoading(true)
+    setRendas(await fetchRendasData())
     setLoading(false)
   }
 
@@ -242,55 +245,111 @@ export default function RelatoriosPage() {
   }
 
   async function handleExportPDF() {
-    if (!reportContentRef.current) return
     setExportingPDF(true)
     try {
-      const [{ default: jsPDF }, { default: html2canvas }] = await Promise.all([
-        import('jspdf'),
-        import('html2canvas'),
-      ])
-
-      const canvas = await html2canvas(reportContentRef.current, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: '#ffffff',
-        ignoreElements: (el) => el.classList?.contains('print:hidden'),
-      })
+      const data = await fetchRendasData()
+      const { default: jsPDF } = await import('jspdf')
 
       const pdf = new jsPDF('p', 'mm', 'a4')
       const pageWidth = pdf.internal.pageSize.getWidth()
       const pageHeight = pdf.internal.pageSize.getHeight()
-      const margin = 10
+      const margin = 14
+      let y = 20
 
       const monthLabel = MONTHS.find(m => m.value === selectedMonth)?.label ?? selectedMonth
 
-      pdf.setFontSize(14)
-      pdf.text(`Relatório Financeiro - ${monthLabel}`, margin, 15)
+      function checkPageBreak(needed: number) {
+        if (y + needed > pageHeight - margin) {
+          pdf.addPage()
+          y = margin + 6
+        }
+      }
+
+      pdf.setFont('helvetica', 'bold')
+      pdf.setFontSize(16)
+      pdf.text(`Relatório Financeiro - ${monthLabel}`, margin, y)
+      y += 7
+
+      pdf.setFont('helvetica', 'normal')
       pdf.setFontSize(9)
       pdf.setTextColor(120)
       pdf.text(
         `Gerado em ${new Date().toLocaleDateString('pt-PT')} às ${new Date().toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' })}`,
-        margin, 21
+        margin, y
       )
       pdf.setTextColor(0)
+      y += 10
 
-      const imgData = canvas.toDataURL('image/png')
-      const imgWidth = pageWidth - margin * 2
-      const imgHeight = (canvas.height * imgWidth) / canvas.width
+      pdf.setFont('helvetica', 'bold')
+      pdf.setFontSize(12)
+      pdf.text('Resumo', margin, y)
+      y += 7
+      pdf.setFont('helvetica', 'normal')
+      pdf.setFontSize(10)
+      pdf.text(`Valor Esperado: ${fmt(data.totalEsperado)}`, margin, y)
+      y += 6
+      pdf.text(`Rendas Recebidas: ${fmt(data.totalRecebido)}`, margin, y)
+      y += 6
+      pdf.text(`Em Falta: ${fmt(Math.max(0, data.totalEsperado - data.totalRecebido))}`, margin, y)
+      y += 10
 
-      const topOffset = 26
-      const usableHeight = pageHeight - margin * 2
+      function drawList(title: string, items: any[], getValue: (l: any) => number, getExtra?: (l: any) => string) {
+        checkPageBreak(14)
+        pdf.setFont('helvetica', 'bold')
+        pdf.setFontSize(12)
+        pdf.text(`${title} (${items.length})`, margin, y)
+        y += 7
 
-      let heightLeft = imgHeight
-      pdf.addImage(imgData, 'PNG', margin, topOffset, imgWidth, imgHeight)
-      heightLeft -= (pageHeight - topOffset - margin)
+        if (items.length === 0) {
+          pdf.setFont('helvetica', 'normal')
+          pdf.setFontSize(10)
+          pdf.text('Sem registos.', margin, y)
+          y += 10
+          return
+        }
 
-      while (heightLeft > 0) {
-        pdf.addPage()
-        const position = margin - (imgHeight - heightLeft)
-        pdf.addImage(imgData, 'PNG', margin, position, imgWidth, imgHeight)
-        heightLeft -= usableHeight
+        pdf.setFont('helvetica', 'bold')
+        pdf.setFontSize(9)
+        pdf.text('Inquilino', margin, y)
+        pdf.text('Espaço', margin + 95, y)
+        pdf.text('Valor', pageWidth - margin, y, { align: 'right' })
+        y += 4
+        pdf.setDrawColor(200)
+        pdf.line(margin, y, pageWidth - margin, y)
+        y += 5
+
+        pdf.setFont('helvetica', 'normal')
+        for (const l of items) {
+          const extra = getExtra?.(l)
+          checkPageBreak(extra ? 11 : 6)
+          pdf.setFontSize(9)
+          pdf.setTextColor(0)
+          pdf.text(String(l.tenant?.name ?? '-'), margin, y)
+          pdf.text(String(l.space?.ref ?? '-'), margin + 95, y)
+          pdf.text(fmt(getValue(l)), pageWidth - margin, y, { align: 'right' })
+          y += 6
+          if (extra) {
+            pdf.setFontSize(8)
+            pdf.setTextColor(130)
+            pdf.text(extra, margin, y)
+            pdf.setTextColor(0)
+            y += 5
+          }
+        }
+        y += 6
       }
+
+      drawList('Rendas em Falta', data.emFalta, (l: any) => l.monthly_rent ?? 0)
+
+      drawList('Rendas Pagas', data.pagos,
+        (l: any) => data.payments.find((pay: any) => String(pay.lease_id) === String(l.id))?.amount ?? 0,
+        (l: any) => {
+          const p = data.payments.find((pay: any) => String(pay.lease_id) === String(l.id))
+          const parts: string[] = []
+          if (p?.payment_date) parts.push(`Pago em ${formatDate(p.payment_date)}`)
+          if (p?.payment_method) parts.push(p.payment_method === 'dinheiro' ? 'Dinheiro' : 'Banco')
+          return parts.join(' · ')
+        })
 
       pdf.save(`relatorio-${selectedMonth}.pdf`)
     } catch (e) {
@@ -351,7 +410,7 @@ export default function RelatoriosPage() {
         </div>
       </div>
 
-      <div className="p-8" ref={reportContentRef}>
+      <div className="p-8">
         {loading ? (
           <div className="flex justify-center py-16">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600" />
