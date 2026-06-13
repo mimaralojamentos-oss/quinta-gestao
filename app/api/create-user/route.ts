@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
+import { requireAdmin } from '@/lib/require-admin'
 
 function getAdminClient() {
   return createClient(
@@ -10,6 +11,9 @@ function getAdminClient() {
 }
 
 export async function GET() {
+  const auth = await requireAdmin()
+  if (auth.error) return auth.error
+
   try {
     const supabaseAdmin = getAdminClient()
     const { data, error } = await supabaseAdmin.auth.admin.listUsers()
@@ -21,6 +25,9 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const auth = await requireAdmin()
+  if (auth.error) return auth.error
+
   try {
     const { email, password, name, role } = await request.json()
     const supabaseAdmin = getAdminClient()
@@ -43,6 +50,9 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  const auth = await requireAdmin()
+  if (auth.error) return auth.error
+
   try {
     const { id } = await request.json()
     const supabaseAdmin = getAdminClient()
