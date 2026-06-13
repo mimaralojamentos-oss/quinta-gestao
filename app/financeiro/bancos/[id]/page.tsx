@@ -87,6 +87,12 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
   const [showFilters, setShowFilters] = useState(false)
   const [syncing, setSyncing] = useState(false)
 
+  const [editingTxId, setEditingTxId] = useState<string | null>(null)
+  const [editDate, setEditDate] = useState('')
+  const [editAmount, setEditAmount] = useState('')
+  const [editDescription, setEditDescription] = useState('')
+  const [savingEdit, setSavingEdit] = useState(false)
+
   const [search, setSearch] = useState('')
   const [filterDateFrom, setFilterDateFrom] = useState('')
   const [filterDateTo, setFilterDateTo] = useState('')
@@ -413,6 +419,34 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
       const tx = transactions.find(t => t.id === id)
       if (tx) warnIfSkipped(await processRendaTransaction(tx))
     }
+    fetchData()
+  }
+
+  function startEditTx(tx: Transaction) {
+    setEditingTxId(tx.id)
+    setEditDate(tx.transaction_date.slice(0, 10))
+    setEditAmount(String(tx.amount))
+    setEditDescription(tx.description)
+  }
+
+  function cancelEditTx() {
+    setEditingTxId(null)
+  }
+
+  async function saveEditTx(id: string) {
+    const amount = parseFloat(editAmount.replace(',', '.'))
+    if (!editDate || !editDescription.trim() || isNaN(amount)) {
+      alert('Preenche a data, a descrição e o valor corretamente.')
+      return
+    }
+    setSavingEdit(true)
+    await supabase.from('bank_transactions').update({
+      transaction_date: editDate,
+      description: editDescription.trim(),
+      amount,
+    }).eq('id', id)
+    setSavingEdit(false)
+    setEditingTxId(null)
     fetchData()
   }
 
@@ -753,14 +787,26 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
                   const autoMatches = txMatches[tx.id]
                   return (
                     <tr key={tx.id} className={`hover:bg-gray-50 ${tx.status === 'ignorado' ? 'opacity-50' : ''}`}>
-                      <td className="table-cell text-sm whitespace-nowrap">{formatDate(tx.transaction_date)}</td>
+                      <td className="table-cell text-sm whitespace-nowrap">
+                        {editingTxId === tx.id ? (
+                          <input type="date" className="input text-sm w-full" value={editDate} onChange={e => setEditDate(e.target.value)} />
+                        ) : formatDate(tx.transaction_date)}
+                      </td>
                       <td className="table-cell" style={{ maxWidth: '280px' }}>
-                        <p className="text-sm text-gray-800 break-words">{tx.description}</p>
+                        {editingTxId === tx.id ? (
+                          <input type="text" className="input text-sm w-full" value={editDescription} onChange={e => setEditDescription(e.target.value)} />
+                        ) : (
+                          <p className="text-sm text-gray-800 break-words">{tx.description}</p>
+                        )}
                       </td>
                       <td className="table-cell whitespace-nowrap">
-                        <span className={`font-semibold text-sm ${tx.amount >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                          {tx.amount >= 0 ? '+' : ''}{formatCurrency(tx.amount)}
-                        </span>
+                        {editingTxId === tx.id ? (
+                          <input type="number" step="0.01" className="input text-sm w-full" value={editAmount} onChange={e => setEditAmount(e.target.value)} />
+                        ) : (
+                          <span className={`font-semibold text-sm ${tx.amount >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                            {tx.amount >= 0 ? '+' : ''}{formatCurrency(tx.amount)}
+                          </span>
+                        )}
                       </td>
                       <td className="table-cell text-sm text-gray-500 whitespace-nowrap">
                         {tx.balance != null ? formatCurrency(tx.balance) : '—'}
@@ -807,11 +853,25 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
                         )}
                       </td>
                       <td className="table-cell">
-                        <div className="flex gap-2">
-                          {tx.status !== 'validado' && <button onClick={() => updateStatus(tx.id, 'validado')} className="text-xs text-emerald-600 hover:underline font-medium">✓ Validar</button>}
-                          {tx.status !== 'ignorado' && <button onClick={() => updateStatus(tx.id, 'ignorado')} className="text-xs text-gray-400 hover:underline font-medium">Ignorar</button>}
-                          {tx.status !== 'por_validar' && <button onClick={() => updateStatus(tx.id, 'por_validar')} className="text-xs text-blue-500 hover:underline font-medium">Reset</button>}
-                        </div>
+                        {editingTxId === tx.id ? (
+                          <div className="flex gap-2 items-center">
+                            <button onClick={() => saveEditTx(tx.id)} disabled={savingEdit} className="text-xs text-emerald-600 hover:underline font-medium flex items-center gap-1">
+                              {savingEdit ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle className="w-3 h-3" />} Guardar
+                            </button>
+                            <button onClick={cancelEditTx} disabled={savingEdit} className="text-xs text-gray-400 hover:underline font-medium flex items-center gap-1">
+                              <X className="w-3 h-3" /> Cancelar
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex gap-2 items-center">
+                            <button onClick={() => startEditTx(tx)} title="Editar transação" className="text-gray-400 hover:text-blue-500">
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            {tx.status !== 'validado' && <button onClick={() => updateStatus(tx.id, 'validado')} className="text-xs text-emerald-600 hover:underline font-medium">✓ Validar</button>}
+                            {tx.status !== 'ignorado' && <button onClick={() => updateStatus(tx.id, 'ignorado')} className="text-xs text-gray-400 hover:underline font-medium">Ignorar</button>}
+                            {tx.status !== 'por_validar' && <button onClick={() => updateStatus(tx.id, 'por_validar')} className="text-xs text-blue-500 hover:underline font-medium">Reset</button>}
+                          </div>
+                        )}
                       </td>
                     </tr>
                   )
