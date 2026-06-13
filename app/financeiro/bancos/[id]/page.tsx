@@ -58,6 +58,16 @@ function parsePortugueseNumber(raw: any): number {
   return parseFloat(str)
 }
 
+const MESES_PT = [
+  'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
+]
+
+function formatReferenceMonthPT(referenceMonth: string): string {
+  const [year, month] = referenceMonth.split('-').map(Number)
+  return `${MESES_PT[month - 1]} ${year}`
+}
+
 export default function BankDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const [bankId, setBankId] = useState('')
   const [bank, setBank] = useState<Bank | null>(null)
@@ -271,6 +281,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     })
 
     let excess = parseFloat((tx.amount - monthlyRent).toFixed(2))
+    const tenantId = tx.confirmed_tenant_id ?? lease.tenant?.id
 
     if (excess > 0) {
       // a. Paga cobranças de eletricidade em dívida, mais antigas primeiro
@@ -292,7 +303,6 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
       }
 
       // b. Abate outras dívidas, mais antigas primeiro
-      const tenantId = tx.confirmed_tenant_id ?? lease.tenant?.id
       if (excess > 0 && tenantId) {
         const { data: debtsData } = await supabase
           .from('debts')
@@ -324,6 +334,18 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
           payment_method: 'banco',
           tipo: 'adiantamento',
           used: false,
+        })
+      }
+    } else if (excess < 0 && tenantId) {
+      // Pagamento parcial: regista a diferença como dívida do inquilino
+      const diferenca = Math.abs(excess)
+      const aviso = `⚠️ Pagamento parcial de renda\n\nValor pago: ${formatCurrency(tx.amount)}\nValor esperado: ${formatCurrency(monthlyRent)}\nDiferença: ${formatCurrency(diferenca)}\n\nVai ser criado um registo de dívida de ${formatCurrency(diferenca)} para este inquilino. Pretende continuar?`
+      if (window.confirm(aviso)) {
+        await supabase.from('debts').insert({
+          tenant_id: tenantId,
+          original_amount: diferenca,
+          description: `Pagamento parcial - renda de ${formatReferenceMonthPT(referenceMonth)}`,
+          created_at: new Date().toISOString(),
         })
       }
     }
