@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import * as XLSX from 'xlsx'
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 
 interface Transaction {
   id: string
@@ -57,6 +58,13 @@ function parsePortugueseNumber(raw: any): number {
   if (typeof raw === 'number') return raw
   const str = String(raw).replace(/[€\s]/g, '').replace(/\./g, '').replace(',', '.')
   return parseFloat(str)
+}
+
+const MESES_ABREV_PT = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
+
+function formatMonthShortPT(dateString: string): string {
+  const [year, month] = dateString.split('-').map(Number)
+  return `${MESES_ABREV_PT[month - 1]} ${year}`
 }
 
 export default function BankDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -541,6 +549,12 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     return true
   })
 
+  const balanceChartData = transactions
+    .filter(t => t.status !== 'ignorado' && t.balance != null)
+    .slice()
+    .sort((a, b) => a.transaction_date.localeCompare(b.transaction_date))
+    .map(t => ({ date: t.transaction_date, balance: t.balance as number }))
+
   const totalIn = transactions.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0)
   const totalOut = transactions.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0)
   const pending = transactions.filter(t => t.status === 'por_validar').length
@@ -582,6 +596,28 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
               <Upload className="w-4 h-4" /> Importar Extrato
             </button>
           </div>
+        </div>
+
+        {/* Gráfico de Evolução do Saldo */}
+        <div className="bg-white border border-gray-100 rounded-xl shadow-sm p-6 mb-5">
+          <h2 className="text-base font-semibold text-gray-800 mb-4">Evolução do Saldo</h2>
+          {balanceChartData.length === 0 ? (
+            <p className="text-sm text-gray-400 text-center py-8">Sem dados para mostrar</p>
+          ) : (
+            <ResponsiveContainer width="100%" height={280}>
+              <LineChart data={balanceChartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis dataKey="date" tickFormatter={formatMonthShortPT} tick={{ fontSize: 12, fill: '#6b7280' }} />
+                <YAxis tickFormatter={v => `${v}€`} tick={{ fontSize: 12, fill: '#6b7280' }} />
+                <Tooltip
+                  labelFormatter={(label: any) => formatDate(label)}
+                  formatter={(value: any) => [formatCurrency(value), 'Saldo']}
+                  contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb', fontSize: '12px' }}
+                />
+                <Line type="monotone" dataKey="balance" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
         </div>
 
         {/* Cards compactos */}
