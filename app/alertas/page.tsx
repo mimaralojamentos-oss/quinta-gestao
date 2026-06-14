@@ -79,7 +79,7 @@ export default function AlertasPage() {
     setDismissed(dismissedKeys)
 
     const newAlerts: AlertItem[] = []
-    const paidLeaseIds = new Set((payments ?? []).map(p => p.lease_id))
+    const paidLeaseIds = new Set((payments ?? []).filter(p => p.tipo === 'renda' || !p.tipo).map(p => p.lease_id))
 
     // Rendas em falta
     ;(leases ?? []).forEach(l => {
