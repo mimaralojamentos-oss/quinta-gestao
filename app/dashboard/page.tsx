@@ -55,7 +55,7 @@ export default function Dashboard() {
         supabase.from('rent_payments').select('lease_id, amount, tipo').gte('reference_month', currentMonth).lt('reference_month', nextMonthStr),
         supabase.from('projects').select('id, status').eq('status', 'em_curso'),
         supabase.from('meters').select('id, name, contract_number').eq('active', true).order('name'),
-        supabase.from('meter_readings').select('meter_id, reading_date, amount').order('reading_date', { ascending: false }),
+        supabase.from('meter_readings').select('meter_id, reading_date, invoice_amount').order('reading_date', { ascending: false }),
       ])
 
       const spaces = spacesRes.data ?? []
@@ -67,7 +67,7 @@ export default function Dashboard() {
 
       const meters = metersData.map(meter => {
         const lastReading = allMeterReadings.find(r => r.meter_id === meter.id)
-        return { ...meter, lastReadingDate: lastReading?.reading_date ?? null, lastReadingAmount: lastReading?.amount ?? null }
+        return { ...meter, lastReadingDate: lastReading?.reading_date ?? null, lastReadingAmount: lastReading?.invoice_amount ?? null }
       })
 
       const paidLeaseIds = new Set(payments.filter(p => p.tipo === 'renda' || !p.tipo).map(p => p.lease_id))
