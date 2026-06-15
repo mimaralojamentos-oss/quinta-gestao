@@ -1,6 +1,7 @@
 'use client'
 
 import AppLayout from '@/components/layout/AppLayout'
+import Link from 'next/link'
 import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency, formatDate } from '@/lib/utils'
@@ -530,8 +531,12 @@ async function handleSaveEdit() {
                     </td>
                     <td className="table-cell text-sm font-medium text-red-600">{doc._amount ? formatCurrency(doc._amount) : '—'}</td>
                     <td className="table-cell">
-                      {doc._expense_id ? <span className="text-xs text-emerald-600 font-medium">✅ Sim</span>
-                        : doc._tipo === 'contrato' ? <span className="text-xs text-gray-400">—</span>
+                      {doc._expense_id ? (
+                        <Link href={`/despesas?expense_id=${doc._expense_id}`}
+                          className="text-xs text-emerald-600 font-medium hover:underline">
+                          ✅ Sim
+                        </Link>
+                      ) : doc._tipo === 'contrato' ? <span className="text-xs text-gray-400">—</span>
                         : <span className="text-xs text-yellow-600">⚠ Não</span>}
                     </td>
                     <td className="table-cell">

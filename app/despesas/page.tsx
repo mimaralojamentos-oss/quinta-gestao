@@ -1,7 +1,8 @@
 'use client'
 
 import AppLayout from '@/components/layout/AppLayout'
-import { useEffect, useState, useRef } from 'react'
+import { Suspense, useEffect, useState, useRef } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { Expense } from '@/lib/types'
 import { formatCurrency, formatDate, categoryLabel } from '@/lib/utils'
@@ -29,7 +30,27 @@ function getDateRange(period: string): { from: string; to: string } | null {
 }
 
 export default function DespesasPage() {
+  return (
+    <Suspense fallback={<DespesasFallback />}>
+      <DespesasContent />
+    </Suspense>
+  )
+}
+
+function DespesasFallback() {
+  return (
+    <AppLayout>
+      <div className="p-8 flex justify-center py-12">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600" />
+      </div>
+    </AppLayout>
+  )
+}
+
+function DespesasContent() {
   const { isAdmin, isCoAdmin } = useAuth()
+  const router = useRouter()
+  const searchParams = useSearchParams()
   const [expenses, setExpenses] = useState<any[]>([])
   const [projects, setProjects] = useState<any[]>([])
   const [documents, setDocuments] = useState<Record<string, any>>({})
@@ -55,6 +76,7 @@ export default function DespesasPage() {
   const [filterDateTo, setFilterDateTo] = useState('')
   const [filterAmountMin, setFilterAmountMin] = useState('')
   const [filterAmountMax, setFilterAmountMax] = useState('')
+  const [filterExpenseId, setFilterExpenseId] = useState<string | null>(() => searchParams.get('expense_id'))
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -147,15 +169,21 @@ export default function DespesasPage() {
 
   function toggleSupplier(s: string) { setFilterSuppliers(prev => prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s]) }
 
+  function clearExpenseFilter() {
+    setFilterExpenseId(null)
+    router.replace('/despesas')
+  }
+
   function resetFilters() {
     setSearch(''); setFilterCategory('all'); setFilterSuppliers([])
     setFilterProject('all'); setFilterPeriod('all')
     setFilterDateFrom(''); setFilterDateTo('')
     setFilterAmountMin(''); setFilterAmountMax('')
+    clearExpenseFilter()
   }
 
   const hasActiveFilters = search || filterCategory !== 'all' || filterSuppliers.length > 0 ||
-    filterProject !== 'all' || filterPeriod !== 'all' || filterDateFrom || filterDateTo || filterAmountMin || filterAmountMax
+    filterProject !== 'all' || filterPeriod !== 'all' || filterDateFrom || filterDateTo || filterAmountMin || filterAmountMax || filterExpenseId
 
   const allSuppliers = [...new Set(expenses.map(e => e.supplier).filter(Boolean))].sort()
   const dateRange = filterPeriod !== 'all' ? getDateRange(filterPeriod) : null
@@ -170,7 +198,8 @@ export default function DespesasPage() {
     const matchPeriod = !dateRange || (e.expense_date >= dateRange.from && e.expense_date <= dateRange.to)
     const matchAmountMin = !filterAmountMin || e.amount >= parseFloat(filterAmountMin)
     const matchAmountMax = !filterAmountMax || e.amount <= parseFloat(filterAmountMax)
-    return matchSearch && matchCat && matchSupplier && matchProject && matchDateFrom && matchDateTo && matchPeriod && matchAmountMin && matchAmountMax
+    const matchExpenseId = !filterExpenseId || e.id === filterExpenseId
+    return matchSearch && matchCat && matchSupplier && matchProject && matchDateFrom && matchDateTo && matchPeriod && matchAmountMin && matchAmountMax && matchExpenseId
   }).sort((a, b) => {
     let valA = a[sortField] ?? '', valB = b[sortField] ?? ''
     if (sortField === 'amount') { valA = Number(valA); valB = Number(valB) }
@@ -191,6 +220,7 @@ export default function DespesasPage() {
   }
 
   const semProjeto = expenses.filter(e => !e.project_id).length
+  const expenseFilterMatch = filterExpenseId ? expenses.find(e => e.id === filterExpenseId) : null
   const thClass = "table-header cursor-pointer hover:bg-gray-100 select-none"
 
   return (
@@ -208,6 +238,15 @@ export default function DespesasPage() {
             </button>
           )}
         </div>
+
+        {filterExpenseId && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-2 mb-3 flex items-center justify-between">
+            <p className="text-sm text-blue-700">
+              🔎 A mostrar despesa vinda de Documentos{expenseFilterMatch ? `: ${expenseFilterMatch.description}` : ''}
+            </p>
+            <button onClick={clearExpenseFilter} className="text-xs text-blue-700 hover:underline font-medium">Ver todas as despesas</button>
+          </div>
+        )}
 
         {/* Cards resumo — compactos */}
         <div className="grid grid-cols-3 gap-3 mb-3">
