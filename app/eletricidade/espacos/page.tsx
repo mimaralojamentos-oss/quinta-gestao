@@ -387,6 +387,18 @@ export default function QuadrosEspacosPage() {
 
     let unpaidCharges: { id: string }[] = []
     if (leaseIds.length > 0) {
+      const { data: paidCharges } = await supabase
+        .from('electricity_charges')
+        .select('id')
+        .in('lease_id', leaseIds)
+        .eq('paid', true)
+        .or(`charge_date.eq.${reading.reading_date},reference_month.eq.${referenceMonth}`)
+
+      if ((paidCharges ?? []).length > 0) {
+        alert('Não é possível apagar esta leitura porque já tem uma cobrança paga associada.')
+        return
+      }
+
       const { data: charges } = await supabase
         .from('electricity_charges')
         .select('id')
