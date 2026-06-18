@@ -226,6 +226,7 @@ export default function PortaoPage() {
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600" />
               </div>
             ) : (
+              <>
               <div className="hidden lg:block bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 border-b border-gray-100">
@@ -459,6 +460,7 @@ export default function PortaoPage() {
                   <div className="py-12 text-center text-gray-400 text-sm">Nenhum número encontrado</div>
                 )}
               </div>
+              </>
             )}
           </>
         )}
