@@ -226,7 +226,7 @@ export default function PortaoPage() {
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600" />
               </div>
             ) : (
-              <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+              <div className="hidden lg:block bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 border-b border-gray-100">
                     <tr>
@@ -390,6 +390,74 @@ export default function PortaoPage() {
                     )}
                   </tbody>
                 </table>
+              </div>
+              {/* Vista mobile */}
+              <div className="lg:hidden bg-white rounded-xl border border-gray-100 shadow-sm divide-y divide-gray-100">
+                {showNewRow && (
+                  <div className="p-4 bg-emerald-50 space-y-2">
+                    <p className="text-xs font-semibold text-emerald-700 mb-2">Novo número</p>
+                    <CellInput value={newForm.phone} onChange={(v) => setNewForm(f => ({ ...f, phone: v }))} placeholder="9XXXXXXXXX" />
+                    <CellInput value={newForm.name} onChange={(v) => setNewForm(f => ({ ...f, name: v }))} placeholder="Nome" />
+                    <CellInput value={newForm.space} onChange={(v) => setNewForm(f => ({ ...f, space: v }))} placeholder="Espaço (ex: P01)" />
+                    <div className="flex gap-2 mt-2">
+                      <button onClick={saveNewRow} disabled={saving || !newForm.phone}
+                        className="flex-1 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium disabled:opacity-50">
+                        {saving ? 'A guardar...' : 'Guardar'}
+                      </button>
+                      <button onClick={() => setShowNewRow(false)}
+                        className="flex-1 py-2 bg-gray-200 text-gray-600 rounded-lg text-sm">
+                        Cancelar
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {filteredPhones.map(phone => (
+                  <div key={phone.id} className={`p-4 ${!phone.active ? 'opacity-50' : ''}`}>
+                    {editingId === phone.id ? (
+                      <div className="space-y-2">
+                        <CellInput value={editForm.phone} onChange={(v) => setEditForm(f => ({ ...f, phone: v }))} />
+                        <CellInput value={editForm.name} onChange={(v) => setEditForm(f => ({ ...f, name: v }))} placeholder="Nome" />
+                        <CellInput value={editForm.space} onChange={(v) => setEditForm(f => ({ ...f, space: v }))} placeholder="Espaço" />
+                        <select value={editForm.active ? 'true' : 'false'}
+                          onChange={e => setEditForm(f => ({ ...f, active: e.target.value === 'true' }))}
+                          className="w-full text-sm border border-emerald-300 rounded px-2 py-1.5 bg-emerald-50">
+                          <option value="true">Ativo</option>
+                          <option value="false">Inativo</option>
+                        </select>
+                        <div className="flex gap-2 mt-2">
+                          <button onClick={saveEdit} disabled={saving}
+                            className="flex-1 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium disabled:opacity-50">
+                            {saving ? 'A guardar...' : 'Guardar'}
+                          </button>
+                          <button onClick={cancelEdit}
+                            className="flex-1 py-2 bg-gray-200 text-gray-600 rounded-lg text-sm">
+                            Cancelar
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="font-mono text-gray-800 font-medium">{phone.phone}</p>
+                          <p className="text-sm text-gray-600">{phone.name ?? '—'}</p>
+                          <div className="flex items-center gap-2 mt-1">
+                            {phone.space && <span className="bg-emerald-100 text-emerald-700 text-xs font-medium px-2 py-0.5 rounded-full">{phone.space}</span>}
+                            <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${phone.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                              {phone.active ? 'Ativo' : 'Inativo'}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="flex gap-3">
+                          <button onClick={() => startEdit(phone)} className="text-xs text-emerald-600 font-medium hover:underline">Editar</button>
+                          <button onClick={() => deletePhone(phone.id)} className="text-xs text-red-500 font-medium hover:underline">Apagar</button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+                {filteredPhones.length === 0 && !showNewRow && (
+                  <div className="py-12 text-center text-gray-400 text-sm">Nenhum número encontrado</div>
+                )}
               </div>
             )}
           </>
