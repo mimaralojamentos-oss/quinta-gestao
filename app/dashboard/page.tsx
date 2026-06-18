@@ -112,14 +112,14 @@ export default function Dashboard() {
 
   return (
     <AppLayout>
-      <div className="p-8">
+      <div className="p-4 md:p-8">
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
           <p className="text-gray-500 text-sm mt-1">{getMonthLabel(currentMonth)}</p>
         </div>
 
         {/* Cards compactos do topo */}
-        <div className="grid grid-cols-4 gap-3 mb-6">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
           <div className="bg-white border border-gray-100 rounded-lg shadow-sm px-4 py-3 flex items-center gap-3">
             <div className="w-8 h-8 bg-emerald-50 rounded-lg flex items-center justify-center flex-shrink-0">
               <Building2 className="w-4 h-4 text-emerald-600" />
@@ -230,7 +230,7 @@ export default function Dashboard() {
         )}
 
         {/* Corpo: Rendas Pendentes + Alertas */}
-        <div className="grid grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="card">
             <div className="flex items-center justify-between mb-4">
               <h2 className="font-semibold text-gray-900">Rendas Pendentes</h2>
