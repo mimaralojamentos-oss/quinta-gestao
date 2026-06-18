@@ -492,7 +492,7 @@ export default function RelatoriosPage() {
         </div>
       </div>
 
-      <div className="p-8">
+      <div className="p-4 md:p-8">
         {loading ? (
           <div className="flex justify-center py-16">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600" />
@@ -502,7 +502,7 @@ export default function RelatoriosPage() {
             {/* RENDAS */}
             {activeReport === 'rendas' && rendas && (
               <div className="space-y-5">
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div className="bg-white border border-gray-200 rounded-xl p-4">
                     <p className="text-xs text-gray-500 mb-1">Valor Esperado</p>
                     <p className="text-2xl font-bold text-gray-900">{fmt(rendas.totalEsperado)}</p>
@@ -620,7 +620,7 @@ export default function RelatoriosPage() {
             {/* OCUPAÇÃO */}
             {activeReport === 'ocupacao' && ocupacao && (
               <div className="space-y-5">
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div className="bg-white border border-gray-200 rounded-xl p-4">
                     <p className="text-xs text-gray-500 mb-1">Total de Espaços</p>
                     <p className="text-2xl font-bold text-gray-900">{ocupacao.total}</p>
@@ -668,7 +668,7 @@ export default function RelatoriosPage() {
             {/* FINANCEIRO */}
             {activeReport === 'financeiro' && financeiro && (
               <div className="space-y-5">
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div className="bg-white border border-gray-200 rounded-xl p-4">
                     <p className="text-xs text-gray-500 mb-1">Receitas</p>
                     <p className="text-2xl font-bold text-emerald-600">{fmt(financeiro.receitas)}</p>

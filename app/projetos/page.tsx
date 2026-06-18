@@ -184,7 +184,7 @@ export default function ProjetosPage() {
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-4 mb-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
             <div className="card text-center py-3">
               <p className="text-xs text-gray-500 mb-1">Orçamento em curso</p>
               <p className="text-lg font-bold text-gray-900">{formatCurrency(totalBudget)}</p>

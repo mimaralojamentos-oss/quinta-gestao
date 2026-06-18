@@ -181,7 +181,7 @@ export default function NotasPage() {
 
   return (
     <AppLayout>
-      <div className="p-8">
+      <div className="p-4 md:p-8">
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
             <NotebookPen className="w-6 h-6 text-emerald-600" />

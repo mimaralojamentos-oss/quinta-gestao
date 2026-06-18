@@ -225,7 +225,7 @@ function DespesasContent() {
 
   return (
     <AppLayout>
-      <div className="p-8">
+      <div className="p-4 md:p-8">
         {/* Header */}
         <div className="flex items-center justify-between mb-4">
           <div>
@@ -249,7 +249,7 @@ function DespesasContent() {
         )}
 
         {/* Cards resumo — compactos */}
-        <div className="grid grid-cols-3 gap-3 mb-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
           <div className="bg-white rounded-lg border border-gray-100 px-4 py-2.5">
             <p className="text-xs text-gray-500">Total de Despesas</p>
             <p className="text-lg font-bold text-gray-900">{formatCurrency(summary.total)}</p>
@@ -266,7 +266,7 @@ function DespesasContent() {
 
         {/* Cards filtrados — só aparecem com filtros */}
         {hasActiveFilters && (
-          <div className="grid grid-cols-3 gap-3 mb-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
             <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-2.5">
               <p className="text-xs text-emerald-600 font-medium">✦ Visível ({filtered.length})</p>
               <p className="text-lg font-bold text-emerald-700">{formatCurrency(filteredTotal)}</p>

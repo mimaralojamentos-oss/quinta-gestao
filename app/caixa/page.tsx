@@ -120,7 +120,7 @@ export default function CaixaPage() {
 
   return (
     <AppLayout>
-      <div className="p-8">
+      <div className="p-4 md:p-8">
 
         <div className="flex items-center justify-between mb-5">
           <div>
@@ -135,7 +135,7 @@ export default function CaixaPage() {
         </div>
 
         {/* KPIs */}
-        <div className="grid grid-cols-4 gap-4 mb-5">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">
           <div className="bg-white border border-gray-200 rounded-xl px-4 py-3 flex items-center gap-3 border-l-4 border-l-emerald-500">
             <div className="w-8 h-8 bg-emerald-50 rounded-lg flex items-center justify-center flex-shrink-0">
               <Wallet className="w-4 h-4 text-emerald-600" />

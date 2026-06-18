@@ -180,14 +180,14 @@ export default function AlertasPage() {
 
   return (
     <AppLayout>
-      <div className="p-8">
+      <div className="p-4 md:p-8">
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-gray-900">Alertas</h1>
           <p className="text-sm text-gray-500 mt-1">{activeAlerts.length} alertas automáticos · {manualAlerts.length} lembretes manuais</p>
         </div>
 
         {/* Cards resumo */}
-        <div className="grid grid-cols-3 gap-4 mb-8">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
           <div className="card border-l-4 border-l-red-500">
             <p className="text-sm text-gray-500">Urgentes</p>
             <p className="text-2xl font-bold text-red-600">{highCount}</p>

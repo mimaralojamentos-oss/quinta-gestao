@@ -224,7 +224,7 @@ export default function PagamentosPage() {
 
   return (
     <AppLayout>
-      <div className="p-8">
+      <div className="p-4 md:p-8">
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-2xl font-bold text-gray-900">Rendas & Pagamentos</h1>
           <div className="flex items-center gap-3">
@@ -243,7 +243,7 @@ export default function PagamentosPage() {
         </div>
 
         {/* Resumo compacto */}
-        <div className="grid grid-cols-6 gap-3 mb-4">
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-4">
           {[
             { label: 'Esperado', value: formatCurrency(summary.expected), color: 'text-gray-900' },
             { label: 'Recebido', value: formatCurrency(summary.received), color: 'text-emerald-600' },

@@ -317,7 +317,7 @@ export default function QuadrosPage() {
 
   return (
     <AppLayout>
-      <div className="p-8">
+      <div className="p-4 md:p-8">
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Quadros da Quinta</h1>
@@ -344,7 +344,7 @@ export default function QuadrosPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-4 mb-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
           <div className="card">
             <p className="text-sm text-gray-500 mb-1">Total Quadros</p>
             <p className="text-xl font-bold text-gray-900">{meters.length}</p>
