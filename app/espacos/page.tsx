@@ -135,7 +135,7 @@ export default function EspacosPage() {
 
   return (
     <AppLayout>
-      <div className="p-8">
+      <div className="p-4 md:p-8">
         <div className="flex items-center justify-between mb-4">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Espaços</h1>
@@ -190,7 +190,7 @@ export default function EspacosPage() {
 
         {/* Filtros avançados */}
         <div className="bg-white border border-gray-100 rounded-xl shadow-sm p-3 mb-4">
-          <div className="grid grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
 
             {/* Renda min/max */}
             <div>
