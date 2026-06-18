@@ -185,7 +185,7 @@ export default function TenantDetailPage() {
 
   return (
     <AppLayout>
-      <div className="p-8 max-w-4xl mx-auto">
+      <div className="p-4 md:p-8 max-w-4xl mx-auto">
 
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
@@ -203,7 +203,7 @@ export default function TenantDetailPage() {
         </div>
 
         {/* Resumo rápido */}
-        <div className="grid grid-cols-4 gap-4 mb-8">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
           <div className="card">
             <p className="text-xs text-gray-500 mb-1">Espaço(s)</p>
             <div className="flex flex-wrap gap-1">
@@ -228,7 +228,7 @@ export default function TenantDetailPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
           {/* Dados do Inquilino */}
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
