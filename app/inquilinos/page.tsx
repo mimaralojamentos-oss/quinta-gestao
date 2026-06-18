@@ -320,7 +320,7 @@ export default function InquilinosPage() {
           )}
         </div>
 
-        <div className="grid grid-cols-3 gap-3 mb-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
           <div className="relative col-span-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input className="input pl-9 w-full" placeholder="Nome, telefone, email..." value={search} onChange={e => setSearch(e.target.value)} />
@@ -359,7 +359,7 @@ export default function InquilinosPage() {
             <option value="loja">🛍️ Lojas</option>
           </select>
         </div>
-        <div className="grid grid-cols-2 gap-3 mb-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
           <select className="input" value={filterDebt} onChange={e => setFilterDebt(e.target.value as any)}>
             <option value="all">Todos (dívida)</option>
             <option value="com_divida">⚠ Com dívida</option>
@@ -389,7 +389,7 @@ export default function InquilinosPage() {
           </div>
         ) : (
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-            <table className="w-full">
+            <table className="w-full hidden lg:table">
               <thead className="bg-gray-50 border-b border-gray-100">
                 <tr>
                   <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('name')}>
@@ -520,6 +520,63 @@ export default function InquilinosPage() {
                 )}
               </tbody>
             </table>
+            {/* Vista mobile — cards */}
+            <div className="lg:hidden divide-y divide-gray-100">
+              {filtered.map(tenant => {
+                const activeLease = tenant.leases?.find(l => l.status === 'ativo')
+                const hasDebt = (tenant.debt ?? 0) > 0
+                return (
+                  <div key={tenant.id} className="p-4">
+                    <div className="flex items-start justify-between mb-2">
+                      <div>
+                        <Link href={`/inquilinos/${tenant.id}`} className="font-semibold text-emerald-600 hover:underline text-base">
+                          {tenant.name}
+                        </Link>
+                        {tenant.phone && (
+                          <div className="flex items-center gap-1.5 text-xs text-gray-500 mt-0.5">
+                            <Phone className="w-3 h-3" />{tenant.phone}
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap gap-1 justify-end">
+                        {tenant.spaces && tenant.spaces.length > 0
+                          ? tenant.spaces.map(s => <span key={s.ref} className="badge-verde">{s.ref}</span>)
+                          : tenant.leases?.filter(l => l.status === 'ativo').map(l => <span key={l.id} className="badge-verde">{l.space?.ref}</span>)
+                        }
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        {activeLease && (
+                          <p className="text-sm text-gray-600">Renda: <span className="font-medium">{formatCurrency(activeLease.monthly_rent)}</span></p>
+                        )}
+                        {hasDebt ? (
+                          <button onClick={() => { setEditTenant(tenant); setOpenTab('conta'); setShowTenantModal(true) }}
+                            className="text-sm font-semibold text-red-600 bg-red-50 px-2 py-0.5 rounded-full mt-1">
+                            Dívida: {formatCurrency(tenant.debt!)}
+                          </button>
+                        ) : (
+                          <p className="text-xs text-emerald-600 mt-1">✓ Sem dívida</p>
+                        )}
+                      </div>
+                      {(isAdmin || isCoAdmin) && (
+                        <div className="flex gap-3">
+                          <button onClick={() => { setEditTenant(tenant); setOpenTab('dados'); setShowTenantModal(true) }}
+                            className="text-xs text-emerald-600 font-medium hover:underline">Editar</button>
+                          <button onClick={() => { setSelectedTenant(tenant); setShowLeaseModal(true) }}
+                            className="text-xs text-blue-600 font-medium hover:underline">Contrato</button>
+                          <button onClick={() => openDebtModal(tenant)}
+                            className="text-xs text-red-500 font-medium hover:underline">Dívidas</button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+              {filtered.length === 0 && (
+                <div className="py-12 text-center text-gray-400 text-sm">Nenhum inquilino encontrado</div>
+              )}
+            </div>
           </div>
         )}
       </div>
