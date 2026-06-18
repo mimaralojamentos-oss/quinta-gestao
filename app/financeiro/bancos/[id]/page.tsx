@@ -574,7 +574,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
 
   return (
     <AppLayout>
-      <div className="p-8">
+      <div className="p-4 md:p-8">
         <div className="flex items-center gap-4 mb-6">
           <Link href="/financeiro/bancos" prefetch={false} className="text-gray-400 hover:text-gray-600">
             <ChevronLeft className="w-5 h-5" />
