@@ -327,8 +327,8 @@ export default function QuadrosEspacosPage() {
       previous_value: prevValue,
       kwh_consumed: kwhConsumed,
       amount_calculated: amountCalc,
-      charged,
-      accumulated: !charged,
+      charged: false,
+      accumulated: true,
       notes: readingForm.notes || null,
     }).select('id').single()
 
@@ -361,10 +361,9 @@ export default function QuadrosEspacosPage() {
 
         if (chargeError) {
           alert(`Erro ao criar a cobrança de eletricidade: ${chargeError.message}`)
-          await supabase.from('electricity_readings').update({ charged: false, accumulated: true }).eq('id', inserted.id)
+        } else {
+          await supabase.from('electricity_readings').update({ charged: true, accumulated: false }).eq('id', inserted.id)
         }
-      } else {
-        await supabase.from('electricity_readings').update({ charged: false, accumulated: true }).eq('id', inserted.id)
       }
     }
 
