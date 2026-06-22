@@ -204,8 +204,32 @@ Atenção especial ao tipo "transferencia_interna": usa este tipo quando o docum
 
     // ── FATURA LUZ: criar leitura no quadro correspondente ──
     let meterReadingCreated = false
-    if (tipo === 'fatura_luz' && extracted.edp_contract_number) {
-      const { data: meter } = await supabase.from('meters').select('id, name').eq('contract_number', extracted.edp_contract_number).single()
+    if (tipo === 'fatura_luz') {
+      let meter = null
+
+      if (!meter && extracted.edp_contract_number) {
+        const { data } = await supabase.from('meters').select('id, name').eq('contract_number', extracted.edp_contract_number).single()
+        if (data) meter = data
+      }
+
+      if (!meter && extracted.edp_cpe) {
+        const { data } = await supabase.from('meters').select('id, name').eq('cpe', extracted.edp_cpe).single()
+        if (data) meter = data
+      }
+
+      if (!meter) {
+        const { data: allMeters } = await supabase.from('meters').select('id, name')
+        const normalizedFileName = file.name.toLowerCase().replace(/\s+/g, '')
+        if (allMeters) {
+          for (const m of allMeters) {
+            const normalizedMeterName = m.name.toLowerCase().replace(/\s+/g, '')
+            if (normalizedFileName.includes(normalizedMeterName)) {
+              meter = m; break
+            }
+          }
+        }
+      }
+
       if (meter && extracted.edp_reading_date) {
         const { data: existingReading } = await supabase.from('meter_readings').select('id').eq('meter_id', meter.id).eq('reading_date', extracted.edp_reading_date).single()
         if (!existingReading) {

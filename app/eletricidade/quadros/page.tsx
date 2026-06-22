@@ -269,14 +269,18 @@ export default function QuadrosPage() {
       let matchedMeter = null
       if (allMeters && doc.items_summary) {
         for (const m of allMeters) {
-          if (doc.items_summary.includes(m.contract_number) || (doc.original_name && doc.original_name.includes(m.name.replace('Quadro ', '')))) {
+          const normalizedDocName = (doc.original_name ?? '').toLowerCase().replace(/\s+/g, '')
+          const normalizedMeterName = m.name.replace('Quadro ', '').toLowerCase().replace(/\s+/g, '')
+          if (doc.items_summary?.includes(m.contract_number) || normalizedDocName.includes(normalizedMeterName)) {
             matchedMeter = m; break
           }
         }
       }
       if (!matchedMeter && allMeters && doc.original_name) {
         for (const m of allMeters) {
-          if (doc.original_name.includes(m.name.replace('Quadro ', ''))) { matchedMeter = m; break }
+          const normalizedDocName2 = doc.original_name.toLowerCase().replace(/\s+/g, '')
+          const normalizedMeterName2 = m.name.replace('Quadro ', '').toLowerCase().replace(/\s+/g, '')
+          if (normalizedDocName2.includes(normalizedMeterName2)) { matchedMeter = m; break }
         }
       }
       if (!matchedMeter) { results.push({ fileName: doc.original_name ?? doc.file_path, status: 'error', error: 'Quadro não identificado' }); continue }
