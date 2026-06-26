@@ -7,7 +7,7 @@ import { formatCurrency, formatDate } from '@/lib/utils'
 import { buildRentPaymentPlan, applyRentPaymentPlan } from '@/lib/rentPaymentPlan'
 import {
   Upload, CheckCircle, Clock, XCircle, ArrowUpRight,
-  ArrowDownRight, ChevronLeft, Loader2, X, ArrowRight, Link2, Edit2, Search, SlidersHorizontal, Sparkles, RefreshCw
+  ArrowDownRight, ChevronLeft, Loader2, X, ArrowRight, Link2, Edit2, Search, SlidersHorizontal, Sparkles, RefreshCw, FileText
 } from 'lucide-react'
 import Link from 'next/link'
 import * as XLSX from 'xlsx'
@@ -27,6 +27,7 @@ interface Transaction {
   confirmed_lease_id: string | null
   confirmed_expense_id: string | null
   confirmed_tenant_id: string | null
+  confirmed_document_id: string | null
   notes: string | null
 }
 
@@ -46,12 +47,24 @@ interface ColumnMapping {
 }
 
 interface AutoMatch {
-  type: 'renda' | 'despesa'
+  type: 'renda' | 'despesa' | 'fatura' | 'regra'
   confidence: 'high' | 'medium' | 'low'
   reason: string
   tenant?: any
   lease?: any
   expense?: any
+  document?: any
+  ruleType?: string
+}
+
+interface MatchingRule {
+  id: string
+  bank_id: string
+  keyword: string
+  confirmed_type: string
+  tenant_id: string | null
+  notes: string | null
+  created_at: string
 }
 
 function parsePortugueseNumber(raw: any): number {
@@ -95,6 +108,14 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
   const [txMatches, setTxMatches] = useState<Record<string, AutoMatch[]>>({})
   const [showFilters, setShowFilters] = useState(false)
   const [syncing, setSyncing] = useState(false)
+  const [documents, setDocuments] = useState<any[]>([])
+  const [matchingRules, setMatchingRules] = useState<MatchingRule[]>([])
+  const [showRules, setShowRules] = useState(false)
+  const [newRuleKeyword, setNewRuleKeyword] = useState('')
+  const [newRuleType, setNewRuleType] = useState('despesa')
+  const [newRuleTenantId, setNewRuleTenantId] = useState('')
+  const [newRuleNotes, setNewRuleNotes] = useState('')
+  const [savingRule, setSavingRule] = useState(false)
 
   const [editingTxId, setEditingTxId] = useState<string | null>(null)
   const [editDate, setEditDate] = useState('')
@@ -142,11 +163,25 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
         .order('payment_date', { ascending: false })
       setRentPayments(rentData ?? [])
 
+      const { data: docsData } = await supabase
+        .from('documents')
+        .select('id, original_name, tipo, supplier_name, amount, doc_date, expense_id, file_path')
+        .not('amount', 'is', null)
+        .eq('status', 'ativo')
+      setDocuments(docsData ?? [])
+
+      const { data: rulesData } = await supabase
+        .from('bank_matching_rules')
+        .select('*')
+        .eq('bank_id', bankId)
+        .order('created_at', { ascending: false })
+      setMatchingRules(rulesData ?? [])
+
       if (txData && leasesData && expensesData && tenantsData) {
         const matches: Record<string, AutoMatch[]> = {}
         for (const tx of txData) {
           if (!tx.confirmed_type) {
-            const found = findAutoMatches(tx, leasesData, expensesData, tenantsData, rentData ?? [])
+            const found = findAutoMatches(tx, leasesData, expensesData, tenantsData, rentData ?? [], docsData ?? [], rulesData ?? [])
             if (found.length > 0) matches[tx.id] = found
           }
         }
@@ -156,9 +191,22 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     finally { setLoading(false) }
   }
 
-  function findAutoMatches(tx: Transaction, leasesData: any[], expensesData: any[], tenantsData: any[], rentData: any[]): AutoMatch[] {
+  function findAutoMatches(tx: Transaction, leasesData: any[], expensesData: any[], tenantsData: any[], rentData: any[], docsData: any[], rulesData: MatchingRule[]): AutoMatch[] {
     const results: AutoMatch[] = []
     const txDate = new Date(tx.transaction_date)
+
+    // Regras personalizadas (máxima prioridade)
+    for (const rule of rulesData) {
+      if (tx.description.toLowerCase().includes(rule.keyword.toLowerCase())) {
+        if (rule.confirmed_type === 'renda' && rule.tenant_id) {
+          const tenant = tenantsData.find(t => t.id === rule.tenant_id)
+          const lease = leasesData.find(l => (l.tenant as any)?.id === rule.tenant_id)
+          results.push({ type: 'regra', confidence: 'high', reason: `Regra: "${rule.keyword}"`, tenant, lease, ruleType: 'renda' })
+        } else {
+          results.push({ type: 'regra', confidence: 'high', reason: `Regra: "${rule.keyword}"`, ruleType: rule.confirmed_type })
+        }
+      }
+    }
 
     if (tx.amount > 0) {
       for (const tenant of tenantsData) {
@@ -212,6 +260,33 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
           results.push({ type: 'despesa', confidence: 'low', reason: `Valor aproximado (${formatCurrency(exp.amount)} vs ${formatCurrency(amt)})`, expense: exp })
         }
       }
+
+      // Matching com documentos/faturas
+      const docDateFrom = new Date(txDate); docDateFrom.setDate(docDateFrom.getDate() - 30)
+      const docDateTo = new Date(txDate); docDateTo.setDate(docDateTo.getDate() + 30)
+
+      for (const doc of docsData) {
+        if (!doc.amount) continue
+        const docDate = doc.doc_date ? new Date(doc.doc_date) : null
+        const dateOk = !docDate || (docDate >= docDateFrom && docDate <= docDateTo)
+        const amountExact = Math.abs(doc.amount - amt) <= 0.02
+        const amountApprox = Math.abs(doc.amount - amt) / Math.max(amt, 1) <= 0.05
+        const supplierMatch = doc.supplier_name && tx.description.toLowerCase().includes(doc.supplier_name.toLowerCase().split(' ')[0])
+
+        if (amountExact && dateOk) {
+          if (!results.find(r => r.document?.id === doc.id)) {
+            results.push({ type: 'fatura', confidence: 'high', reason: `Valor exato ${formatCurrency(amt)} e data próxima`, document: doc })
+          }
+        } else if (supplierMatch && dateOk) {
+          if (!results.find(r => r.document?.id === doc.id)) {
+            results.push({ type: 'fatura', confidence: 'medium', reason: `Fornecedor "${doc.supplier_name}" encontrado`, document: doc })
+          }
+        } else if (amountApprox && dateOk) {
+          if (!results.find(r => r.document?.id === doc.id)) {
+            results.push({ type: 'fatura', confidence: 'low', reason: `Valor aproximado (${formatCurrency(doc.amount)} vs ${formatCurrency(amt)})`, document: doc })
+          }
+        }
+      }
     }
 
     return results.slice(0, 3)
@@ -226,6 +301,11 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     if (tx.confirmed_type === 'despesa' && tx.confirmed_expense_id) {
       const exp = expenses.find(e => e.id === tx.confirmed_expense_id)
       return { label: `💸 ${exp?.description ?? '—'}`, color: 'text-red-600', confirmed: true }
+    }
+    if (tx.confirmed_type === 'despesa' && tx.confirmed_document_id) {
+      const doc = documents.find(d => d.id === tx.confirmed_document_id)
+      const label = doc ? `📄 ${doc.supplier_name ?? doc.original_name ?? 'Fatura'}` : '📄 Fatura'
+      return { label, color: 'text-orange-600', confirmed: true, documentId: tx.confirmed_document_id, filePath: doc?.file_path }
     }
     if (tx.confirmed_type === 'custos_bancarios') {
       return { label: `🏦 ${tx.notes ?? 'Custos Bancários'}`, color: 'text-blue-600', confirmed: true }
@@ -316,17 +396,44 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
       await supabase.from('bank_transactions').update({
         confirmed_type: 'despesa', confirmed_expense_id: best.expense?.id ?? null, status: 'validado',
       }).eq('id', tx.id)
+    } else if (best.type === 'fatura') {
+      const updateData: any = {
+        confirmed_type: 'despesa',
+        confirmed_document_id: best.document.id,
+        status: 'validado',
+      }
+      if (best.document.expense_id) {
+        updateData.confirmed_expense_id = best.document.expense_id
+      }
+      await supabase.from('bank_transactions').update(updateData).eq('id', tx.id)
+      fetchData()
+    } else if (best.type === 'regra') {
+      const updateData: any = {
+        confirmed_type: best.ruleType,
+        status: 'validado',
+      }
+      if (best.tenant) {
+        updateData.confirmed_tenant_id = best.tenant.id
+        updateData.confirmed_lease_id = best.lease?.id ?? null
+      }
+      await supabase.from('bank_transactions').update(updateData).eq('id', tx.id)
+      if (best.ruleType === 'renda' && best.lease) {
+        const tx2 = { ...tx, confirmed_type: 'renda', confirmed_tenant_id: best.tenant?.id ?? null, confirmed_lease_id: best.lease?.id ?? null }
+        warnIfSkipped(await processRendaTransaction(tx2 as Transaction))
+      }
+      fetchData()
     }
     fetchData()
   }
 
-  async function saveManualMatch(tx: Transaction, type: string, tenantId: string, expenseId: string, notes: string) {
+  async function saveManualMatch(tx: Transaction, type: string, tenantId: string, expenseId: string, notes: string, documentId?: string) {
     const confirmedLeaseId = tenantId ? (leases.find(l => (l.tenant as any)?.id === tenantId)?.id ?? null) : null
     await supabase.from('bank_transactions').update({
       confirmed_type: type,
       confirmed_tenant_id: tenantId || null,
       confirmed_lease_id: confirmedLeaseId,
       confirmed_expense_id: expenseId || null,
+      confirmed_document_id: documentId || null,
       notes: notes || null, status: 'validado',
     }).eq('id', tx.id)
     setMatchModal(null)
@@ -589,6 +696,9 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
                 {validatingAll ? <><Loader2 className="w-4 h-4 animate-spin" /> A validar...</> : <><CheckCircle className="w-4 h-4" /> Validar Todas ({pending})</>}
               </button>
             )}
+            <button onClick={() => setShowRules(v => !v)} className={`btn-secondary ${showRules ? 'ring-2 ring-blue-300' : ''}`}>
+              <SlidersHorizontal className="w-4 h-4" /> Regras
+            </button>
             <button onClick={syncRentPayments} disabled={syncing} className="btn-secondary">
               {syncing ? <><Loader2 className="w-4 h-4 animate-spin" /> A sincronizar...</> : <><RefreshCw className="w-4 h-4" /> Sincronizar pagamentos</>}
             </button>
@@ -651,6 +761,110 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
             </div>
           </div>
         </div>
+
+        {showRules && (
+          <div className="bg-white border border-blue-100 rounded-xl shadow-sm p-5 mb-5">
+            <h2 className="text-sm font-semibold text-gray-800 mb-4 flex items-center gap-2">
+              <SlidersHorizontal className="w-4 h-4 text-blue-500" /> Regras de Identificação Automática
+            </h2>
+
+            {matchingRules.length === 0 ? (
+              <p className="text-sm text-gray-400 mb-4">Ainda não tens regras definidas.</p>
+            ) : (
+              <div className="border border-gray-100 rounded-lg overflow-hidden mb-4">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="text-left px-3 py-2 text-xs text-gray-500 font-medium">Palavra-chave</th>
+                      <th className="text-left px-3 py-2 text-xs text-gray-500 font-medium">Tipo</th>
+                      <th className="text-left px-3 py-2 text-xs text-gray-500 font-medium">Inquilino / Nota</th>
+                      <th className="px-3 py-2"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {matchingRules.map(rule => (
+                      <tr key={rule.id} className="hover:bg-gray-50">
+                        <td className="px-3 py-2 font-mono text-xs text-blue-700 bg-blue-50 rounded">{rule.keyword}</td>
+                        <td className="px-3 py-2 text-xs text-gray-700 capitalize">{rule.confirmed_type}</td>
+                        <td className="px-3 py-2 text-xs text-gray-500">
+                          {rule.tenant_id ? tenants.find(t => t.id === rule.tenant_id)?.name ?? '—' : rule.notes ?? '—'}
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          <button
+                            onClick={async () => {
+                              if (!confirm(`Apagar regra "${rule.keyword}"?`)) return
+                              await supabase.from('bank_matching_rules').delete().eq('id', rule.id)
+                              fetchData()
+                            }}
+                            className="text-xs text-red-400 hover:text-red-600"
+                          >
+                            Apagar
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div className="border-t border-gray-100 pt-4">
+              <p className="text-xs font-semibold text-gray-500 mb-3">Nova regra</p>
+              <div className="grid grid-cols-4 gap-3 items-end">
+                <div>
+                  <label className="label">Palavra-chave</label>
+                  <input className="input text-sm" placeholder="ex: EDP, SILVA, AT-" value={newRuleKeyword} onChange={e => setNewRuleKeyword(e.target.value)} />
+                </div>
+                <div>
+                  <label className="label">Tipo</label>
+                  <select className="input text-sm" value={newRuleType} onChange={e => setNewRuleType(e.target.value)}>
+                    <option value="renda">🏠 Renda</option>
+                    <option value="despesa">💸 Despesa</option>
+                    <option value="custos_bancarios">🏦 Custos Bancários</option>
+                    <option value="impostos">🧾 Impostos</option>
+                    <option value="outro">📝 Outro</option>
+                  </select>
+                </div>
+                {newRuleType === 'renda' ? (
+                  <div>
+                    <label className="label">Inquilino</label>
+                    <select className="input text-sm" value={newRuleTenantId} onChange={e => setNewRuleTenantId(e.target.value)}>
+                      <option value="">— Seleciona —</option>
+                      {tenants.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    </select>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="label">Nota (opcional)</label>
+                    <input className="input text-sm" placeholder="ex: Água, IMI..." value={newRuleNotes} onChange={e => setNewRuleNotes(e.target.value)} />
+                  </div>
+                )}
+                <button
+                  disabled={!newRuleKeyword.trim() || savingRule}
+                  onClick={async () => {
+                    if (!newRuleKeyword.trim()) return
+                    setSavingRule(true)
+                    await supabase.from('bank_matching_rules').insert({
+                      bank_id: bankId,
+                      keyword: newRuleKeyword.trim(),
+                      confirmed_type: newRuleType,
+                      tenant_id: newRuleType === 'renda' && newRuleTenantId ? newRuleTenantId : null,
+                      notes: newRuleNotes.trim() || null,
+                    })
+                    setNewRuleKeyword('')
+                    setNewRuleNotes('')
+                    setNewRuleTenantId('')
+                    setSavingRule(false)
+                    fetchData()
+                  }}
+                  className="btn-primary disabled:opacity-50"
+                >
+                  {savingRule ? <Loader2 className="w-4 h-4 animate-spin" /> : '+ Adicionar'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Grupo 1: Estado */}
         <div className="flex flex-wrap gap-2 mb-2">
@@ -809,6 +1023,17 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
                           <div>
                             <div className="flex items-center gap-2 flex-wrap">
                               <span className={`text-xs font-medium ${matchInfo.color}`}>{matchInfo.label}</span>
+                              {(matchInfo as any).filePath && (
+                                <a
+                                  href={`https://szjwtccjrljprettcfxm.supabase.co/storage/v1/object/public/documents/${(matchInfo as any).filePath}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-xs text-blue-500 hover:underline flex items-center gap-0.5 flex-shrink-0"
+                                  title="Ver fatura"
+                                >
+                                  <FileText className="w-3 h-3" /> Ver
+                                </a>
+                              )}
                               {!matchInfo.confirmed && (matchInfo as any).confidence && (
                                 <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium flex-shrink-0 ${
                                   (matchInfo as any).confidence === 'high' ? 'bg-emerald-100 text-emerald-700' :
@@ -886,8 +1111,11 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
           tenants={tenants}
           leases={leases}
           expenses={expenses}
+          documents={documents}
           autoMatches={txMatches[matchModal.id] ?? []}
+          bankId={bankId}
           onSave={saveManualMatch}
+          onSaveRule={fetchData}
           onClose={() => setMatchModal(null)}
         />
       )}
@@ -1016,13 +1244,16 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
   )
 }
 
-function MatchModalComponent({ tx, tenants, leases, expenses, autoMatches, onSave, onClose }: {
+function MatchModalComponent({ tx, tenants, leases, expenses, documents, autoMatches, bankId, onSave, onSaveRule, onClose }: {
   tx: Transaction
   tenants: any[]
   leases: any[]
   expenses: any[]
+  documents: any[]
   autoMatches: any[]
-  onSave: (tx: Transaction, type: string, tenantId: string, expenseId: string, notes: string) => void
+  bankId: string
+  onSave: (tx: Transaction, type: string, tenantId: string, expenseId: string, notes: string, documentId?: string) => void
+  onSaveRule: () => void
   onClose: () => void
 }) {
   const [type, setType] = useState(tx.confirmed_type ?? (tx.amount > 0 ? 'renda' : 'despesa'))
@@ -1031,6 +1262,11 @@ function MatchModalComponent({ tx, tenants, leases, expenses, autoMatches, onSav
   const [notes, setNotes] = useState(tx.notes ?? '')
   const [searchExpense, setSearchExpense] = useState('')
   const [searchTenant, setSearchTenant] = useState('')
+  const [documentId, setDocumentId] = useState(tx.confirmed_document_id ?? '')
+  const [searchDoc, setSearchDoc] = useState('')
+  const [saveAsRule, setSaveAsRule] = useState(false)
+  const [ruleKeyword, setRuleKeyword] = useState('')
+  const supabase = createClient()
 
   const txDate = new Date(tx.transaction_date)
 
@@ -1061,6 +1297,8 @@ function MatchModalComponent({ tx, tenants, leases, expenses, autoMatches, onSav
   function applyAutoMatch(match: any) {
     if (match.type === 'renda') { setType('renda'); setTenantId(match.tenant?.id ?? '') }
     else if (match.type === 'despesa') { setType('despesa'); setExpenseId(match.expense?.id ?? '') }
+    else if (match.type === 'fatura') { setType('despesa'); setDocumentId(match.document?.id ?? '') }
+    else if (match.type === 'regra') { setType(match.ruleType ?? 'despesa') }
   }
 
   return (
@@ -1212,6 +1450,33 @@ function MatchModalComponent({ tx, tenants, leases, expenses, autoMatches, onSav
               {filteredExpenses.length > 0 && filteredExpenses.length <= 200 && (
                 <p className="text-xs text-gray-400 mt-1">A mostrar {filteredExpenses.length} despesa(s) — ordenadas por proximidade de data</p>
               )}
+              <div className="mt-3">
+                <label className="label">Fatura associada (opcional)</label>
+                <div className="relative mb-2">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                  <input className="input pl-8 text-sm" placeholder="Pesquisar fatura..." value={searchDoc} onChange={e => setSearchDoc(e.target.value)} />
+                </div>
+                <div className="border border-gray-200 rounded-lg overflow-hidden max-h-40 overflow-y-auto">
+                  <div
+                    onClick={() => setDocumentId('')}
+                    className={`flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-gray-50 border-b border-gray-50 ${documentId === '' ? 'bg-emerald-50 border-l-4 border-l-emerald-500' : ''}`}
+                  >
+                    <span className="text-xs text-gray-400">— Nenhuma —</span>
+                  </div>
+                  {documents
+                    .filter(d => !searchDoc || (d.supplier_name ?? d.original_name ?? '').toLowerCase().includes(searchDoc.toLowerCase()) || String(d.amount).includes(searchDoc))
+                    .slice(0, 50)
+                    .map(d => (
+                      <div key={d.id} onClick={() => setDocumentId(d.id)}
+                        className={`flex items-center gap-3 px-3 py-2 cursor-pointer border-b border-gray-50 hover:bg-gray-50 ${documentId === d.id ? 'bg-emerald-50 border-l-4 border-l-emerald-500' : ''}`}>
+                        <span className="text-xs text-gray-400 whitespace-nowrap flex-shrink-0 w-20">{d.doc_date ? formatDate(d.doc_date) : '—'}</span>
+                        <span className="text-sm font-semibold text-red-600 whitespace-nowrap flex-shrink-0 w-20">{d.amount ? formatCurrency(d.amount) : '—'}</span>
+                        <span className="text-xs text-gray-700 truncate flex-1">{d.supplier_name ?? d.original_name ?? '—'}</span>
+                        {documentId === d.id && <CheckCircle className="w-4 h-4 text-emerald-500 flex-shrink-0" />}
+                      </div>
+                    ))}
+                </div>
+              </div>
             </div>
           )}
 
@@ -1224,9 +1489,33 @@ function MatchModalComponent({ tx, tenants, leases, expenses, autoMatches, onSav
           )}
         </div>
 
+        <div className="border-t border-gray-100 pt-4 mt-4">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" className="rounded" checked={saveAsRule} onChange={e => setSaveAsRule(e.target.checked)} />
+            <span className="text-xs text-gray-600">Guardar como regra automática</span>
+          </label>
+          {saveAsRule && (
+            <div className="mt-2">
+              <input className="input text-sm" placeholder="Palavra-chave (parte da descrição bancária)..." value={ruleKeyword} onChange={e => setRuleKeyword(e.target.value)} />
+            </div>
+          )}
+        </div>
+
         <div className="flex justify-end gap-3 mt-6">
           <button className="btn-secondary" onClick={onClose}>Cancelar</button>
-          <button className="btn-primary" onClick={() => onSave(tx, type, tenantId, expenseId, notes)}>Guardar</button>
+          <button className="btn-primary" onClick={async () => {
+            if (saveAsRule && ruleKeyword.trim()) {
+              await supabase.from('bank_matching_rules').insert({
+                bank_id: bankId,
+                keyword: ruleKeyword.trim(),
+                confirmed_type: type,
+                tenant_id: type === 'renda' && tenantId ? tenantId : null,
+                notes: notes.trim() || null,
+              })
+              onSaveRule()
+            }
+            onSave(tx, type, tenantId, expenseId, notes, documentId || undefined)
+          }}>Guardar</button>
         </div>
       </div>
     </div>
