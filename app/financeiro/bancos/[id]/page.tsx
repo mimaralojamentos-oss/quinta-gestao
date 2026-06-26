@@ -316,6 +316,9 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     if (tx.confirmed_type === 'outro') {
       return { label: `📝 ${tx.notes ?? 'Outro'}`, color: 'text-gray-600', confirmed: true }
     }
+    if (tx.confirmed_type === 'transferencia_interna') {
+      return { label: `🔄 ${tx.notes ?? 'Transferência Interna'}`, color: 'text-indigo-600', confirmed: true }
+    }
     const autoMatches = txMatches[tx.id]
     if (autoMatches && autoMatches.length > 0) {
       const best = autoMatches[0]
@@ -1292,7 +1295,7 @@ function MatchModalComponent({ tx, tenants, leases, expenses, documents, autoMat
     return diff <= 15 * 24 * 60 * 60 * 1000
   }).length
 
-  const tiposComNotes = ['outro', 'custos_bancarios', 'impostos']
+  const tiposComNotes = ['outro', 'custos_bancarios', 'impostos', 'transferencia_interna']
 
   function applyAutoMatch(match: any) {
     if (match.type === 'renda') { setType('renda'); setTenantId(match.tenant?.id ?? '') }
@@ -1378,10 +1381,11 @@ function MatchModalComponent({ tx, tenants, leases, expenses, documents, autoMat
               ))}
             </div>
             {/* Linha 2 */}
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-3 gap-2">
               {[
                 { value: 'custos_bancarios', label: '🏦 Custos Bancários' },
                 { value: 'impostos', label: '🧾 Impostos' },
+                { value: 'transferencia_interna', label: '🔄 Transf. Interna' },
               ].map(opt => (
                 <button key={opt.value} onClick={() => setType(opt.value)}
                   className={`py-2 rounded-lg border text-sm font-medium transition-colors ${type === opt.value ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-600 border-gray-200'}`}>
@@ -1450,32 +1454,35 @@ function MatchModalComponent({ tx, tenants, leases, expenses, documents, autoMat
               {filteredExpenses.length > 0 && filteredExpenses.length <= 200 && (
                 <p className="text-xs text-gray-400 mt-1">A mostrar {filteredExpenses.length} despesa(s) — ordenadas por proximidade de data</p>
               )}
-              <div className="mt-3">
-                <label className="label">Fatura associada (opcional)</label>
-                <div className="relative mb-2">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
-                  <input className="input pl-8 text-sm" placeholder="Pesquisar fatura..." value={searchDoc} onChange={e => setSearchDoc(e.target.value)} />
+            </div>
+          )}
+
+          {type !== 'renda' && (
+            <div className="mt-3">
+              <label className="label">Fatura associada (opcional)</label>
+              <div className="relative mb-2">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                <input className="input pl-8 text-sm" placeholder="Pesquisar fatura..." value={searchDoc} onChange={e => setSearchDoc(e.target.value)} />
+              </div>
+              <div className="border border-gray-200 rounded-lg overflow-hidden max-h-40 overflow-y-auto">
+                <div
+                  onClick={() => setDocumentId('')}
+                  className={`flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-gray-50 border-b border-gray-50 ${documentId === '' ? 'bg-emerald-50 border-l-4 border-l-emerald-500' : ''}`}
+                >
+                  <span className="text-xs text-gray-400">— Nenhuma —</span>
                 </div>
-                <div className="border border-gray-200 rounded-lg overflow-hidden max-h-40 overflow-y-auto">
-                  <div
-                    onClick={() => setDocumentId('')}
-                    className={`flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-gray-50 border-b border-gray-50 ${documentId === '' ? 'bg-emerald-50 border-l-4 border-l-emerald-500' : ''}`}
-                  >
-                    <span className="text-xs text-gray-400">— Nenhuma —</span>
-                  </div>
-                  {documents
-                    .filter(d => !searchDoc || (d.supplier_name ?? d.original_name ?? '').toLowerCase().includes(searchDoc.toLowerCase()) || String(d.amount).includes(searchDoc))
-                    .slice(0, 50)
-                    .map(d => (
-                      <div key={d.id} onClick={() => setDocumentId(d.id)}
-                        className={`flex items-center gap-3 px-3 py-2 cursor-pointer border-b border-gray-50 hover:bg-gray-50 ${documentId === d.id ? 'bg-emerald-50 border-l-4 border-l-emerald-500' : ''}`}>
-                        <span className="text-xs text-gray-400 whitespace-nowrap flex-shrink-0 w-20">{d.doc_date ? formatDate(d.doc_date) : '—'}</span>
-                        <span className="text-sm font-semibold text-red-600 whitespace-nowrap flex-shrink-0 w-20">{d.amount ? formatCurrency(d.amount) : '—'}</span>
-                        <span className="text-xs text-gray-700 truncate flex-1">{d.supplier_name ?? d.original_name ?? '—'}</span>
-                        {documentId === d.id && <CheckCircle className="w-4 h-4 text-emerald-500 flex-shrink-0" />}
-                      </div>
-                    ))}
-                </div>
+                {documents
+                  .filter(d => !searchDoc || (d.supplier_name ?? d.original_name ?? '').toLowerCase().includes(searchDoc.toLowerCase()) || String(d.amount).includes(searchDoc))
+                  .slice(0, 50)
+                  .map(d => (
+                    <div key={d.id} onClick={() => setDocumentId(d.id)}
+                      className={`flex items-center gap-3 px-3 py-2 cursor-pointer border-b border-gray-50 hover:bg-gray-50 ${documentId === d.id ? 'bg-emerald-50 border-l-4 border-l-emerald-500' : ''}`}>
+                      <span className="text-xs text-gray-400 whitespace-nowrap flex-shrink-0 w-20">{d.doc_date ? formatDate(d.doc_date) : '—'}</span>
+                      <span className="text-sm font-semibold text-red-600 whitespace-nowrap flex-shrink-0 w-20">{d.amount ? formatCurrency(d.amount) : '—'}</span>
+                      <span className="text-xs text-gray-700 truncate flex-1">{d.supplier_name ?? d.original_name ?? '—'}</span>
+                      {documentId === d.id && <CheckCircle className="w-4 h-4 text-emerald-500 flex-shrink-0" />}
+                    </div>
+                  ))}
               </div>
             </div>
           )}
