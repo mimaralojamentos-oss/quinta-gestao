@@ -1471,7 +1471,15 @@ function MatchModalComponent({ tx, tenants, leases, expenses, documents, autoMat
                 >
                   <span className="text-xs text-gray-400">— Nenhuma —</span>
                 </div>
-                {documents
+                {[...documents]
+                  .sort((a, b) => {
+                    const diffA = a.doc_date ? Math.abs(new Date(a.doc_date).getTime() - txDate.getTime()) : Infinity
+                    const diffB = b.doc_date ? Math.abs(new Date(b.doc_date).getTime() - txDate.getTime()) : Infinity
+                    if (diffA !== diffB) return diffA - diffB
+                    const amtA = Math.abs((a.amount ?? 0) - Math.abs(tx.amount))
+                    const amtB = Math.abs((b.amount ?? 0) - Math.abs(tx.amount))
+                    return amtA - amtB
+                  })
                   .filter(d => !searchDoc || (d.supplier_name ?? d.original_name ?? '').toLowerCase().includes(searchDoc.toLowerCase()) || String(d.amount).includes(searchDoc))
                   .slice(0, 50)
                   .map(d => (
