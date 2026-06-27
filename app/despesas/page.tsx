@@ -78,6 +78,10 @@ function DespesasContent() {
   const [filterAmountMax, setFilterAmountMax] = useState('')
   const [filterExpenseId, setFilterExpenseId] = useState<string | null>(() => searchParams.get('expense_id'))
 
+  const today = new Date()
+  const currentMonthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`
+  const [selectedPeriod, setSelectedPeriod] = useState<string>(currentMonthStr)
+
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       if (supplierDropdownRef.current && !supplierDropdownRef.current.contains(e.target as Node)) setShowSupplierDropdown(false)
@@ -180,6 +184,7 @@ function DespesasContent() {
     setFilterDateFrom(''); setFilterDateTo('')
     setFilterAmountMin(''); setFilterAmountMax('')
     clearExpenseFilter()
+    setSelectedPeriod(currentMonthStr)
   }
 
   const hasActiveFilters = search || filterCategory !== 'all' || filterSuppliers.length > 0 ||
@@ -199,7 +204,8 @@ function DespesasContent() {
     const matchAmountMin = !filterAmountMin || e.amount >= parseFloat(filterAmountMin)
     const matchAmountMax = !filterAmountMax || e.amount <= parseFloat(filterAmountMax)
     const matchExpenseId = !filterExpenseId || e.id === filterExpenseId
-    return matchSearch && matchCat && matchSupplier && matchProject && matchDateFrom && matchDateTo && matchPeriod && matchAmountMin && matchAmountMax && matchExpenseId
+    const matchSelectedPeriod = selectedPeriod === 'all' || e.expense_date?.slice(0, 7) === selectedPeriod
+    return matchSearch && matchCat && matchSupplier && matchProject && matchDateFrom && matchDateTo && matchPeriod && matchAmountMin && matchAmountMax && matchExpenseId && matchSelectedPeriod
   }).sort((a, b) => {
     let valA = a[sortField] ?? '', valB = b[sortField] ?? ''
     if (sortField === 'amount') { valA = Number(valA); valB = Number(valB) }
@@ -219,6 +225,26 @@ function DespesasContent() {
     manutencao: 'bg-cyan-100 text-cyan-700', outros: 'bg-gray-100 text-gray-700',
   }
 
+  const monthOptions = (() => {
+    const opts: { val: string; label: string }[] = []
+    const d = new Date()
+    for (let i = 0; i < 24; i++) {
+      const val = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+      const label = d.toLocaleDateString('pt-PT', { month: 'long', year: 'numeric' })
+      opts.push({ val, label: label.charAt(0).toUpperCase() + label.slice(1) })
+      d.setMonth(d.getMonth() - 1)
+    }
+    return opts
+  })()
+
+  const periodExpenses = selectedPeriod === 'all'
+    ? expenses
+    : expenses.filter(e => e.expense_date?.slice(0, 7) === selectedPeriod)
+
+  const periodTotal = periodExpenses.reduce((s, e) => s + e.amount, 0)
+  const periodCash = periodExpenses.filter(e => e.payment_method === 'dinheiro').reduce((s, e) => s + e.amount, 0)
+  const periodBank = periodExpenses.filter(e => e.payment_method !== 'dinheiro').reduce((s, e) => s + e.amount, 0)
+
   const semProjeto = expenses.filter(e => !e.project_id).length
   const expenseFilterMatch = filterExpenseId ? expenses.find(e => e.id === filterExpenseId) : null
   const thClass = "table-header cursor-pointer hover:bg-gray-100 select-none"
@@ -230,7 +256,6 @@ function DespesasContent() {
         <div className="flex items-center justify-between mb-4">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Despesas</h1>
-            <p className="text-sm text-gray-500 mt-0.5">{expenses.length} registos</p>
           </div>
           {(isAdmin || isCoAdmin) && (
             <button className="btn-primary" onClick={() => { setEditExpense(null); setShowModal(true) }}>
@@ -248,19 +273,39 @@ function DespesasContent() {
           </div>
         )}
 
-        {/* Cards resumo — compactos */}
+        {/* Seletor de período */}
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-gray-500 font-medium">Período:</span>
+            <select
+              className="input text-sm w-56"
+              value={selectedPeriod}
+              onChange={e => setSelectedPeriod(e.target.value)}
+            >
+              <option value="all">📅 Todos os registos</option>
+              {monthOptions.map(o => (
+                <option key={o.val} value={o.val}>{o.label}</option>
+              ))}
+            </select>
+          </div>
+          <p className="text-sm text-gray-400">
+            {selectedPeriod === 'all' ? `${expenses.length} registos` : `${periodExpenses.length} despesa(s)`}
+          </p>
+        </div>
+
+        {/* Cards resumo do período selecionado */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
           <div className="bg-white rounded-lg border border-gray-100 px-4 py-2.5">
             <p className="text-xs text-gray-500">Total de Despesas</p>
-            <p className="text-lg font-bold text-gray-900">{formatCurrency(summary.total)}</p>
+            <p className="text-lg font-bold text-gray-900">{formatCurrency(periodTotal)}</p>
           </div>
           <div className="bg-white rounded-lg border border-gray-100 px-4 py-2.5">
             <p className="text-xs text-gray-500">Pago em Dinheiro</p>
-            <p className="text-lg font-bold text-gray-700">{formatCurrency(summary.cash)}</p>
+            <p className="text-lg font-bold text-gray-700">{formatCurrency(periodCash)}</p>
           </div>
           <div className="bg-white rounded-lg border border-gray-100 px-4 py-2.5">
             <p className="text-xs text-gray-500">Pago via Banco</p>
-            <p className="text-lg font-bold text-gray-700">{formatCurrency(summary.bank)}</p>
+            <p className="text-lg font-bold text-gray-700">{formatCurrency(periodBank)}</p>
           </div>
         </div>
 
