@@ -1049,7 +1049,9 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
                             </div>
                             {!matchInfo.confirmed && autoMatches && autoMatches.length > 0 && (
                               <div className="flex items-center gap-2 mt-1">
-                                <button onClick={() => confirmAutoMatch(tx)} className="text-xs text-emerald-600 hover:underline font-medium">✓ Confirmar</button>
+                                {autoMatches[0]?.confidence === 'high' && (
+                                  <button onClick={() => confirmAutoMatch(tx)} className="text-xs text-emerald-600 hover:underline font-medium">✓ Confirmar</button>
+                                )}
                                 {autoMatches.length > 1 && <span className="text-xs text-gray-400">+{autoMatches.length - 1} sugestão(ões)</span>}
                               </div>
                             )}
