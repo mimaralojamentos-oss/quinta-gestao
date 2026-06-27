@@ -243,25 +243,88 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
 
         await logAccess({ action: 'criar', page: '/pagamentos', details: `Registou pagamento de "${entry.debtItem.label}" (${formatCurrency(amount)}) de ${lease.tenant?.name}` })
       } else if (type === 'eletricidade' && chargeId) {
+        const elecDebt = entry.debtItem.remainingAmount
+        const elecPaid = Math.min(amount, elecDebt)
+        const elecExcesso = parseFloat((amount - elecDebt).toFixed(2))
+
         // Marcar cobrança de eletricidade como paga
         await supabase.from('electricity_charges').update({
           paid: true,
           payment_date: entry.payment_date,
           payment_method: entry.payment_method,
         }).eq('id', chargeId)
-        // Fundo de Maneio se dinheiro
+
+        // Fundo de Maneio — apenas o valor da dívida (não o excesso, que vai para dívidas)
         if (entry.payment_method === 'dinheiro') {
           await supabase.from('cash_fund_movements').insert({
             movement_date: entry.payment_date,
             description: `⚡ ${entry.debtItem.label} — ${lease.space?.ref} (${lease.tenant?.name})`,
-            amount,
+            amount: elecPaid,
             type: 'entrada',
             source: 'eletricidade',
             source_id: chargeId,
           })
         }
 
-        await logAccess({ action: 'criar', page: '/pagamentos', details: `Registou pagamento de ${entry.debtItem.label} (${formatCurrency(amount)}) de ${lease.tenant?.name} (${lease.space?.ref})` })
+        await logAccess({ action: 'criar', page: '/pagamentos', details: `Registou pagamento de ${entry.debtItem.label} (${formatCurrency(elecPaid)}) de ${lease.tenant?.name} (${lease.space?.ref})` })
+
+        // Se pagou a mais, aplica o excesso às dívidas manuais mais antigas
+        if (elecExcesso > 0 && lease.tenant?.id) {
+          const { data: debtsData } = await supabase
+            .from('debts')
+            .select('id, original_amount, description, payments:debt_payments(amount)')
+            .eq('tenant_id', lease.tenant.id)
+            .order('reference_date', { ascending: true })
+
+          let restante = elecExcesso
+          for (const debt of debtsData ?? []) {
+            if (restante <= 0) break
+            const paid = (debt.payments ?? []).reduce((s: number, p: any) => s + p.amount, 0)
+            const emDivida = parseFloat((debt.original_amount - paid).toFixed(2))
+            if (emDivida <= 0) continue
+            const toApply = parseFloat(Math.min(emDivida, restante).toFixed(2))
+            await supabase.from('debt_payments').insert({
+              debt_id: debt.id,
+              payment_date: entry.payment_date,
+              amount: toApply,
+              payment_method: entry.payment_method,
+              notes: `Excesso de pagamento de eletricidade aplicado automaticamente`,
+            })
+            if (entry.payment_method === 'dinheiro') {
+              await supabase.from('cash_fund_movements').insert({
+                movement_date: entry.payment_date,
+                description: `⚠️ ${debt.description} (excesso elétricidade) — ${lease.tenant?.name}`,
+                amount: toApply,
+                type: 'entrada',
+                source: 'divida',
+                source_id: debt.id,
+              })
+            }
+            restante = parseFloat((restante - toApply).toFixed(2))
+          }
+
+          // Se ainda sobrar depois das dívidas, regista como adiantamento
+          if (restante > 0) {
+            const { data: advPayment } = await supabase.from('rent_payments').insert({
+              lease_id: lease.id,
+              reference_month: new Date().toISOString().slice(0, 7) + '-01',
+              payment_date: entry.payment_date,
+              amount: restante,
+              payment_method: entry.payment_method,
+              tipo: 'adiantamento',
+            }).select().single()
+            if (entry.payment_method === 'dinheiro' && advPayment) {
+              await supabase.from('cash_fund_movements').insert({
+                movement_date: entry.payment_date,
+                description: `💰 Adiantamento (excesso eletricidade) — ${lease.space?.ref} (${lease.tenant?.name})`,
+                amount: restante,
+                type: 'entrada',
+                source: 'renda',
+                source_id: advPayment.id,
+              })
+            }
+          }
+        }
       }
     }
 
