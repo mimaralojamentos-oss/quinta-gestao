@@ -246,7 +246,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
       }
       const supplierMatches = expensesData.filter(e => {
         if (!e.supplier) return false
-        const supplierWords = e.supplier.split(' ').filter((w: string) => w.length > 4)
+        const supplierWords = e.supplier.split(' ').filter((w: string) => w.length >= 2)
         return supplierWords.some((w: string) => tx.description.toLowerCase().includes(w.toLowerCase()))
       })
       for (const exp of supplierMatches.slice(0, 2)) {
@@ -271,7 +271,12 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
         const dateOk = !docDate || (docDate >= docDateFrom && docDate <= docDateTo)
         const amountExact = Math.abs(doc.amount - amt) <= 0.02
         const amountApprox = Math.abs(doc.amount - amt) / Math.max(amt, 1) <= 0.05
-        const supplierMatch = doc.supplier_name && tx.description.toLowerCase().includes(doc.supplier_name.toLowerCase().split(' ')[0])
+        const supplierWords2 = doc.supplier_name
+          ? doc.supplier_name.toLowerCase().split(' ').filter((w: string) => w.length >= 2)
+          : []
+        const fileKeywords = (doc.file_path || '').toLowerCase().split(/[\/_\-\s]+/).filter((w: string) => w.length >= 3)
+        const allMatchWords = [...supplierWords2, ...fileKeywords]
+        const supplierMatch = allMatchWords.some((w: string) => tx.description.toLowerCase().includes(w))
 
         if (amountExact && dateOk) {
           if (!results.find(r => r.document?.id === doc.id)) {
