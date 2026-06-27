@@ -601,6 +601,11 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
                           💰 Os {formatCurrency(parseFloat(entry.amount) - entry.debtItem.remainingAmount)} extra serão guardados como adiantamento
                         </p>
                       )}
+                      {entry.debtItem.type === 'eletricidade' && entry.amount && parseFloat(entry.amount) > entry.debtItem.remainingAmount && (
+                        <p className="text-xs text-purple-600 mt-1.5">
+                          💰 Os {formatCurrency(parseFloat(entry.amount) - entry.debtItem.remainingAmount)} extra serão aplicados a dívidas pendentes ou guardados como adiantamento
+                        </p>
+                      )}
                     </div>
                   ))}
                   {totalToPay > 0 && (
