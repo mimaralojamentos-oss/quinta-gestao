@@ -194,7 +194,7 @@ function DespesasContent() {
   const dateRange = filterPeriod !== 'all' ? getDateRange(filterPeriod) : null
 
   const filtered = expenses.filter(e => {
-    const matchSearch = !search || e.description.toLowerCase().includes(search.toLowerCase())
+    const matchSearch = !search || e.description.toLowerCase().includes(search.toLowerCase()) || (e.supplier && e.supplier.toLowerCase().includes(search.toLowerCase()))
     const matchCat = filterCategory === 'all' || e.category === filterCategory
     const matchSupplier = filterSuppliers.length === 0 || filterSuppliers.includes(e.supplier)
     const matchProject = filterProject === 'all' || (filterProject === 'none' && !e.project_id) || e.project_id === filterProject
