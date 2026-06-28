@@ -16,6 +16,7 @@ export async function POST(request: Request) {
     let tipo = formData.get('tipo') as string ?? 'fatura'
     const tipoCustom = formData.get('tipo_custom') as string ?? null
     const force = formData.get('force') === 'true'
+    const skipExpense = formData.get('skip_expense') === 'true'
 
     if (!file) return NextResponse.json({ error: 'Ficheiro não encontrado' }, { status: 400 })
 
@@ -266,7 +267,7 @@ Atenção especial ao tipo "transferencia_interna": usa este tipo quando o docum
     let autoExpense = false
     let expenseId = null
 
-    if (isFatura && doc && extracted.amount && extracted.doc_date) {
+    if (!skipExpense && isFatura && doc && extracted.amount && extracted.doc_date) {
       const paymentMethod = detectPaymentMethod(file.name)
 
       const dateFrom = new Date(extracted.doc_date); dateFrom.setDate(dateFrom.getDate() - 1)

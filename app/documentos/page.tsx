@@ -218,6 +218,7 @@ async function handleSaveEdit() {
     formData.append('tipo', uploadTipo)
     if (uploadTipoCustom) formData.append('tipo_custom', uploadTipoCustom)
     if (force) formData.append('force', 'true')
+    if (skipExpense) formData.append('skip_expense', 'true')
     const res = await fetch('/api/process-document', { method: 'POST', body: formData })
     const data = await res.json()
     if (data.duplicate && !force) {
@@ -703,6 +704,12 @@ async function handleSaveEdit() {
                         </p>
                       ))}
                     </div>
+                  )}
+                  {['fatura', 'fatura_luz', 'fatura_agua', 'automatico'].includes(uploadTipo) && (
+                    <label className="flex items-center gap-2 mt-3 cursor-pointer select-none">
+                      <input type="checkbox" checked={!skipExpense} onChange={e => setSkipExpense(!e.target.checked)} className="accent-emerald-600 w-4 h-4" />
+                      <span className="text-sm text-gray-700">Criar despesa automaticamente</span>
+                    </label>
                   )}
                 </div>
               </div>
