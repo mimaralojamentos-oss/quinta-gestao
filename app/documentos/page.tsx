@@ -108,6 +108,7 @@ export default function DocumentosPage() {
   const [uploading, setUploading] = useState(false)
   const [uploadDone, setUploadDone] = useState(false)
   const [uploadResults, setUploadResults] = useState<UploadResult[]>([])
+  const [skipExpense, setSkipExpense] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirm | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [forceDuplicate, setForceDuplicate] = useState<{ file: File; index: number } | null>(null)
