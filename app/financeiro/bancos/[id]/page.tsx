@@ -93,6 +93,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
   const [filterStatus, setFilterStatus] = useState<'all' | 'por_validar' | 'validado' | 'ignorado'>('all')
   const [filterConfidence, setFilterConfidence] = useState<'all' | 'high' | 'medium' | 'low'>('all')
   const [filterIdentification, setFilterIdentification] = useState<'all' | 'identificadas' | 'nao_identificadas'>('all')
+  const [filterCustosBancarios, setFilterCustosBancarios] = useState(false)
 
   const [importStep, setImportStep] = useState<'upload' | 'mapping' | 'preview'>('upload')
   const [parsedHeaders, setParsedHeaders] = useState<string[]>([])
@@ -654,11 +655,11 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
   function resetFilters() {
     setSearch(''); setFilterDateFrom(''); setFilterDateTo('')
     setFilterAmountMin(''); setFilterAmountMax(''); setFilterDirection('all')
-    setFilterStatus('all'); setFilterConfidence('all'); setFilterIdentification('all')
+    setFilterStatus('all'); setFilterConfidence('all'); setFilterIdentification('all'); setFilterCustosBancarios(false)
   }
 
   const hasActiveFilters = search || filterDateFrom || filterDateTo || filterAmountMin || filterAmountMax || filterDirection !== 'all'
-  const hasActiveGroupFilters = filterStatus !== 'all' || filterConfidence !== 'all' || filterIdentification !== 'all'
+  const hasActiveGroupFilters = filterStatus !== 'all' || filterConfidence !== 'all' || filterIdentification !== 'all' || filterCustosBancarios
 
   const countPorValidar = transactions.filter(t => t.status === 'por_validar').length
   const countValidado = transactions.filter(t => t.status === 'validado').length
@@ -669,6 +670,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
   const countBai = transactions.filter(t => !t.confirmed_type && txMatches[t.id]?.[0]?.confidence === 'low').length
   const countIdentificadas = transactions.filter(t => t.confirmed_type || (txMatches[t.id]?.length > 0)).length
   const countNaoIdentificadas = transactions.filter(t => !t.confirmed_type && (!txMatches[t.id] || txMatches[t.id].length === 0)).length
+  const countCustosBancarios = transactions.filter(t => t.confirmed_type === 'custos_bancarios').length
 
   const filtered = transactions.filter(t => {
     const autoMatches = txMatches[t.id]
@@ -684,6 +686,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
 
     if (filterIdentification === 'identificadas' && !(t.confirmed_type || (autoMatches && autoMatches.length > 0))) return false
     if (filterIdentification === 'nao_identificadas' && (t.confirmed_type || (autoMatches && autoMatches.length > 0))) return false
+    if (filterCustosBancarios && t.confirmed_type !== 'custos_bancarios') return false
 
     if (search && !t.description.toLowerCase().includes(search.toLowerCase())) return false
     if (filterDateFrom && t.transaction_date < filterDateFrom) return false
@@ -951,6 +954,11 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
               <span className={`px-1.5 py-0.5 rounded-full text-xs ${filterIdentification === btn.key ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-500'}`}>{btn.count}</span>
             </button>
           ))}
+          <button onClick={() => setFilterCustosBancarios(v => !v)}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 ${filterCustosBancarios ? 'bg-emerald-600 text-white' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'}`}>
+            🏦 Custos Bancários
+            <span className={`px-1.5 py-0.5 rounded-full text-xs ${filterCustosBancarios ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-500'}`}>{countCustosBancarios}</span>
+          </button>
         </div>
 
         <div className="flex gap-3 mb-3">
