@@ -476,6 +476,23 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     setValidatingAll(false)
   }
 
+  async function quickCustoBancario(tx: Transaction) {
+    await supabase.from('bank_transactions').update({
+      confirmed_type: 'custos_bancarios',
+      status: 'validado',
+    }).eq('id', tx.id)
+    if (window.confirm('Criar regra para todas as transações com esta descrição?')) {
+      await supabase.from('bank_matching_rules').insert({
+        bank_id: bankId,
+        keyword: tx.description,
+        confirmed_type: 'custos_bancarios',
+        tenant_id: null,
+        notes: null,
+      })
+    }
+    fetchData()
+  }
+
   async function validateAllHighConfidence() {
     const candidates = transactions.filter(t =>
       t.status === 'por_validar' && !t.confirmed_type && txMatches[t.id]?.[0]?.confidence === 'high'
@@ -714,11 +731,6 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
             {bank?.iban && <p className="text-sm text-gray-500 font-mono mt-0.5">{bank.iban}</p>}
           </div>
           <div className="flex gap-3">
-            {countHighConfidencePending > 0 && (
-              <button onClick={validateAllHighConfidence} disabled={validatingAllHigh} className="btn-secondary">
-                {validatingAllHigh ? <><Loader2 className="w-4 h-4 animate-spin" /> A validar...</> : <><CheckCircle className="w-4 h-4" /> ✓ Validar todas (Alta confiança) ({countHighConfidencePending})</>}
-              </button>
-            )}
             {pending > 0 && (
               <button onClick={validateAll} disabled={validatingAll} className="btn-secondary">
                 {validatingAll ? <><Loader2 className="w-4 h-4 animate-spin" /> A validar...</> : <><CheckCircle className="w-4 h-4" /> Validar Todas ({pending})</>}
@@ -1085,10 +1097,16 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
                             </button>
                           </div>
                         ) : (
-                          <button onClick={() => setMatchModal(tx)}
-                            className="flex items-center gap-1 text-xs text-gray-400 hover:text-blue-600 transition-colors">
-                            <Link2 className="w-3 h-3" /> Identificar
-                          </button>
+                          <div className="flex flex-col gap-1">
+                            <button onClick={() => setMatchModal(tx)}
+                              className="flex items-center gap-1 text-xs text-gray-400 hover:text-blue-600 transition-colors">
+                              <Link2 className="w-3 h-3" /> Identificar
+                            </button>
+                            <button onClick={() => quickCustoBancario(tx)}
+                              className="flex items-center gap-1 text-xs text-blue-500 hover:text-blue-700 transition-colors">
+                              🏦 Custo Bancário
+                            </button>
+                          </div>
                         )}
                       </td>
                       <td className="table-cell">
