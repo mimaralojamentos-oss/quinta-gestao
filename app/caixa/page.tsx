@@ -9,7 +9,6 @@ import { Plus, TrendingUp, TrendingDown, Wallet, Trash2, Search, X, Calendar } f
 import CashModal from './CashModal'
 import { useAuth } from '@/lib/auth-context'
 
-type PeriodFilter = 'all' | 'today' | 'week' | 'month' | 'year' | 'range'
 type SourceFilter = 'all' | 'manual' | 'renda' | 'despesa' | 'documento'
 
 export default function CaixaPage() {
@@ -25,10 +24,11 @@ export default function CaixaPage() {
 
   // filtros
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all')
-  const [periodFilter, setPeriodFilter] = useState<PeriodFilter>('all')
-  const [rangeStart, setRangeStart] = useState('')
-  const [rangeEnd, setRangeEnd] = useState('')
   const [search, setSearch] = useState('')
+
+  const today = new Date()
+  const currentMonthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`
+  const [selectedMonth, setSelectedMonth] = useState<string>(currentMonthStr)
 
   useEffect(() => { fetchData() }, [])
 
@@ -42,7 +42,6 @@ export default function CaixaPage() {
     setLoading(false)
   }
 
-  // Calcular saldo até uma data específica
   function calcularSaldoNaData(data: string) {
     if (!data) { setSaldoNaData(null); return }
     const saldo = movements
@@ -61,38 +60,37 @@ export default function CaixaPage() {
     fetchData()
   }
 
-  const filtered = useMemo(() => {
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
+  const monthOptions = useMemo(() => {
+    const months = new Set(movements.map(m => m.movement_date?.slice(0, 7)).filter(Boolean))
+    months.add(currentMonthStr)
+    return Array.from(months)
+      .sort((a, b) => b.localeCompare(a))
+      .map(val => {
+        const [y, m] = val.split('-').map(Number)
+        const d = new Date(y, m - 1, 1)
+        const label = d.toLocaleDateString('pt-PT', { month: 'long', year: 'numeric' })
+        return { val, label: label.charAt(0).toUpperCase() + label.slice(1) }
+      })
+  }, [movements])
 
+  const filtered = useMemo(() => {
     return movements.filter(m => {
       if (sourceFilter !== 'all' && (m as any).source !== sourceFilter) return false
       if (search && !m.description?.toLowerCase().includes(search.toLowerCase())) return false
-
-      const date = new Date(m.movement_date)
-      date.setHours(0, 0, 0, 0)
-
-      if (periodFilter === 'today') {
-        if (date.getTime() !== today.getTime()) return false
-      } else if (periodFilter === 'week') {
-        const weekAgo = new Date(today); weekAgo.setDate(today.getDate() - 7)
-        if (date < weekAgo) return false
-      } else if (periodFilter === 'month') {
-        if (date.getMonth() !== today.getMonth() || date.getFullYear() !== today.getFullYear()) return false
-      } else if (periodFilter === 'year') {
-        if (date.getFullYear() !== today.getFullYear()) return false
-      } else if (periodFilter === 'range') {
-        if (rangeStart && date < new Date(rangeStart)) return false
-        if (rangeEnd && date > new Date(rangeEnd)) return false
-      }
-
+      if (selectedMonth !== 'all' && m.movement_date?.slice(0, 7) !== selectedMonth) return false
       return true
     })
-  }, [movements, sourceFilter, periodFilter, rangeStart, rangeEnd, search])
+  }, [movements, sourceFilter, search, selectedMonth])
 
+  // Saldo total real (sempre sobre todos os movimentos)
   const balance = movements.reduce((s, m) => s + m.amount, 0)
-  const entries = movements.filter(m => m.amount > 0).reduce((s, m) => s + m.amount, 0)
-  const exits = movements.filter(m => m.amount < 0).reduce((s, m) => s + m.amount, 0)
+
+  // Entradas/Saídas do período selecionado
+  const periodMovements = selectedMonth === 'all'
+    ? movements
+    : movements.filter(m => m.movement_date?.slice(0, 7) === selectedMonth)
+  const entries = periodMovements.filter(m => m.amount > 0).reduce((s, m) => s + m.amount, 0)
+  const exits = periodMovements.filter(m => m.amount < 0).reduce((s, m) => s + m.amount, 0)
 
   const sourceLabel = (source: string) => {
     if (source === 'renda') return '🏠 Renda'
@@ -100,15 +98,6 @@ export default function CaixaPage() {
     if (source === 'documento') return '📄 Documento'
     return '✋ Manual'
   }
-
-  const PERIOD_FILTERS = [
-    { key: 'all', label: 'Todos' },
-    { key: 'today', label: 'Hoje' },
-    { key: 'week', label: 'Semana' },
-    { key: 'month', label: 'Mês' },
-    { key: 'year', label: 'Ano' },
-    { key: 'range', label: 'Intervalo' },
-  ]
 
   const SOURCE_FILTERS = [
     { key: 'all', label: 'Todas origens' },
@@ -152,7 +141,7 @@ export default function CaixaPage() {
               <TrendingUp className="w-4 h-4 text-emerald-500" />
             </div>
             <div>
-              <p className="text-xs text-gray-500">Total Entradas</p>
+              <p className="text-xs text-gray-500">Entradas {selectedMonth !== 'all' ? '(mês)' : ''}</p>
               <p className="text-xl font-bold text-emerald-600">{formatCurrency(entries)}</p>
             </div>
           </div>
@@ -161,7 +150,7 @@ export default function CaixaPage() {
               <TrendingDown className="w-4 h-4 text-red-500" />
             </div>
             <div>
-              <p className="text-xs text-gray-500">Total Saídas</p>
+              <p className="text-xs text-gray-500">Saídas {selectedMonth !== 'all' ? '(mês)' : ''}</p>
               <p className="text-xl font-bold text-red-600">{formatCurrency(Math.abs(exits))}</p>
             </div>
           </div>
@@ -195,21 +184,16 @@ export default function CaixaPage() {
         <div className="bg-white border border-gray-200 rounded-xl p-4 mb-4 space-y-3">
           <div className="flex flex-wrap gap-2 items-center">
             <span className="text-xs font-semibold text-gray-500 w-16">Período:</span>
-            {PERIOD_FILTERS.map(f => (
-              <button key={f.key} onClick={() => setPeriodFilter(f.key as PeriodFilter)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${periodFilter === f.key ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
-                {f.label}
-              </button>
-            ))}
-            {periodFilter === 'range' && (
-              <div className="flex items-center gap-2 ml-2">
-                <input type="date" value={rangeStart} onChange={e => setRangeStart(e.target.value)}
-                  className="input text-xs py-1.5 px-2 h-8" />
-                <span className="text-xs text-gray-400">até</span>
-                <input type="date" value={rangeEnd} onChange={e => setRangeEnd(e.target.value)}
-                  className="input text-xs py-1.5 px-2 h-8" />
-              </div>
-            )}
+            <select
+              className="input text-sm w-56"
+              value={selectedMonth}
+              onChange={e => setSelectedMonth(e.target.value)}
+            >
+              <option value="all">📅 Todo o histórico</option>
+              {monthOptions.map(o => (
+                <option key={o.val} value={o.val}>{o.label}</option>
+              ))}
+            </select>
           </div>
 
           <div className="flex flex-wrap gap-2 items-center">
@@ -236,8 +220,8 @@ export default function CaixaPage() {
                 </button>
               )}
             </div>
-            {(sourceFilter !== 'all' || periodFilter !== 'all' || search) && (
-              <button onClick={() => { setSourceFilter('all'); setPeriodFilter('all'); setSearch(''); setRangeStart(''); setRangeEnd('') }}
+            {(sourceFilter !== 'all' || selectedMonth !== currentMonthStr || search) && (
+              <button onClick={() => { setSourceFilter('all'); setSelectedMonth(currentMonthStr); setSearch('') }}
                 className="text-xs text-red-500 hover:text-red-700 font-medium ml-2">
                 Limpar filtros
               </button>
