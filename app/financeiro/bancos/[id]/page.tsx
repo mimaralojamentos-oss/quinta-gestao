@@ -87,6 +87,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
   const [loading, setLoading] = useState(true)
   const [importing, setImporting] = useState(false)
   const [validatingAll, setValidatingAll] = useState(false)
+  const [validatingAllHigh, setValidatingAllHigh] = useState(false)
   const [showImport, setShowImport] = useState(false)
 
   const [filterStatus, setFilterStatus] = useState<'all' | 'por_validar' | 'validado' | 'ignorado'>('all')
@@ -475,6 +476,19 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     setValidatingAll(false)
   }
 
+  async function validateAllHighConfidence() {
+    const candidates = transactions.filter(t =>
+      t.status === 'por_validar' && !t.confirmed_type && txMatches[t.id]?.[0]?.confidence === 'high'
+    )
+    if (candidates.length === 0) return
+    setValidatingAllHigh(true)
+    for (const tx of candidates) {
+      await confirmAutoMatch(tx)
+    }
+    await fetchData()
+    setValidatingAllHigh(false)
+  }
+
   async function syncRentPayments() {
     const candidates = transactions.filter(t =>
       t.status === 'validado' && t.confirmed_type === 'renda' && t.confirmed_lease_id && t.amount > 0
@@ -633,6 +647,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
   const countValidado = transactions.filter(t => t.status === 'validado').length
   const countIgnorado = transactions.filter(t => t.status === 'ignorado').length
   const countAlt = transactions.filter(t => !t.confirmed_type && txMatches[t.id]?.[0]?.confidence === 'high').length
+  const countHighConfidencePending = transactions.filter(t => t.status === 'por_validar' && !t.confirmed_type && txMatches[t.id]?.[0]?.confidence === 'high').length
   const countMed = transactions.filter(t => !t.confirmed_type && txMatches[t.id]?.[0]?.confidence === 'medium').length
   const countBai = transactions.filter(t => !t.confirmed_type && txMatches[t.id]?.[0]?.confidence === 'low').length
   const countIdentificadas = transactions.filter(t => t.confirmed_type || (txMatches[t.id]?.length > 0)).length
@@ -699,6 +714,11 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
             {bank?.iban && <p className="text-sm text-gray-500 font-mono mt-0.5">{bank.iban}</p>}
           </div>
           <div className="flex gap-3">
+            {countHighConfidencePending > 0 && (
+              <button onClick={validateAllHighConfidence} disabled={validatingAllHigh} className="btn-secondary">
+                {validatingAllHigh ? <><Loader2 className="w-4 h-4 animate-spin" /> A validar...</> : <><CheckCircle className="w-4 h-4" /> ✓ Validar todas (Alta confiança) ({countHighConfidencePending})</>}
+              </button>
+            )}
             {pending > 0 && (
               <button onClick={validateAll} disabled={validatingAll} className="btn-secondary">
                 {validatingAll ? <><Loader2 className="w-4 h-4 animate-spin" /> A validar...</> : <><CheckCircle className="w-4 h-4" /> Validar Todas ({pending})</>}
