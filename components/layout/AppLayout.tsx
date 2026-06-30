@@ -33,7 +33,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <div className="w-7 h-7 bg-blue-600 rounded-lg flex items-center justify-center">
               <span className="text-white text-xs font-bold">GQ</span>
             </div>
-            <p className="font-bold text-gray-900 text-sm">Gestão da Quinta</p>
+            <p className="font-bold text-gray-900 text-sm">{process.env.NEXT_PUBLIC_APP_NAME || 'Gestão da Quinta'}</p>
           </div>
         </div>
         {children}

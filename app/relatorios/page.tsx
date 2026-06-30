@@ -886,7 +886,7 @@ export default function RelatoriosPage() {
 
                   <div className="print-area bg-white border border-gray-200 rounded-xl p-4 print:border-0 print:rounded-none print:p-0">
                     <div className="hidden print:block mb-4">
-                      <h1 className="text-lg font-bold text-gray-900">Gestão da Quinta — Évora</h1>
+                      <h1 className="text-lg font-bold text-gray-900">{process.env.NEXT_PUBLIC_APP_NAME || 'Gestão da Quinta'} — {process.env.NEXT_PUBLIC_APP_LOCATION || 'Évora'}</h1>
                       <h2 className="text-sm text-gray-700">Cobranças de {monthLabel}</h2>
                     </div>
 

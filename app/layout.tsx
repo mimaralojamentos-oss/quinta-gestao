@@ -3,8 +3,8 @@ import './globals.css'
 import { AuthProvider } from '@/lib/auth-context'
 
 export const metadata: Metadata = {
-  title: 'Gestão da Quinta',
-  description: 'Sistema de gestão de arrendamentos da quinta',
+  title: process.env.NEXT_PUBLIC_APP_NAME || 'Gestão da Quinta',
+  description: 'Sistema de gestão de arrendamentos',
 }
 
 export default function RootLayout({

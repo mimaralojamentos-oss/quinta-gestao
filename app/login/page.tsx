@@ -58,8 +58,8 @@ export default function LoginPage() {
           <div className="inline-flex items-center justify-center w-16 h-16 bg-emerald-600 rounded-2xl shadow-lg mb-4">
             <Home className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-2xl font-bold text-white drop-shadow-lg">Gestão da Quinta</h1>
-          <p className="text-white/80 text-sm mt-1 drop-shadow">Évora · Sistema de Arrendamentos</p>
+          <h1 className="text-2xl font-bold text-white drop-shadow-lg">{process.env.NEXT_PUBLIC_APP_NAME || 'Gestão da Quinta'}</h1>
+          <p className="text-white/80 text-sm mt-1 drop-shadow">{process.env.NEXT_PUBLIC_APP_LOCATION || 'Évora'} · Sistema de Arrendamentos</p>
         </div>
 
         <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-2xl p-8">

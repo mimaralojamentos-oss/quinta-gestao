@@ -324,7 +324,7 @@ export default function QuadrosPage() {
       <div className="p-4 md:p-8">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Quadros da Quinta</h1>
+            <h1 className="text-2xl font-bold text-gray-900">Quadros Elétricos</h1>
             <p className="text-sm text-gray-500 mt-1">{meters.length} quadros registados</p>
           </div>
           <div className="flex gap-3">

@@ -1073,7 +1073,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
                               <span className={`text-xs font-medium ${matchInfo.color}`}>{matchInfo.label}</span>
                               {(matchInfo as any).filePath && (
                                 <a
-                                  href={`https://szjwtccjrljprettcfxm.supabase.co/storage/v1/object/public/documents/${(matchInfo as any).filePath}`}
+                                  href={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/documents/${(matchInfo as any).filePath}`}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   className="text-xs text-blue-500 hover:underline flex items-center gap-0.5 flex-shrink-0"

@@ -24,7 +24,7 @@ const navItems = [
 ]
 
 const eletricidadeItems = [
-  { href: '/eletricidade/quadros', label: 'Quadros da Quinta', icon: Zap },
+  { href: '/eletricidade/quadros', label: 'Quadros Elétricos', icon: Zap },
   { href: '/eletricidade/espacos', label: 'Quadros dos Espaços', icon: Building2 },
 ]
 
@@ -58,8 +58,8 @@ export default function Sidebar({ onClose }: { onClose?: () => void }) {
             <span className="text-white text-xs font-bold">GQ</span>
           </div>
           <div>
-            <p className="font-bold text-gray-900 text-sm">Gestão da Quinta</p>
-            <p className="text-xs text-gray-500">Évora</p>
+            <p className="font-bold text-gray-900 text-sm">{process.env.NEXT_PUBLIC_APP_NAME || 'Gestão da Quinta'}</p>
+            <p className="text-xs text-gray-500">{process.env.NEXT_PUBLIC_APP_LOCATION || 'Évora'}</p>
           </div>
         </div>
       </div>
