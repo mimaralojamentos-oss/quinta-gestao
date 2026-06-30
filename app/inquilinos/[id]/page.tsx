@@ -427,7 +427,20 @@ export default function TenantDetailPage() {
                       <p className="text-sm text-gray-700">
                         {p.reference_month?.slice(0, 7)} — {p.lease?.space?.ref ?? '—'}
                         {p.tipo === 'luz'
-                          ? <span clas
+                          ? <span className="ml-1.5 text-xs font-medium text-yellow-600 bg-yellow-50 px-1.5 py-0.5 rounded-full">Luz</span>
+                          : p.tipo && p.tipo !== 'renda'
+                            ? <span className="ml-1.5 text-xs font-medium text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-full">{p.tipo}</span>
+                            : null
+                        }
+                      </p>
+                      {p.payment_date
+                        ? <p className="text-xs text-gray-400">Pago em {formatDate(p.payment_date)}</p>
+                        : <p className="text-xs text-red-500 font-medium">Por pagar</p>
+                      }
+                    </div>
+                    <span className={`text-sm font-semibold ${p.payment_date ? 'text-gray-700' : 'text-red-600'}`}>
+                      {formatCurrency(p.amount)}
+                    </span>
                   </div>
                 ))}
               </div>
