@@ -26,7 +26,7 @@ const CATEGORIAS = ['administracao', 'contabilidade', 'edp', 'manutencao', 'obra
 const TIPO_LABELS: Record<string, string> = {
   renda: '🏠 Renda',
   luz: '⚡ Luz',
-  caucao: '🔒 Caução',
+  caucao: '🔒 Caucao',
   extra: '➕ Extra',
   adiantamento: '💰 Adiantamento',
   outro: '📝 Outro',
@@ -82,27 +82,23 @@ export default function RelatoriosPage() {
     const endMonth = m === 12 ? 1 : m + 1
     const nextMonthDate = `${endYear}-${String(endMonth).padStart(2, '0')}-01`
 
-    // Buscar contratos ativos cujo início é antes do fim do mês selecionado
     const { data: leasesData } = await supabase
       .from('leases')
       .select('id, monthly_rent, start_date, space:spaces(ref), tenant:tenants(id, name)')
       .eq('status', 'ativo')
       .lt('start_date', nextMonthDate)
 
-    // Buscar todos os pagamentos do mês selecionado
     const { data: allPayments } = await supabase
       .from('rent_payments')
       .select('*')
       .gte('reference_month', startDate)
       .lt('reference_month', nextMonthDate)
 
-    // leasesMap para enriquecer outros pagamentos
     const leasesMap: Record<string, any> = {}
     for (const l of leasesData ?? []) {
       leasesMap[l.id] = l
     }
 
-    // Buscar também leases não ativos para enriquecer outros pagamentos
     const { data: allLeasesData } = await supabase
       .from('leases')
       .select('id, space:spaces(ref), tenant:tenants(name)')
@@ -112,7 +108,6 @@ export default function RelatoriosPage() {
       allLeasesMap[l.id] = l
     }
 
-    // Separar rendas de outros pagamentos
     const rendaPayments = (allPayments ?? []).filter((p: any) => p.tipo === 'renda' || !p.tipo)
     const outrosPayments = (allPayments ?? [])
       .filter((p: any) => p.tipo && p.tipo !== 'renda')
@@ -122,7 +117,6 @@ export default function RelatoriosPage() {
     const totalRecebido = rendaPayments.reduce((s: number, p: any) => s + (p.amount ?? 0), 0)
     const totalOutros = outrosPayments.reduce((s: number, p: any) => s + (p.amount ?? 0), 0)
 
-    // Comparar lease_id dos pagamentos com id dos contratos ativos
     const pagosLeaseIds = new Set(rendaPayments.map((p: any) => String(p.lease_id)))
     const emFalta = (leasesData ?? []).filter((l: any) => !pagosLeaseIds.has(String(l.id)))
     const pagos = (leasesData ?? []).filter((l: any) => pagosLeaseIds.has(String(l.id)))
@@ -233,29 +227,11 @@ export default function RelatoriosPage() {
     setLoading(false)
   }
 
-  async function handleSaveExpense() {
-    if (!editingExpense) return
-    setSavingExpense(true)
-    await supabase.from('expenses').update({
-      description: editForm.description,
-      amount: parseFloat(editForm.amount),
-      category: editForm.category,
-      expense_date: editForm.expense_date,
-      supplier: editForm.supplier,
-      payment_method: editForm.payment_method,
-    }).eq('id', editingExpense.id)
-    setEditingExpense(null)
-    setSavingExpense(false)
-    setExpandedCategory(null)
-    fetchFinanceiro()
-  }
-
   async function fetchPagamentos() {
     setLoading(true)
     try {
       const currentYear = new Date().getFullYear()
 
-      // Calcular datas
       let startDate: string, endDate: string
       if (pagamentosMes === 'year') {
         startDate = `${currentYear}-01-01`
@@ -268,11 +244,9 @@ export default function RelatoriosPage() {
         endDate = `${endYear}-${String(endMonth).padStart(2, '0')}-01`
       }
 
-      // Buscar espaços para o filtro
       const { data: spacesData } = await supabase.from('spaces').select('id, ref').order('ref')
       setAllSpaces(spacesData ?? [])
 
-      // Buscar pagamentos com info do contrato
       const { data: paymentsData } = await supabase
         .from('rent_payments')
         .select('*, lease:leases(id, space:spaces(id, ref), tenant:tenants(name))')
@@ -280,7 +254,6 @@ export default function RelatoriosPage() {
         .lt('reference_month', endDate)
         .order('reference_month', { ascending: false })
 
-      // Filtrar por espaço
       let filtered = (paymentsData ?? []) as any[]
       if (pagamentosEspaco !== 'todos') {
         filtered = filtered.filter((p: any) => p.lease?.space?.ref === pagamentosEspaco)
@@ -299,6 +272,23 @@ export default function RelatoriosPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  async function handleSaveExpense() {
+    if (!editingExpense) return
+    setSavingExpense(true)
+    await supabase.from('expenses').update({
+      description: editForm.description,
+      amount: parseFloat(editForm.amount),
+      category: editForm.category,
+      expense_date: editForm.expense_date,
+      supplier: editForm.supplier,
+      payment_method: editForm.payment_method,
+    }).eq('id', editingExpense.id)
+    setEditingExpense(null)
+    setSavingExpense(false)
+    setExpandedCategory(null)
+    fetchFinanceiro()
   }
 
   function fmt(v: number) {
@@ -333,14 +323,14 @@ export default function RelatoriosPage() {
 
       pdf.setFont('helvetica', 'bold')
       pdf.setFontSize(16)
-      pdf.text(`Relatório Financeiro - ${monthLabel}`, margin, y)
+      pdf.text(`Relatorio Financeiro - ${monthLabel}`, margin, y)
       y += 7
 
       pdf.setFont('helvetica', 'normal')
       pdf.setFontSize(9)
       pdf.setTextColor(120)
       pdf.text(
-        `Gerado em ${new Date().toLocaleDateString('pt-PT')} às ${new Date().toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' })}`,
+        `Gerado em ${new Date().toLocaleDateString('pt-PT')} as ${new Date().toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' })}`,
         margin, y
       )
       pdf.setTextColor(0)
@@ -392,7 +382,7 @@ export default function RelatoriosPage() {
         pdf.setFont('helvetica', 'bold')
         pdf.setFontSize(9)
         pdf.text('Inquilino', margin, y)
-        pdf.text('Espaço', margin + 95, y)
+        pdf.text('Espaco', margin + 95, y)
         pdf.text('Valor', pageWidth - margin, y, { align: 'right' })
         y += 4
         pdf.setDrawColor(200)
@@ -503,11 +493,11 @@ export default function RelatoriosPage() {
   }
 
   const REPORTS = [
-    { key: 'rendas', label: 'Rendas do Mês', icon: FileText, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-    { key: 'ocupacao', label: 'Ocupação', icon: Home, color: 'text-blue-600', bg: 'bg-blue-50' },
+    { key: 'rendas', label: 'Rendas do Mes', icon: FileText, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+    { key: 'ocupacao', label: 'Ocupacao', icon: Home, color: 'text-blue-600', bg: 'bg-blue-50' },
     { key: 'financeiro', label: 'Financeiro', icon: TrendingUp, color: 'text-purple-600', bg: 'bg-purple-50' },
     { key: 'contratos', label: 'Contratos a Expirar', icon: Calendar, color: 'text-orange-600', bg: 'bg-orange-50' },
-    { key: 'cobrancas', label: 'Lista de Cobranças', icon: ClipboardList, color: 'text-rose-600', bg: 'bg-rose-50' },
+    { key: 'cobrancas', label: 'Lista de Cobrancas', icon: ClipboardList, color: 'text-rose-600', bg: 'bg-rose-50' },
     { key: 'pagamentos', label: 'Pagamentos dos Inquilinos', icon: Receipt, color: 'text-teal-600', bg: 'bg-teal-50' },
   ]
 
@@ -515,12 +505,12 @@ export default function RelatoriosPage() {
 
   return (
     <AppLayout>
-      {/* Cabeçalho fixo */}
+      {/* Cabecalho fixo */}
       <div className="sticky top-0 z-10 bg-white border-b border-gray-100 px-8 py-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <BarChart3 className="w-5 h-5 text-emerald-600" />
-            <h1 className="text-xl font-bold text-gray-900">Relatórios</h1>
+            <h1 className="text-xl font-bold text-gray-900">Relatorios</h1>
             <button onClick={handleExportPDF} disabled={exportingPDF || loading}
               className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-800 text-white hover:bg-gray-900 disabled:opacity-50 transition-colors">
               {exportingPDF ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
@@ -530,7 +520,7 @@ export default function RelatoriosPage() {
           <div className="flex items-center gap-3">
             {showMonthPicker && (
               <div className="flex items-center gap-2">
-                <label className="text-sm font-medium text-gray-600">Mês:</label>
+                <label className="text-sm font-medium text-gray-600">Mes:</label>
                 <div className="relative">
                   <select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)}
                     className="appearance-none bg-white border border-gray-200 rounded-lg px-3 py-1.5 pr-8 text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-emerald-500">
@@ -582,14 +572,14 @@ export default function RelatoriosPage() {
 
                 {rendas.totalOutros > 0 && (
                   <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-                    <p className="text-xs text-blue-600 font-medium mb-1">💡 Outros recebimentos este mês (luz, caução, adiantamento...)</p>
+                    <p className="text-xs text-blue-600 font-medium mb-1">Outros recebimentos este mes (luz, caucao, adiantamento...)</p>
                     <p className="text-xl font-bold text-blue-700">{fmt(rendas.totalOutros)}</p>
                   </div>
                 )}
 
                 <div className="bg-white border border-gray-200 rounded-xl p-4">
                   <div className="flex justify-between text-sm mb-2">
-                    <span className="text-gray-600 font-medium">Taxa de cobrança</span>
+                    <span className="text-gray-600 font-medium">Taxa de cobranca</span>
                     <span className="font-bold text-gray-900">
                       {rendas.totalEsperado > 0 ? Math.round((rendas.totalRecebido / rendas.totalEsperado) * 100) : 0}%
                     </span>
@@ -606,7 +596,7 @@ export default function RelatoriosPage() {
 
                 {rendas.emFalta.length > 0 && (
                   <div className="bg-white border border-gray-200 rounded-xl p-4">
-                    <h3 className="text-sm font-semibold text-gray-700 mb-3">⚠️ Rendas em falta ({rendas.emFalta.length})</h3>
+                    <h3 className="text-sm font-semibold text-gray-700 mb-3">Rendas em falta ({rendas.emFalta.length})</h3>
                     <div className="space-y-1">
                       {rendas.emFalta.map((l: any) => (
                         <div key={l.id}
@@ -625,7 +615,7 @@ export default function RelatoriosPage() {
 
                 {rendas.pagos.length > 0 && (
                   <div className="bg-white border border-gray-200 rounded-xl p-4">
-                    <h3 className="text-sm font-semibold text-gray-700 mb-3">✅ Rendas pagas ({rendas.pagos.length})</h3>
+                    <h3 className="text-sm font-semibold text-gray-700 mb-3">Rendas pagas ({rendas.pagos.length})</h3>
                     <div className="space-y-1">
                       {rendas.pagos.map((l: any) => {
                         const p = rendas.payments.find((pay: any) => String(pay.lease_id) === String(l.id))
@@ -638,7 +628,7 @@ export default function RelatoriosPage() {
                               <p className="text-xs text-gray-400">
                                 {l.space?.ref}
                                 {p?.payment_date ? ` · Pago em ${formatDate(p.payment_date)}` : ''}
-                                {p?.payment_method ? ` · ${p.payment_method === 'dinheiro' ? '💵 Dinheiro' : '🏦 Banco'}` : ''}
+                                {p?.payment_method ? ` · ${p.payment_method === 'dinheiro' ? 'Dinheiro' : 'Banco'}` : ''}
                               </p>
                             </div>
                             <span className="text-sm font-semibold text-emerald-600">{fmt(p?.amount ?? 0)}</span>
@@ -651,7 +641,7 @@ export default function RelatoriosPage() {
 
                 {rendas.outrosPayments?.length > 0 && (
                   <div className="bg-white border border-gray-200 rounded-xl p-4">
-                    <h3 className="text-sm font-semibold text-gray-700 mb-3">💡 Outros pagamentos do mês ({rendas.outrosPayments.length})</h3>
+                    <h3 className="text-sm font-semibold text-gray-700 mb-3">Outros pagamentos do mes ({rendas.outrosPayments.length})</h3>
                     <div className="space-y-1">
                       {rendas.outrosPayments.map((p: any) => (
                         <div key={p.id} className="flex justify-between items-center py-2 border-b border-gray-50 last:border-0 px-2">
@@ -662,7 +652,7 @@ export default function RelatoriosPage() {
                             <p className="text-xs text-gray-400">
                               {p.lease?.space?.ref} · {TIPO_LABELS[p.tipo] ?? p.tipo}
                               {p.payment_date ? ` · Pago em ${formatDate(p.payment_date)}` : ''}
-                              {p.payment_method ? ` · ${p.payment_method === 'dinheiro' ? '💵 Dinheiro' : '🏦 Banco'}` : ''}
+                              {p.payment_method ? ` · ${p.payment_method === 'dinheiro' ? 'Dinheiro' : 'Banco'}` : ''}
                             </p>
                           </div>
                           <span className={`text-sm font-semibold ${p.tipo === 'adiantamento' ? 'text-purple-600' : 'text-blue-600'}`}>
@@ -680,12 +670,12 @@ export default function RelatoriosPage() {
               </div>
             )}
 
-            {/* OCUPAÇÃO */}
+            {/* OCUPACAO */}
             {activeReport === 'ocupacao' && ocupacao && (
               <div className="space-y-5">
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div className="bg-white border border-gray-200 rounded-xl p-4">
-                    <p className="text-xs text-gray-500 mb-1">Total de Espaços</p>
+                    <p className="text-xs text-gray-500 mb-1">Total de Espacos</p>
                     <p className="text-2xl font-bold text-gray-900">{ocupacao.total}</p>
                   </div>
                   <div className="bg-white border border-gray-200 rounded-xl p-4">
@@ -700,7 +690,7 @@ export default function RelatoriosPage() {
 
                 <div className="bg-white border border-gray-200 rounded-xl p-4">
                   <div className="flex justify-between text-sm mb-2">
-                    <span className="text-gray-600 font-medium">Taxa de ocupação</span>
+                    <span className="text-gray-600 font-medium">Taxa de ocupacao</span>
                     <span className="font-bold text-gray-900">{ocupacao.taxa}%</span>
                   </div>
                   <div className="w-full bg-gray-100 rounded-full h-3">
@@ -709,7 +699,7 @@ export default function RelatoriosPage() {
                 </div>
 
                 <div className="bg-white border border-gray-200 rounded-xl p-4">
-                  <h3 className="text-sm font-semibold text-gray-700 mb-3">Todos os espaços</h3>
+                  <h3 className="text-sm font-semibold text-gray-700 mb-3">Todos os espacos</h3>
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
                     {ocupacao.spaces.map((s: any) => {
                       const activeLease = (s.leases ?? []).find((l: any) => l.status === 'ativo')
@@ -783,7 +773,7 @@ export default function RelatoriosPage() {
                                       <div className="space-y-2">
                                         <div className="grid grid-cols-2 gap-2">
                                           <div>
-                                            <label className="text-xs text-gray-500 mb-0.5 block">Descrição</label>
+                                            <label className="text-xs text-gray-500 mb-0.5 block">Descricao</label>
                                             <input className="input text-sm" value={editForm.description}
                                               onChange={e => setEditForm((f: any) => ({ ...f, description: e.target.value }))} />
                                           </div>
@@ -795,7 +785,7 @@ export default function RelatoriosPage() {
                                         </div>
                                         <div className="grid grid-cols-4 gap-2">
                                           <div>
-                                            <label className="text-xs text-gray-500 mb-0.5 block">Valor (€)</label>
+                                            <label className="text-xs text-gray-500 mb-0.5 block">Valor (EUR)</label>
                                             <input type="number" step="0.01" className="input text-sm" value={editForm.amount}
                                               onChange={e => setEditForm((f: any) => ({ ...f, amount: e.target.value }))} />
                                           </div>
@@ -817,8 +807,8 @@ export default function RelatoriosPage() {
                                             <label className="text-xs text-gray-500 mb-0.5 block">Pagamento</label>
                                             <select className="input text-sm" value={editForm.payment_method}
                                               onChange={e => setEditForm((f: any) => ({ ...f, payment_method: e.target.value }))}>
-                                              <option value="dinheiro">💵 Dinheiro</option>
-                                              <option value="banco">🏦 Banco</option>
+                                              <option value="dinheiro">Dinheiro</option>
+                                              <option value="banco">Banco</option>
                                             </select>
                                           </div>
                                         </div>
@@ -840,7 +830,7 @@ export default function RelatoriosPage() {
                                           <div className="flex items-center gap-2 mt-0.5">
                                             <span className="text-xs text-gray-400">{formatDate(exp.expense_date)}</span>
                                             {exp.supplier && <span className="text-xs text-gray-400">· {exp.supplier}</span>}
-                                            <span className="text-xs text-gray-400">· {exp.payment_method === 'dinheiro' ? '💵' : '🏦'}</span>
+                                            <span className="text-xs text-gray-400">· {exp.payment_method === 'dinheiro' ? 'Dinheiro' : 'Banco'}</span>
                                           </div>
                                         </div>
                                         <div className="flex items-center gap-2 flex-shrink-0">
@@ -865,7 +855,7 @@ export default function RelatoriosPage() {
                 )}
 
                 {financeiro.despesas?.length === 0 && (
-                  <div className="text-center py-8 text-gray-400 text-sm">Sem despesas registadas neste mês.</div>
+                  <div className="text-center py-8 text-gray-400 text-sm">Sem despesas registadas neste mes.</div>
                 )}
               </div>
             )}
@@ -874,12 +864,12 @@ export default function RelatoriosPage() {
             {activeReport === 'contratos' && (
               <div className="space-y-5">
                 <div className="bg-white border border-gray-200 rounded-xl p-4">
-                  <h3 className="text-sm font-semibold text-gray-700 mb-1">Contratos a expirar nos próximos 6 meses</h3>
+                  <h3 className="text-sm font-semibold text-gray-700 mb-1">Contratos a expirar nos proximos 6 meses</h3>
                   <p className="text-xs text-gray-400 mb-4">Apenas contratos com data de fim definida</p>
 
                   {!contratos || contratos.length === 0 ? (
                     <div className="text-center py-8 text-gray-400">
-                      <p className="text-sm">✅ Nenhum contrato a expirar nos próximos 6 meses.</p>
+                      <p className="text-sm">Nenhum contrato a expirar nos proximos 6 meses.</p>
                     </div>
                   ) : (
                     <div className="space-y-2">
@@ -897,7 +887,7 @@ export default function RelatoriosPage() {
                               <p className={`text-sm font-bold ${urgente ? 'text-red-600' : aviso ? 'text-yellow-600' : 'text-gray-600'}`}>
                                 {dias} dias
                               </p>
-                              <p className="text-xs text-gray-400">{fmt(c.monthly_rent ?? 0)}/mês</p>
+                              <p className="text-xs text-gray-400">{fmt(c.monthly_rent ?? 0)}/mes</p>
                             </div>
                           </div>
                         )
@@ -908,7 +898,7 @@ export default function RelatoriosPage() {
               </div>
             )}
 
-            {/* LISTA DE COBRANÇAS */}
+            {/* LISTA DE COBRANCAS */}
             {activeReport === 'cobrancas' && rendas && (() => {
               const totalEmFalta = rendas.emFalta.reduce((s: number, l: any) => s + (l.monthly_rent ?? 0), 0)
               const sortedEmFalta = [...rendas.emFalta].sort((a: any, b: any) => {
@@ -938,30 +928,30 @@ export default function RelatoriosPage() {
                       </button>
                       <button onClick={() => setCobrancasSort('espaco')}
                         className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${cobrancasSort === 'espaco' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
-                        Ordenar por Espaço
+                        Ordenar por Espaco
                       </button>
                     </div>
                     <button onClick={() => window.print()}
                       className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-medium bg-gray-800 text-white hover:bg-gray-900 transition-colors">
-                      🖨️ Imprimir
+                      Imprimir
                     </button>
                   </div>
 
                   <div className="print-area bg-white border border-gray-200 rounded-xl p-4 print:border-0 print:rounded-none print:p-0">
                     <div className="hidden print:block mb-4">
-                      <h1 className="text-lg font-bold text-gray-900">{process.env.NEXT_PUBLIC_APP_NAME || 'Gestão da Quinta'} — {process.env.NEXT_PUBLIC_APP_LOCATION || 'Évora'}</h1>
-                      <h2 className="text-sm text-gray-700">Cobranças de {monthLabel}</h2>
+                      <h1 className="text-lg font-bold text-gray-900">{process.env.NEXT_PUBLIC_APP_NAME || 'Gestao da Quinta'} — {process.env.NEXT_PUBLIC_APP_LOCATION || 'Evora'}</h1>
+                      <h2 className="text-sm text-gray-700">Cobrancas de {monthLabel}</h2>
                     </div>
 
                     {sortedEmFalta.length === 0 ? (
                       <div className="text-center py-8 text-gray-400">
-                        <p className="text-sm">✅ Sem rendas em falta para {monthLabel}.</p>
+                        <p className="text-sm">Sem rendas em falta para {monthLabel}.</p>
                       </div>
                     ) : (
                       <table className="w-full text-sm">
                         <thead>
                           <tr className="border-b border-gray-200">
-                            <th className="text-left py-2 px-2 text-xs font-semibold text-gray-500 uppercase">Espaço</th>
+                            <th className="text-left py-2 px-2 text-xs font-semibold text-gray-500 uppercase">Espaco</th>
                             <th className="text-left py-2 px-2 text-xs font-semibold text-gray-500 uppercase">Inquilino</th>
                             <th className="text-right py-2 px-2 text-xs font-semibold text-gray-500 uppercase">Renda</th>
                             <th className="text-center py-2 px-2 text-xs font-semibold text-gray-500 uppercase w-20">Pago</th>
@@ -990,11 +980,179 @@ export default function RelatoriosPage() {
                 </div>
               )
             })()}
+
             {/* PAGAMENTOS DOS INQUILINOS */}
             {activeReport === 'pagamentos' && (
               <div className="space-y-5">
                 {/* Filtros */}
                 <div className="bg-white border border-gray-200 rounded-xl p-4">
                   <div className="flex flex-wrap gap-4 items-end">
-                    {/* Filtro por espaço */}
-                    <
+                    <div>
+                      <label className="text-xs font-medium text-gray-500 block mb-1">Espaco</label>
+                      <div className="relative">
+                        <select
+                          value={pagamentosEspaco}
+                          onChange={e => setPagamentosEspaco(e.target.value)}
+                          className="appearance-none bg-white border border-gray-200 rounded-lg px-3 py-1.5 pr-8 text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-teal-500">
+                          <option value="todos">Todos os espacos</option>
+                          {allSpaces.map((s: any) => (
+                            <option key={s.id} value={s.ref}>{s.ref}</option>
+                          ))}
+                        </select>
+                        <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-medium text-gray-500 block mb-1">Periodo</label>
+                      <div className="relative">
+                        <select
+                          value={pagamentosMes}
+                          onChange={e => setPagamentosMes(e.target.value)}
+                          className="appearance-none bg-white border border-gray-200 rounded-lg px-3 py-1.5 pr-8 text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-teal-500">
+                          <option value="year">Ano atual ({new Date().getFullYear()})</option>
+                          {MONTHS.map(m => (
+                            <option key={m.value} value={m.value}>{m.label}</option>
+                          ))}
+                        </select>
+                        <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {pagamentos && (
+                  <>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                      <div className="bg-teal-50 border border-teal-200 rounded-xl p-4 col-span-2 sm:col-span-1">
+                        <p className="text-xs text-teal-600 font-medium mb-1">Total Recebido</p>
+                        <p className="text-2xl font-bold text-teal-700">{fmt(pagamentos.total)}</p>
+                        <p className="text-xs text-teal-500 mt-1">{pagamentos.payments.length} pagamento(s)</p>
+                      </div>
+                      {Object.entries(pagamentos.totalPorTipo).sort(([, a]: any, [, b]: any) => b - a).map(([tipo, val]: any) => (
+                        <div key={tipo} className="bg-white border border-gray-200 rounded-xl p-4">
+                          <p className="text-xs text-gray-500 mb-1">{TIPO_LABELS[tipo] ?? tipo}</p>
+                          <p className="text-lg font-bold text-gray-900">{fmt(val)}</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                      {pagamentos.payments.length === 0 ? (
+                        <div className="text-center py-12 text-gray-400">
+                          <Receipt className="w-10 h-10 mx-auto mb-3 text-gray-300" />
+                          <p className="text-sm">Sem pagamentos para o periodo e filtro selecionados.</p>
+                        </div>
+                      ) : (
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="border-b border-gray-200 bg-gray-50">
+                              <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 uppercase">Mes</th>
+                              <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 uppercase">Inquilino</th>
+                              <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 uppercase">Espaco</th>
+                              <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 uppercase">Tipo</th>
+                              <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 uppercase">Pagamento</th>
+                              <th className="text-right py-3 px-4 text-xs font-semibold text-gray-500 uppercase">Valor</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {pagamentos.payments.map((p: any) => (
+                              <tr key={p.id} className="border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors">
+                                <td className="py-2.5 px-4 text-gray-700">
+                                  {p.reference_month
+                                    ? new Date(p.reference_month).toLocaleDateString('pt-PT', { month: 'short', year: 'numeric' })
+                                    : '—'}
+                                </td>
+                                <td className="py-2.5 px-4 font-medium text-gray-800">{p.lease?.tenant?.name ?? '—'}</td>
+                                <td className="py-2.5 px-4 text-gray-600">{p.lease?.space?.ref ?? '—'}</td>
+                                <td className="py-2.5 px-4">
+                                  <span className={`inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full ${
+                                    (p.tipo || 'renda') === 'renda' ? 'bg-emerald-100 text-emerald-700' :
+                                    p.tipo === 'luz' ? 'bg-yellow-100 text-yellow-700' :
+                                    p.tipo === 'caucao' ? 'bg-gray-100 text-gray-700' :
+                                    p.tipo === 'adiantamento' ? 'bg-purple-100 text-purple-700' :
+                                    'bg-blue-100 text-blue-700'
+                                  }`}>
+                                    {TIPO_LABELS[p.tipo || 'renda'] ?? p.tipo}
+                                  </span>
+                                </td>
+                                <td className="py-2.5 px-4 text-xs text-gray-400">
+                                  {p.payment_date ? formatDate(p.payment_date) : '—'}
+                                  {p.payment_method ? ` · ${p.payment_method === 'dinheiro' ? 'Dinheiro' : 'Banco'}` : ''}
+                                </td>
+                                <td className="py-2.5 px-4 text-right font-semibold text-gray-900">{fmt(p.amount ?? 0)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                          <tfoot>
+                            <tr className="border-t-2 border-gray-200 bg-teal-50">
+                              <td colSpan={5} className="py-3 px-4 text-sm font-semibold text-teal-700">
+                                Total ({pagamentos.payments.length} pagamentos)
+                              </td>
+                              <td className="py-3 px-4 text-right text-base font-bold text-teal-700">{fmt(pagamentos.total)}</td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+          </div>
+        )}
+      </div>
+
+      {/* Modal Conta Corrente */}
+      {contaCorrenteModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 max-h-[85vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="font-semibold text-lg text-gray-900">Conta Corrente</h2>
+                <p className="text-sm text-gray-500">{contaCorrenteModal.name} · {contaCorrenteModal.spaceRef}</p>
+              </div>
+              <button onClick={() => setContaCorrenteModal(null)}>
+                <X className="w-5 h-5 text-gray-400" />
+              </button>
+            </div>
+
+            {loadingCC ? (
+              <div className="flex justify-center py-8">
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-emerald-600" />
+              </div>
+            ) : contaCorrenteData.length === 0 ? (
+              <p className="text-sm text-gray-400 text-center py-8">Sem pagamentos registados.</p>
+            ) : (
+              <div className="space-y-2">
+                {contaCorrenteData.map((p: any) => (
+                  <div key={p.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-100">
+                    <div>
+                      <p className="text-sm font-medium text-gray-800">
+                        {p.reference_month ? new Date(p.reference_month).toLocaleDateString('pt-PT', { month: 'long', year: 'numeric' }) : '—'}
+                      </p>
+                      <p className="text-xs text-gray-400">
+                        {p.payment_date ? formatDate(p.payment_date) : '—'} · {p.payment_method === 'dinheiro' ? 'Dinheiro' : 'Banco'}
+                        {p.tipo && p.tipo !== 'renda' ? ` · ${TIPO_LABELS[p.tipo] ?? p.tipo}` : ''}
+                      </p>
+                    </div>
+                    <span className={`text-sm font-semibold ${p.tipo === 'adiantamento' ? 'text-purple-600' : 'text-emerald-600'}`}>
+                      {fmt(p.amount ?? 0)}
+                    </span>
+                  </div>
+                ))}
+                <div className="flex justify-between items-center pt-2 border-t border-gray-200 mt-2">
+                  <span className="text-sm font-semibold text-gray-700">Total</span>
+                  <span className="text-base font-bold text-emerald-600">
+                    {fmt(contaCorrenteData.reduce((s: number, p: any) => s + (p.amount ?? 0), 0))}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </AppLayout>
+  )
+}
