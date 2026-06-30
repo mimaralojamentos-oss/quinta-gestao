@@ -206,9 +206,8 @@ export default function CaixaPage() {
           <div className="flex flex-wrap gap-3 items-center">
             <div className="flex items-center gap-2">
               <span className="text-xs font-semibold text-gray-500">Período:</span>
-              <div style={{ width: '200px' }}>
               <select
-                className="input text-sm py-1 h-8"
+                style={{ width: '200px', minWidth: '200px', flexShrink: 0, border: '1px solid #e5e7eb', borderRadius: '0.5rem', padding: '0.25rem 0.75rem', fontSize: '0.875rem', outline: 'none', height: '2rem', backgroundColor: 'white' }}
                 value={selectedMonth}
                 onChange={e => setSelectedMonth(e.target.value)}
               >
@@ -217,7 +216,6 @@ export default function CaixaPage() {
                   <option key={o.val} value={o.val}>{o.label}</option>
                 ))}
               </select>
-              </div>
             </div>
             <div className="w-px h-5 bg-gray-200" />
             <div className="flex items-center gap-1.5 flex-wrap">
