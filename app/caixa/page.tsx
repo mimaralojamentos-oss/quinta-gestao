@@ -207,7 +207,7 @@ export default function CaixaPage() {
             <div className="flex items-center gap-2">
               <span className="text-xs font-semibold text-gray-500">Período:</span>
               <select
-                className="input text-sm py-1 h-8" style={{ width: 'auto', minWidth: '180px' }}
+                className="input text-sm py-1 h-8" style={{ width: '200px' }}
                 value={selectedMonth}
                 onChange={e => setSelectedMonth(e.target.value)}
               >
