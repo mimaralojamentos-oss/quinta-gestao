@@ -259,7 +259,10 @@ export default function RelatoriosPage() {
         leaseIdFilter = ((spaceData as any)?.leases ?? []).map((l: any) => String(l.id))
       }
 
-      let query = supabase
+      const noResults = ['00000000-0000-0000-0000-000000000000']
+
+      // --- rent_payments ---
+      let rpQuery = supabase
         .from('rent_payments')
         .select('*, lease:leases(id, space:spaces(id, ref), tenant:tenants(name))')
         .gte('reference_month', startDate)
@@ -267,15 +270,37 @@ export default function RelatoriosPage() {
         .order('reference_month', { ascending: false })
 
       if (leaseIdFilter !== null) {
-        if (leaseIdFilter.length === 0) {
-          query = query.in('lease_id', ['00000000-0000-0000-0000-000000000000'])
-        } else {
-          query = query.in('lease_id', leaseIdFilter)
-        }
+        rpQuery = rpQuery.in('lease_id', leaseIdFilter.length ? leaseIdFilter : noResults)
       }
 
-      const { data: paymentsData } = await query
-      const filtered = (paymentsData ?? []) as any[]
+      const { data: paymentsData } = await rpQuery
+
+      // --- electricity_charges (pagas) ---
+      let ecQuery = supabase
+        .from('electricity_charges')
+        .select('*, lease:leases(id, space:spaces(id, ref), tenant:tenants(name))')
+        .eq('paid', true)
+        .gte('reference_month', startDate)
+        .lt('reference_month', endDate)
+        .order('reference_month', { ascending: false })
+
+      if (leaseIdFilter !== null) {
+        ecQuery = ecQuery.in('lease_id', leaseIdFilter.length ? leaseIdFilter : noResults)
+      }
+
+      const { data: elecData } = await ecQuery
+
+      // Normalizar electricity_charges para o mesmo formato que rent_payments
+      const elecNorm = (elecData ?? []).map((e: any) => ({
+        ...e,
+        tipo: 'luz',
+        payment_date: e.payment_date,
+        payment_method: e.payment_method,
+      }))
+
+      const filtered = [...(paymentsData ?? []), ...elecNorm].sort((a: any, b: any) =>
+        (b.reference_month ?? '').localeCompare(a.reference_month ?? '')
+      )
 
       const total = filtered.reduce((s: number, p: any) => s + (p.amount ?? 0), 0)
       const totalPorTipo: Record<string, number> = {}
