@@ -3,7 +3,7 @@
 import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { Plus, Trash2, Send, MessageSquare, Check, X, Search } from 'lucide-react'
+import { Plus, Trash2, Send, MessageSquare, Check, X, Search, ChevronDown, Filter } from 'lucide-react'
 
 interface GatePhone {
   id: string
@@ -56,6 +56,10 @@ export default function PortaoPage() {
   const [sendResult, setSendResult] = useState<{ sent: number; errors: number } | null>(null)
   const [smsLog, setSmsLog] = useState<SmsLog[]>([])
   const [loadingLog, setLoadingLog] = useState(false)
+
+  // Filtro por espaço
+  const [selectedSpaces, setSelectedSpaces] = useState<string[]>([])
+  const [spaceFilterOpen, setSpaceFilterOpen] = useState(false)
 
   // Nova linha
   const [showNewRow, setShowNewRow] = useState(false)
@@ -141,7 +145,16 @@ export default function PortaoPage() {
     }
   }
 
+  const allSpaces = [...new Set(phones.map(p => p.space).filter(Boolean))].sort() as string[]
+
+  function toggleSpace(space: string) {
+    setSelectedSpaces(prev =>
+      prev.includes(space) ? prev.filter(s => s !== space) : [...prev, space]
+    )
+  }
+
   function matchesSearch(p: GatePhone) {
+    if (selectedSpaces.length > 0 && !selectedSpaces.includes(p.space ?? '')) return false
     if (!search) return true
     const s = search.toLowerCase()
     return (
@@ -212,14 +225,80 @@ export default function PortaoPage() {
         {/* TAB: LISTA */}
         {tab === 'lista' && (
           <>
-            <div className="flex items-center gap-3 mb-4">
+            <div className="flex items-center gap-3 mb-4 flex-wrap">
               <div className="relative flex-1 max-w-sm">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                 <input className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500"
                   placeholder="Pesquisar nome, número, espaço..."
                   value={search} onChange={e => setSearch(e.target.value)} />
               </div>
+
+              {/* Filtro por espaço */}
+              <div className="relative">
+                <button
+                  onClick={() => setSpaceFilterOpen(o => !o)}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                    selectedSpaces.length > 0
+                      ? 'bg-emerald-600 text-white border-emerald-600'
+                      : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                  }`}>
+                  <Filter className="w-4 h-4" />
+                  Espaço
+                  {selectedSpaces.length > 0 && (
+                    <span className="bg-white text-emerald-600 text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
+                      {selectedSpaces.length}
+                    </span>
+                  )}
+                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${spaceFilterOpen ? 'rotate-180' : ''}`} />
+                </button>
+
+                {spaceFilterOpen && (
+                  <div className="absolute top-full left-0 mt-1 z-20 bg-white border border-gray-200 rounded-xl shadow-lg p-3 min-w-[160px] max-h-80 overflow-y-auto">
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Espaços</p>
+                      {selectedSpaces.length > 0 && (
+                        <button onClick={() => setSelectedSpaces([])} className="text-xs text-emerald-600 hover:underline">
+                          Limpar
+                        </button>
+                      )}
+                    </div>
+                    <div className="space-y-1">
+                      {allSpaces.map(space => (
+                        <label key={space} className={`flex items-center gap-2.5 px-2 py-1.5 rounded-lg cursor-pointer transition-colors ${
+                          selectedSpaces.includes(space) ? 'bg-emerald-50' : 'hover:bg-gray-50'
+                        }`}>
+                          <input
+                            type="checkbox"
+                            checked={selectedSpaces.includes(space)}
+                            onChange={() => toggleSpace(space)}
+                            className="accent-emerald-600 w-3.5 h-3.5"
+                          />
+                          <span className="text-sm text-gray-700">{space}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {selectedSpaces.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {selectedSpaces.map(s => (
+                    <span key={s} className="flex items-center gap-1 bg-emerald-100 text-emerald-700 text-xs font-medium px-2.5 py-1 rounded-full">
+                      {s}
+                      <button onClick={() => toggleSpace(s)} className="hover:text-emerald-900">
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
+
+            {/* Fechar dropdown ao clicar fora */}
+            {spaceFilterOpen && (
+              <div className="fixed inset-0 z-10" onClick={() => setSpaceFilterOpen(false)} />
+            )}
 
             {loading ? (
               <div className="flex justify-center py-12">
