@@ -247,17 +247,34 @@ export default function RelatoriosPage() {
       const { data: spacesData } = await supabase.from('spaces').select('id, ref').order('ref')
       setAllSpaces(spacesData ?? [])
 
-      const { data: paymentsData } = await supabase
+      // Buscar todos os contratos do espaço selecionado (incluindo inativos)
+      // para garantir que apanhamos pagamentos de contratos já terminados
+      let leaseIdFilter: string[] | null = null
+      if (pagamentosEspaco !== 'todos') {
+        const { data: spaceLeases } = await supabase
+          .from('leases')
+          .select('id')
+          .eq('space_id', (spacesData ?? []).find((s: any) => s.ref === pagamentosEspaco)?.id ?? '')
+        leaseIdFilter = (spaceLeases ?? []).map((l: any) => String(l.id))
+      }
+
+      let query = supabase
         .from('rent_payments')
         .select('*, lease:leases(id, space:spaces(id, ref), tenant:tenants(name))')
         .gte('reference_month', startDate)
         .lt('reference_month', endDate)
         .order('reference_month', { ascending: false })
 
-      let filtered = (paymentsData ?? []) as any[]
-      if (pagamentosEspaco !== 'todos') {
-        filtered = filtered.filter((p: any) => p.lease?.space?.ref === pagamentosEspaco)
+      if (leaseIdFilter !== null) {
+        if (leaseIdFilter.length === 0) {
+          query = query.in('lease_id', ['00000000-0000-0000-0000-000000000000'])
+        } else {
+          query = query.in('lease_id', leaseIdFilter)
+        }
       }
+
+      const { data: paymentsData } = await query
+      const filtered = (paymentsData ?? []) as any[]
 
       const total = filtered.reduce((s: number, p: any) => s + (p.amount ?? 0), 0)
       const totalPorTipo: Record<string, number> = {}
