@@ -4,7 +4,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatDate } from '@/lib/utils'
-import { BarChart3, TrendingUp, Home, FileText, Calendar, ChevronDown, ChevronUp, Edit2, X, Save, ClipboardList, Download, Loader2 } from 'lucide-react'
+import { BarChart3, TrendingUp, Home, FileText, Calendar, ChevronDown, ChevronUp, Edit2, X, Save, ClipboardList, Download, Loader2, Receipt } from 'lucide-react'
 
 interface MonthOption { label: string; value: string }
 
@@ -57,12 +57,23 @@ export default function RelatoriosPage() {
 
   const [exportingPDF, setExportingPDF] = useState(false)
 
+  // Pagamentos dos Inquilinos
+  const [pagamentos, setPagamentos] = useState<any>(null)
+  const [allSpaces, setAllSpaces] = useState<any[]>([])
+  const [pagamentosEspaco, setPagamentosEspaco] = useState('todos')
+  const [pagamentosMes, setPagamentosMes] = useState('year')
+
   useEffect(() => {
     if (activeReport === 'rendas' || activeReport === 'cobrancas') fetchRendas()
     if (activeReport === 'ocupacao') fetchOcupacao()
     if (activeReport === 'financeiro') fetchFinanceiro()
     if (activeReport === 'contratos') fetchContratos()
+    if (activeReport === 'pagamentos') fetchPagamentos()
   }, [activeReport, selectedMonth])
+
+  useEffect(() => {
+    if (activeReport === 'pagamentos') fetchPagamentos()
+  }, [pagamentosEspaco, pagamentosMes])
 
   async function fetchRendasData() {
     const startDate = `${selectedMonth}-01`
@@ -237,6 +248,57 @@ export default function RelatoriosPage() {
     setSavingExpense(false)
     setExpandedCategory(null)
     fetchFinanceiro()
+  }
+
+  async function fetchPagamentos() {
+    setLoading(true)
+    try {
+      const currentYear = new Date().getFullYear()
+
+      // Calcular datas
+      let startDate: string, endDate: string
+      if (pagamentosMes === 'year') {
+        startDate = `${currentYear}-01-01`
+        endDate = `${currentYear + 1}-01-01`
+      } else {
+        const [y, m] = pagamentosMes.split('-').map(Number)
+        const endYear = m === 12 ? y + 1 : y
+        const endMonth = m === 12 ? 1 : m + 1
+        startDate = `${pagamentosMes}-01`
+        endDate = `${endYear}-${String(endMonth).padStart(2, '0')}-01`
+      }
+
+      // Buscar espaços para o filtro
+      const { data: spacesData } = await supabase.from('spaces').select('id, ref').order('ref')
+      setAllSpaces(spacesData ?? [])
+
+      // Buscar pagamentos com info do contrato
+      const { data: paymentsData } = await supabase
+        .from('rent_payments')
+        .select('*, lease:leases(id, space:spaces(id, ref), tenant:tenants(name))')
+        .gte('reference_month', startDate)
+        .lt('reference_month', endDate)
+        .order('reference_month', { ascending: false })
+
+      // Filtrar por espaço
+      let filtered = (paymentsData ?? []) as any[]
+      if (pagamentosEspaco !== 'todos') {
+        filtered = filtered.filter((p: any) => p.lease?.space?.ref === pagamentosEspaco)
+      }
+
+      const total = filtered.reduce((s: number, p: any) => s + (p.amount ?? 0), 0)
+      const totalPorTipo: Record<string, number> = {}
+      for (const p of filtered) {
+        const tipo = p.tipo || 'renda'
+        totalPorTipo[tipo] = (totalPorTipo[tipo] ?? 0) + (p.amount ?? 0)
+      }
+
+      setPagamentos({ payments: filtered, total, totalPorTipo })
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setLoading(false)
+    }
   }
 
   function fmt(v: number) {
@@ -446,6 +508,7 @@ export default function RelatoriosPage() {
     { key: 'financeiro', label: 'Financeiro', icon: TrendingUp, color: 'text-purple-600', bg: 'bg-purple-50' },
     { key: 'contratos', label: 'Contratos a Expirar', icon: Calendar, color: 'text-orange-600', bg: 'bg-orange-50' },
     { key: 'cobrancas', label: 'Lista de Cobranças', icon: ClipboardList, color: 'text-rose-600', bg: 'bg-rose-50' },
+    { key: 'pagamentos', label: 'Pagamentos dos Inquilinos', icon: Receipt, color: 'text-teal-600', bg: 'bg-teal-50' },
   ]
 
   const showMonthPicker = activeReport === 'rendas' || activeReport === 'financeiro' || activeReport === 'cobrancas'
@@ -927,59 +990,11 @@ export default function RelatoriosPage() {
                 </div>
               )
             })()}
-          </div>
-        )}
-      </div>
-
-      {/* Modal Conta Corrente */}
-      {contaCorrenteModal && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 max-h-[85vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h2 className="font-semibold text-lg text-gray-900">Conta Corrente</h2>
-                <p className="text-sm text-gray-500">{contaCorrenteModal.name} · {contaCorrenteModal.spaceRef}</p>
-              </div>
-              <button onClick={() => setContaCorrenteModal(null)}>
-                <X className="w-5 h-5 text-gray-400" />
-              </button>
-            </div>
-
-            {loadingCC ? (
-              <div className="flex justify-center py-8">
-                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-emerald-600" />
-              </div>
-            ) : contaCorrenteData.length === 0 ? (
-              <p className="text-sm text-gray-400 text-center py-8">Sem pagamentos registados.</p>
-            ) : (
-              <div className="space-y-2">
-                {contaCorrenteData.map((p: any) => (
-                  <div key={p.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-100">
-                    <div>
-                      <p className="text-sm font-medium text-gray-800">
-                        {p.reference_month ? new Date(p.reference_month).toLocaleDateString('pt-PT', { month: 'long', year: 'numeric' }) : '—'}
-                      </p>
-                      <p className="text-xs text-gray-400">
-                        {p.payment_date ? formatDate(p.payment_date) : '—'} · {p.payment_method === 'dinheiro' ? '💵 Dinheiro' : '🏦 Banco'}
-                        {p.tipo && p.tipo !== 'renda' ? ` · ${TIPO_LABELS[p.tipo] ?? p.tipo}` : ''}
-                      </p>
-                    </div>
-                    <span className={`text-sm font-semibold ${p.tipo === 'adiantamento' ? 'text-purple-600' : 'text-emerald-600'}`}>
-                      {fmt(p.amount ?? 0)}
-                    </span>
-                  </div>
-                ))}
-                <div className="flex justify-between items-center pt-2 border-t border-gray-200 mt-2">
-                  <span className="text-sm font-semibold text-gray-700">Total</span>
-                  <span className="text-base font-bold text-emerald-600">
-                    {fmt(contaCorrenteData.reduce((s: number, p: any) => s + (p.amount ?? 0), 0))}
-                  </span>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-    </AppLayout>
-  )
-}
+            {/* PAGAMENTOS DOS INQUILINOS */}
+            {activeReport === 'pagamentos' && (
+              <div className="space-y-5">
+                {/* Filtros */}
+                <div className="bg-white border border-gray-200 rounded-xl p-4">
+                  <div className="flex flex-wrap gap-4 items-end">
+                    {/* Filtro por espaço */}
+                    <
