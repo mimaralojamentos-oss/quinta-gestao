@@ -248,14 +248,15 @@ export default function RelatoriosPage() {
       setAllSpaces(spacesData ?? [])
 
       // Buscar todos os contratos do espaço selecionado (incluindo inativos)
-      // para garantir que apanhamos pagamentos de contratos já terminados
+      // via tabela spaces para não depender do nome da coluna FK
       let leaseIdFilter: string[] | null = null
       if (pagamentosEspaco !== 'todos') {
-        const { data: spaceLeases } = await supabase
-          .from('leases')
-          .select('id')
-          .eq('space_id', (spacesData ?? []).find((s: any) => s.ref === pagamentosEspaco)?.id ?? '')
-        leaseIdFilter = (spaceLeases ?? []).map((l: any) => String(l.id))
+        const { data: spaceData } = await supabase
+          .from('spaces')
+          .select('id, leases(id)')
+          .eq('ref', pagamentosEspaco)
+          .single()
+        leaseIdFilter = ((spaceData as any)?.leases ?? []).map((l: any) => String(l.id))
       }
 
       let query = supabase
