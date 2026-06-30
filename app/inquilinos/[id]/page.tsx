@@ -94,11 +94,29 @@ export default function TenantDetailPage() {
     }
     setDebts(debtsWithPayments)
 
-    // Pagamentos recentes
+    // Pagamentos recentes (rent_payments + electricity_charges pagas)
     const leaseIds = (l ?? []).map((x: any) => x.id)
     if (leaseIds.length > 0) {
-      const { data: p } = await supabase.from('rent_payments').select('*, lease:leases(space:spaces(ref))').in('lease_id', leaseIds).order('reference_month', { ascending: false }).limit(12)
-      setPayments(p ?? [])
+      const { data: rp } = await supabase
+        .from('rent_payments')
+        .select('*, lease:leases(space:spaces(ref))')
+        .in('lease_id', leaseIds)
+        .order('reference_month', { ascending: false })
+        .limit(24)
+
+      const { data: ec } = await supabase
+        .from('electricity_charges')
+        .select('*, lease:leases(space:spaces(ref))')
+        .eq('paid', true)
+        .in('lease_id', leaseIds)
+        .order('reference_month', { ascending: false })
+        .limit(24)
+
+      const ecNorm = (ec ?? []).map((e: any) => ({ ...e, tipo: 'luz' }))
+      const combined = [...(rp ?? []), ...ecNorm].sort((a, b) =>
+        (b.reference_month ?? '').localeCompare(a.reference_month ?? '')
+      )
+      setPayments(combined)
     }
 
     setLoading(false)
@@ -403,18 +421,13 @@ export default function TenantDetailPage() {
               <p className="text-sm text-gray-400 text-center py-4">Sem pagamentos registados</p>
             ) : (
               <div className="space-y-2">
-                {payments.slice(0, 8).map((p, i) => (
+                {payments.slice(0, 12).map((p, i) => (
                   <div key={i} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0">
                     <div>
-                      <p className="text-sm text-gray-700">{p.reference_month?.slice(0, 7)} — {p.lease?.space?.ref ?? '—'}</p>
-                      {p.payment_date
-                        ? <p className="text-xs text-gray-400">Pago em {formatDate(p.payment_date)}</p>
-                        : <p className="text-xs text-red-500 font-medium">⚠ Por pagar</p>
-                      }
-                    </div>
-                    <span className={`text-sm font-semibold ${p.payment_date ? 'text-gray-700' : 'text-red-600'}`}>
-                      {formatCurrency(p.amount)}
-                    </span>
+                      <p className="text-sm text-gray-700">
+                        {p.reference_month?.slice(0, 7)} — {p.lease?.space?.ref ?? '—'}
+                        {p.tipo === 'luz'
+                          ? <span clas
                   </div>
                 ))}
               </div>
