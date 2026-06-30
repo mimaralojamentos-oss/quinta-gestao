@@ -1,10 +1,10 @@
 'use client'
 
 import AppLayout from '@/components/layout/AppLayout'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatCurrency } from '@/lib/utils'
-import { Plus, Building, CreditCard, ArrowUpRight, ArrowDownRight, Upload, Eye, X, Loader2 } from 'lucide-react'
+import { Plus, Building, CreditCard, ArrowUpRight, ArrowDownRight, Upload, Eye, X, Loader2, FileText, CheckCircle } from 'lucide-react'
 import Link from 'next/link'
 
 interface Bank {
@@ -12,6 +12,7 @@ interface Bank {
   name: string
   iban: string | null
   account_number: string | null
+  holder_name: string | null
   notes: string | null
   active: boolean
   _stats?: { total_in: number; total_out: number; pending: number }
@@ -87,6 +88,7 @@ export default function BancosPage() {
                     </div>
                     <div>
                       <h3 className="font-semibold text-gray-900 text-lg">{bank.name}</h3>
+                      {bank.holder_name && <p className="text-sm text-gray-600">{bank.holder_name}</p>}
                       {bank.iban && <p className="text-sm text-gray-500 font-mono">{bank.iban}</p>}
                       {bank.account_number && <p className="text-xs text-gray-400">Conta: {bank.account_number}</p>}
                     </div>
@@ -147,19 +149,65 @@ export default function BancosPage() {
 function BankModal({ bank, onClose, onSaved }: { bank: Bank | null; onClose: () => void; onSaved: () => void }) {
   const [form, setForm] = useState({
     name: bank?.name ?? '',
+    holder_name: bank?.holder_name ?? '',
     iban: bank?.iban ?? '',
     account_number: bank?.account_number ?? '',
     notes: bank?.notes ?? '',
   })
   const [saving, setSaving] = useState(false)
+  const [extracting, setExtracting] = useState(false)
+  const [pdfFileName, setPdfFileName] = useState<string | null>(null)
+  const [extractError, setExtractError] = useState('')
   const [error, setError] = useState('')
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const supabase = createClient()
+
+  async function handlePdfUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setExtracting(true)
+    setExtractError('')
+    setPdfFileName(file.name)
+
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+
+      const res = await fetch('/api/extract-bank-pdf', {
+        method: 'POST',
+        body: formData,
+      })
+      const json = await res.json()
+
+      if (!res.ok || json.error) {
+        setExtractError(json.error ?? 'Erro ao processar PDF')
+        return
+      }
+
+      const d = json.data
+      setForm(f => ({
+        name: d.bank_name || f.name,
+        holder_name: d.holder_name || f.holder_name,
+        iban: d.iban || f.iban,
+        account_number: d.account_number || f.account_number,
+        notes: d.notes || f.notes,
+      }))
+    } catch {
+      setExtractError('Erro ao processar PDF. Tenta novamente.')
+    } finally {
+      setExtracting(false)
+      // Reset input para permitir re-upload do mesmo ficheiro
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
 
   async function handleSave() {
     if (!form.name.trim()) { setError('O nome é obrigatório'); return }
     setSaving(true); setError('')
     const payload = {
       name: form.name.trim(),
+      holder_name: form.holder_name || null,
       iban: form.iban || null,
       account_number: form.account_number || null,
       notes: form.notes || null,
@@ -182,11 +230,43 @@ function BankModal({ bank, onClose, onSaved }: { bank: Bank | null; onClose: () 
           <h2 className="font-semibold text-lg text-gray-900">{bank ? 'Editar Banco' : 'Novo Banco'}</h2>
           <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
         </div>
+
+        {/* Upload PDF */}
+        <div className="mb-5">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/pdf"
+            className="hidden"
+            onChange={handlePdfUpload}
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={extracting}
+            className="w-full flex items-center justify-center gap-2 border-2 border-dashed border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg py-3 px-4 text-sm font-medium transition-colors disabled:opacity-60"
+          >
+            {extracting ? (
+              <><Loader2 className="w-4 h-4 animate-spin" /> A ler PDF...</>
+            ) : pdfFileName ? (
+              <><CheckCircle className="w-4 h-4 text-emerald-600" /> {pdfFileName} — carregar outro</>
+            ) : (
+              <><FileText className="w-4 h-4" /> Carregar PDF do banco para preencher automaticamente</>
+            )}
+          </button>
+          {extractError && <p className="text-xs text-red-600 mt-1">{extractError}</p>}
+        </div>
+
         <div className="space-y-4">
           <div>
             <label className="label">Nome do Banco *</label>
             <input className="input" placeholder="ex: Caixa Geral de Depósitos" value={form.name}
               onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+          </div>
+          <div>
+            <label className="label">Titular da Conta</label>
+            <input className="input" placeholder="ex: João Silva" value={form.holder_name}
+              onChange={e => setForm(f => ({ ...f, holder_name: e.target.value }))} />
           </div>
           <div>
             <label className="label">IBAN</label>
