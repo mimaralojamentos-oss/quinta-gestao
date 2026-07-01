@@ -343,7 +343,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
   // aplicando o valor por ordem de prioridade: renda > eletricidade em dívida > dívidas abertas > adiantamento.
   // Devolve 'created' se criou, 'skipped' se já existia pagamento de renda para o mês,
   // 'cancelled' se o utilizador rejeitou o resumo, ou 'no_lease' se não há contrato associado.
-  async function processRendaTransaction(tx: Transaction, overrideMonth?: string): Promise<'created' | 'skipped' | 'no_lease' | 'cancelled'> {
+  async function processRendaTransaction(tx: Transaction, overrideMonth?: string, skipConfirm?: boolean): Promise<'created' | 'skipped' | 'no_lease' | 'cancelled'> {
     if (tx.confirmed_type !== 'renda' || !tx.confirmed_lease_id || tx.amount <= 0) return 'no_lease'
 
     const lease = allLeases.find(l => l.id === tx.confirmed_lease_id)
@@ -369,7 +369,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
       referenceMonth,
     })
 
-    if (!window.confirm(`${plan.summary}\n\nConfirmar processamento deste pagamento?`)) return 'cancelled'
+    if (!skipConfirm && !window.confirm(`${plan.summary}\n\nConfirmar processamento deste pagamento?`)) return 'cancelled'
 
     await applyRentPaymentPlan(supabase, plan, {
       leaseId: tx.confirmed_lease_id,
@@ -515,10 +515,9 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     setSyncing(true)
     let created = 0, skipped = 0, cancelled = 0
     for (const tx of candidates) {
-      const result = await processRendaTransaction(tx)
+      const result = await processRendaTransaction(tx, undefined, true)
       if (result === 'created') created++
       else if (result === 'skipped') skipped++
-      else if (result === 'cancelled') cancelled++
     }
     await fetchData()
     setSyncing(false)
