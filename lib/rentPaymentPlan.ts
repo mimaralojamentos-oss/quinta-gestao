@@ -42,6 +42,7 @@ interface BuildPlanParams {
   monthlyRent: number
   amount: number
   referenceMonth: string
+  alreadyPaidRenda?: number
 }
 
 // Distribui um pagamento de renda por ordem de prioridade:
@@ -49,13 +50,14 @@ interface BuildPlanParams {
 // 3. Dívidas abertas (mais antigas primeiro, pagamento parcial permitido), 4. Adiantamento.
 // Se o valor pago for inferior à renda, regista a diferença como nova dívida.
 export async function buildRentPaymentPlan(supabase: any, params: BuildPlanParams): Promise<RentPaymentPlan> {
-  const { leaseId, tenantId, monthlyRent, amount, referenceMonth } = params
+  const { leaseId, tenantId, monthlyRent, amount, referenceMonth, alreadyPaidRenda = 0 } = params
   let remaining = parseFloat(amount.toFixed(2))
   const lines: string[] = []
 
-  const rendaAmount = Math.min(remaining, monthlyRent)
+  const remainingRent = Math.max(0, monthlyRent - alreadyPaidRenda)
+  const rendaAmount = Math.min(remaining, remainingRent)
   remaining = parseFloat((remaining - rendaAmount).toFixed(2))
-  const rendaFullyPaid = rendaAmount >= monthlyRent
+  const rendaFullyPaid = alreadyPaidRenda + rendaAmount >= monthlyRent
   lines.push(rendaFullyPaid
     ? `Renda: ${formatCurrency(rendaAmount)} ✅`
     : `Renda: ${formatCurrency(rendaAmount)} de ${formatCurrency(monthlyRent)} ⚠️`)

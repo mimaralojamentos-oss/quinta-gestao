@@ -353,11 +353,13 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
 
     const { data: existingPayments } = await supabase
       .from('rent_payments')
-      .select('id, tipo')
+      .select('id, tipo, amount')
       .eq('lease_id', tx.confirmed_lease_id)
       .eq('reference_month', referenceMonth)
 
-    if ((existingPayments ?? []).some(p => p.tipo === 'renda' || !p.tipo)) return 'skipped'
+    const existingRenda = (existingPayments ?? []).filter((p: any) => p.tipo === 'renda' || !p.tipo)
+    const alreadyPaidRenda = existingRenda.reduce((sum: number, p: any) => sum + (p.amount || 0), 0)
+    if (alreadyPaidRenda >= lease.monthly_rent) return 'skipped'
 
     const tenantId = tx.confirmed_tenant_id ?? lease.tenant?.id
 
@@ -367,6 +369,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
       monthlyRent: lease.monthly_rent,
       amount: tx.amount,
       referenceMonth,
+      alreadyPaidRenda,
     })
 
     if (!skipConfirm && !window.confirm(`${plan.summary}\n\nConfirmar processamento deste pagamento?`)) return 'cancelled'
