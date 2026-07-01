@@ -691,8 +691,8 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     if (search && !t.description.toLowerCase().includes(search.toLowerCase())) return false
     if (filterDateFrom && t.transaction_date < filterDateFrom) return false
     if (filterDateTo && t.transaction_date > filterDateTo) return false
-    if (filterAmountMin && Math.abs(t.amount) < parseFloat(filterAmountMin)) return false
-    if (filterAmountMax && Math.abs(t.amount) > parseFloat(filterAmountMax)) return false
+    if (filterAmountMin && t.amount < parseFloat(filterAmountMin)) return false
+    if (filterAmountMax && t.amount > parseFloat(filterAmountMax)) return false
     if (filterDirection === 'entrada' && t.amount <= 0) return false
     if (filterDirection === 'saida' && t.amount >= 0) return false
 
