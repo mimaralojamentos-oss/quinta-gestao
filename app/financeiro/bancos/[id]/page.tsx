@@ -343,13 +343,13 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
   // aplicando o valor por ordem de prioridade: renda > eletricidade em dívida > dívidas abertas > adiantamento.
   // Devolve 'created' se criou, 'skipped' se já existia pagamento de renda para o mês,
   // 'cancelled' se o utilizador rejeitou o resumo, ou 'no_lease' se não há contrato associado.
-  async function processRendaTransaction(tx: Transaction): Promise<'created' | 'skipped' | 'no_lease' | 'cancelled'> {
+  async function processRendaTransaction(tx: Transaction, overrideMonth?: string): Promise<'created' | 'skipped' | 'no_lease' | 'cancelled'> {
     if (tx.confirmed_type !== 'renda' || !tx.confirmed_lease_id || tx.amount <= 0) return 'no_lease'
 
     const lease = allLeases.find(l => l.id === tx.confirmed_lease_id)
     if (!lease) return 'no_lease'
 
-    const referenceMonth = tx.transaction_date.slice(0, 7) + '-01'
+    const referenceMonth = (overrideMonth ?? tx.transaction_date.slice(0, 7)) + '-01'
 
     const { data: existingPayments } = await supabase
       .from('rent_payments')
@@ -436,7 +436,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     fetchData()
   }
 
-  async function saveManualMatch(tx: Transaction, type: string, tenantId: string, expenseId: string, notes: string, documentId?: string) {
+  async function saveManualMatch(tx: Transaction, type: string, tenantId: string, expenseId: string, notes: string, documentId?: string, referenceMonth?: string) {
     const confirmedLeaseId = tenantId ? (leases.find(l => (l.tenant as any)?.id === tenantId)?.id ?? null) : null
     await supabase.from('bank_transactions').update({
       confirmed_type: type,
@@ -448,7 +448,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     }).eq('id', tx.id)
     setMatchModal(null)
     if (type === 'renda' && confirmedLeaseId) {
-      const result = await processRendaTransaction({ ...tx, confirmed_type: 'renda', confirmed_tenant_id: tenantId || null, confirmed_lease_id: confirmedLeaseId })
+      const result = await processRendaTransaction({ ...tx, confirmed_type: 'renda', confirmed_tenant_id: tenantId || null, confirmed_lease_id: confirmedLeaseId }, referenceMonth)
       warnIfSkipped(result)
     }
     fetchData()
@@ -1308,7 +1308,7 @@ function MatchModalComponent({ tx, tenants, leases, expenses, documents, autoMat
   documents: any[]
   autoMatches: any[]
   bankId: string
-  onSave: (tx: Transaction, type: string, tenantId: string, expenseId: string, notes: string, documentId?: string) => void
+  onSave: (tx: Transaction, type: string, tenantId: string, expenseId: string, notes: string, documentId?: string, referenceMonth?: string) => void
   onSaveRule: () => void
   onClose: () => void
 }) {
@@ -1316,6 +1316,7 @@ function MatchModalComponent({ tx, tenants, leases, expenses, documents, autoMat
   const [tenantId, setTenantId] = useState(tx.confirmed_tenant_id ?? '')
   const [expenseId, setExpenseId] = useState(tx.confirmed_expense_id ?? '')
   const [notes, setNotes] = useState(tx.notes ?? '')
+  const [referenceMonth, setReferenceMonth] = useState(tx.transaction_date.slice(0, 7))
   const [searchExpense, setSearchExpense] = useState('')
   const [searchTenant, setSearchTenant] = useState('')
   const [documentId, setDocumentId] = useState(tx.confirmed_document_id ?? '')
@@ -1449,20 +1450,30 @@ function MatchModalComponent({ tx, tenants, leases, expenses, documents, autoMat
           </div>
 
           {type === 'renda' && (
-            <div>
-              <label className="label">Inquilino</label>
-              <div className="relative mb-2">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
-                <input className="input pl-8 text-sm" placeholder="Pesquisar inquilino..."
-                  value={searchTenant} onChange={e => setSearchTenant(e.target.value)} />
+            <div className="space-y-3">
+              <div>
+                <label className="label">Inquilino</label>
+                <div className="relative mb-2">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                  <input className="input pl-8 text-sm" placeholder="Pesquisar inquilino..."
+                    value={searchTenant} onChange={e => setSearchTenant(e.target.value)} />
+                </div>
+                <select className="input" value={tenantId} onChange={e => setTenantId(e.target.value)} size={5}>
+                  <option value="">— Nenhum —</option>
+                  {filteredTenants.map(t => {
+                    const lease = leases.find(l => (l.tenant as any)?.id === t.id)
+                    return <option key={t.id} value={t.id}>{t.name}{lease?.space ? ` · ${(lease.space as any).ref}` : ''}</option>
+                  })}
+                </select>
               </div>
-              <select className="input" value={tenantId} onChange={e => setTenantId(e.target.value)} size={5}>
-                <option value="">— Nenhum —</option>
-                {filteredTenants.map(t => {
-                  const lease = leases.find(l => (l.tenant as any)?.id === t.id)
-                  return <option key={t.id} value={t.id}>{t.name}{lease?.space ? ` · ${(lease.space as any).ref}` : ''}</option>
-                })}
-              </select>
+              <div>
+                <label className="label">Mes de referencia da renda</label>
+                <input type="month" className="input" value={referenceMonth}
+                  onChange={e => setReferenceMonth(e.target.value)} />
+                {referenceMonth !== tx.transaction_date.slice(0, 7) && (
+                  <p className="text-xs text-amber-600 mt-1">Diferente do mes da transacao ({tx.transaction_date.slice(0, 7)})</p>
+                )}
+              </div>
             </div>
           )}
 
@@ -1582,7 +1593,7 @@ function MatchModalComponent({ tx, tenants, leases, expenses, documents, autoMat
               })
               onSaveRule()
             }
-            onSave(tx, type, tenantId, expenseId, notes, documentId || undefined)
+            onSave(tx, type, tenantId, expenseId, notes, documentId || undefined, type === 'renda' ? referenceMonth : undefined)
           }}>Guardar</button>
         </div>
       </div>
