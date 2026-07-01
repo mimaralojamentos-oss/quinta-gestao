@@ -594,11 +594,6 @@ async function handleSaveEdit() {
                             <Zap className="w-3.5 h-3.5" />
                           </button>
                         )}
-                        {(isAdmin || isCoAdmin) && doc._tipo === 'fatura_luz' && doc._doc && (
-                          <button onClick={() => openLinkModal(doc._doc!)} className="text-gray-400 hover:text-yellow-500 transition-colors" title="Ligar a Quadro Elétrico">
-                            <Zap className="w-3.5 h-3.5" />
-                          </button>
-                        )}
                         {(isAdmin || isCoAdmin) && doc._doc && (
                           <button onClick={() => openEditModal(doc._doc!)} className="text-gray-400 hover:text-blue-500 transition-colors">
                             <Edit2 className="w-3.5 h-3.5" />
@@ -870,61 +865,6 @@ async function handleSaveEdit() {
                   className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-700 disabled:opacity-50">
                   {deleting ? 'A apagar...' : 'Apagar'}
                 </button>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Modal Ligar Fatura ao Quadro Elétrico */}
-      {linkDoc && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
-            <div className="flex items-center justify-between mb-5">
-              <h2 className="font-semibold text-lg text-gray-900">⚡ Ligar Fatura ao Quadro</h2>
-              <button onClick={() => setLinkDoc(null)}><X className="w-5 h-5 text-gray-400" /></button>
-            </div>
-            {!linkDone ? (
-              <>
-                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
-                  <p className="text-sm font-medium text-gray-800 truncate">{linkDoc.original_name}</p>
-                  <p className="text-xs text-gray-500 mt-0.5">
-                    {linkDoc.doc_date ? formatDate(linkDoc.doc_date) : 'Sem data'} · {linkDoc.amount ? formatCurrency(linkDoc.amount) : '—'}
-                  </p>
-                </div>
-                {!linkDoc.doc_date && (
-                  <p className="text-xs text-red-600 mb-3">⚠ Este documento não tem data. Edita o documento primeiro para definir a data.</p>
-                )}
-                <div className="mb-5">
-                  <label className="label">Quadro Elétrico</label>
-                  <select className="input" value={selectedMeterId} onChange={e => setSelectedMeterId(e.target.value)}>
-                    {meters.length === 0 && <option value="">Sem quadros disponíveis</option>}
-                    {meters.map(m => (
-                      <option key={m.id} value={m.id}>{m.name}{m.location ? ` — ${m.location}` : ''}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="flex justify-end gap-3">
-                  <button className="btn-secondary" onClick={() => setLinkDoc(null)}>Cancelar</button>
-                  <button className="btn-primary" onClick={confirmLink}
-                    disabled={linkingToQuadro || !selectedMeterId || !linkDoc.doc_date}>
-                    {linkingToQuadro ? <><Loader2 className="w-4 h-4 animate-spin" /> A ligar...</> : <><Zap className="w-4 h-4" /> Ligar</>}
-                  </button>
-                </div>
-              </>
-            ) : linkDone === 'success' ? (
-              <div className="text-center py-4">
-                <CheckCircle className="w-10 h-10 text-emerald-500 mx-auto mb-3" />
-                <p className="font-medium text-gray-900">Ligado com sucesso!</p>
-                <p className="text-sm text-gray-500 mt-1">A leitura foi criada no Quadro Elétrico.</p>
-                <button className="btn-secondary mt-4" onClick={() => setLinkDoc(null)}>Fechar</button>
-              </div>
-            ) : (
-              <div className="text-center py-4">
-                <AlertCircle className="w-10 h-10 text-yellow-500 mx-auto mb-3" />
-                <p className="font-medium text-gray-900">Já existe uma leitura nesta data</p>
-                <p className="text-sm text-gray-500 mt-1">Já há uma leitura registada para este quadro na data da fatura.</p>
-                <button className="btn-secondary mt-4" onClick={() => setLinkDoc(null)}>Fechar</button>
               </div>
             )}
           </div>
