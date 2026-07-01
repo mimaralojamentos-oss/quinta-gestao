@@ -52,7 +52,7 @@ export default function EspacosPage() {
 
   async function fetchSpaces() {
     setLoading(true)
-    const { data: spacesData } = await supabase.from('spaces').select('*, directTenant:tenants(id, name, phone)').order('ref')
+    const { data: spacesData } = await supabase.from('spaces').select('*').order('ref')
     const { data: leasesData } = await supabase.from('leases').select('*, tenant:tenants(*)').eq('status', 'ativo')
     const spacesWithDetails = (spacesData ?? []).map(s => ({
       ...s,
@@ -354,3 +354,4 @@ export default function EspacosPage() {
 }
 
 // https://quinta-gestao.vercel.app/espacos
+                                       
