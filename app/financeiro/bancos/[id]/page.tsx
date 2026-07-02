@@ -323,6 +323,9 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     if (tx.confirmed_type === 'outro') {
       return { label: `📝 ${tx.notes ?? 'Outro'}`, color: 'text-gray-600', confirmed: true }
     }
+    if (tx.confirmed_type === 'receita_extraordinaria') {
+      return { label: `💰 Receita Extraordinária`, color: 'text-emerald-600', confirmed: true }
+    }
     if (tx.confirmed_type === 'transferencia_interna') {
       return { label: `🔄 ${tx.notes ?? 'Transferência Interna'}`, color: 'text-indigo-600', confirmed: true }
     }
@@ -1325,7 +1328,13 @@ function MatchModalComponent({ tx, tenants, leases, expenses, documents, autoMat
   const [searchDoc, setSearchDoc] = useState('')
   const [saveAsRule, setSaveAsRule] = useState(false)
   const [ruleKeyword, setRuleKeyword] = useState('')
+  const [incomeId, setIncomeId] = useState('')
+  const [incomeRecords, setIncomeRecords] = useState<any[]>([])
   const supabase = createClient()
+
+  useEffect(() => {
+    supabase.from('income_records').select('id, description, amount, income_date, category').order('income_date', { ascending: false }).then(({ data }) => setIncomeRecords(data ?? []))
+  }, [])
 
   const txDate = new Date(tx.transaction_date)
 
@@ -1351,7 +1360,7 @@ function MatchModalComponent({ tx, tenants, leases, expenses, documents, autoMat
     return diff <= 15 * 24 * 60 * 60 * 1000
   }).length
 
-  const tiposComNotes = ['outro', 'custos_bancarios', 'impostos', 'transferencia_interna']
+  const tiposComNotes = ['outro', 'custos_bancarios', 'impostos', 'transferencia_interna', 'receita_extraordinaria']
 
   function applyAutoMatch(match: any) {
     if (match.type === 'renda') { setType('renda'); setTenantId(match.tenant?.id ?? '') }
@@ -1442,6 +1451,7 @@ function MatchModalComponent({ tx, tenants, leases, expenses, documents, autoMat
                 { value: 'custos_bancarios', label: '🏦 Custos Bancários' },
                 { value: 'impostos', label: '🧾 Impostos' },
                 { value: 'transferencia_interna', label: '🔄 Transf. Interna' },
+                { value: 'receita_extraordinaria', label: '💰 Receita' },
               ].map(opt => (
                 <button key={opt.value} onClick={() => setType(opt.value)}
                   className={`py-2 rounded-lg border text-sm font-medium transition-colors ${type === opt.value ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-600 border-gray-200'}`}>
@@ -1476,6 +1486,20 @@ function MatchModalComponent({ tx, tenants, leases, expenses, documents, autoMat
                   <p className="text-xs text-amber-600 mt-1">Diferente do mes da transacao ({tx.transaction_date.slice(0, 7)})</p>
                 )}
               </div>
+            </div>
+          )}
+
+          {type === 'receita_extraordinaria' && (
+            <div>
+              <label className="label">Receita Extraordinária associada</label>
+              <select className="input" value={incomeId} onChange={e => setIncomeId(e.target.value)} size={5}>
+                <option value="">— Nenhuma —</option>
+                {incomeRecords.map(r => (
+                  <option key={r.id} value={r.id}>
+                    {r.income_date} · {r.description.slice(0, 50)} · {r.amount}€
+                  </option>
+                ))}
+              </select>
             </div>
           )}
 
@@ -1595,7 +1619,7 @@ function MatchModalComponent({ tx, tenants, leases, expenses, documents, autoMat
               })
               onSaveRule()
             }
-            onSave(tx, type, tenantId, expenseId, notes, documentId || undefined, type === 'renda' ? referenceMonth : undefined)
+            onSave(tx, type, tenantId, expenseId, notes, type === 'receita_extraordinaria' ? (incomeId || undefined) : (documentId || undefined), type === 'renda' ? referenceMonth : undefined)
           }}>Guardar</button>
         </div>
       </div>
