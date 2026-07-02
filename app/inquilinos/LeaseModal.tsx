@@ -124,7 +124,8 @@ export default function LeaseModal({ tenant, onClose, onSaved }: Props) {
     let contractPath = existingLease?.contract_file_path ?? null
 
     if (contractFile) {
-      const filename = `contracts/${tenant.id}/${Date.now()}_${contractFile.name}`
+      const safeName = contractFile.name.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9._-]/g, '_')
+      const filename = `contracts/${tenant.id}/${Date.now()}_${safeName}`
       const { error: uploadErr } = await supabase.storage
         .from('documents')
         .upload(filename, contractFile)
