@@ -70,6 +70,7 @@ const tipoLabels: Record<string, string> = {
   outro: '📦 Outro',
   contrato: '📄 Contrato',
   transferencia_interna: '🔄 Transferência Interna',
+  receita: '💰 Receita',
 }
 
 const tipoColors: Record<string, string> = {
@@ -81,6 +82,7 @@ const tipoColors: Record<string, string> = {
   outro: 'bg-gray-100 text-gray-600',
   contrato: 'bg-blue-100 text-blue-700',
   transferencia_interna: 'bg-indigo-100 text-indigo-700',
+  receita: 'bg-emerald-100 text-emerald-700',
 }
 
 function formatDateTime(dateStr: string): string {
@@ -116,6 +118,7 @@ export default function DocumentosPage() {
   const [uploadDone, setUploadDone] = useState(false)
   const [uploadResults, setUploadResults] = useState<UploadResult[]>([])
   const [skipExpense, setSkipExpense] = useState(false)
+  const [createIncome, setCreateIncome] = useState(true)
   const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirm | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [forceDuplicate, setForceDuplicate] = useState<{ file: File; index: number } | null>(null)
@@ -262,6 +265,7 @@ async function handleSaveEdit() {
     if (uploadTipoCustom) formData.append('tipo_custom', uploadTipoCustom)
     if (force) formData.append('force', 'true')
     if (skipExpense) formData.append('skip_expense', 'true')
+    if (uploadTipo === 'receita' && createIncome) formData.append('create_income', 'true')
     const res = await fetch('/api/process-document', { method: 'POST', body: formData })
     const data = await res.json()
     if (data.duplicate && !force) {
@@ -438,6 +442,7 @@ async function handleSaveEdit() {
     { tipo: 'carta', emoji: '✉️', label: 'Cartas', color: 'text-gray-600' },
     { tipo: 'outro', emoji: '📦', label: 'Outros', color: 'text-gray-500' },
     { tipo: 'transferencia_interna', emoji: '🔄', label: 'Transferências', color: 'text-indigo-600' },
+    { tipo: 'receita', emoji: '💰', label: 'Receitas', color: 'text-emerald-600' },
   ]
 
   return (
@@ -630,6 +635,7 @@ async function handleSaveEdit() {
                   <option value="fatura">🧾 Fatura</option>
                   <option value="fatura_luz">⚡ Fatura da Luz</option>
                   <option value="fatura_agua">💧 Fatura da Água</option>
+                  <option value="receita">💰 Receita</option>
                   <option value="registo_predial">🏠 Registo Predial</option>
                   <option value="carta">✉️ Carta</option>
                   <option value="outro">📦 Outro</option>
@@ -712,6 +718,7 @@ async function handleSaveEdit() {
                     <option value="fatura">🧾 Fatura</option>
                     <option value="fatura_luz">⚡ Fatura da Luz</option>
                     <option value="fatura_agua">💧 Fatura da Água</option>
+                    <option value="receita">💰 Receita</option>
                     <option value="registo_predial">🏠 Registo Predial</option>
                     <option value="carta">✉️ Carta</option>
                     <option value="outro">📦 Outro</option>
@@ -757,6 +764,12 @@ async function handleSaveEdit() {
                     <label className="flex items-center gap-2 mt-3 cursor-pointer select-none">
                       <input type="checkbox" checked={!skipExpense} onChange={e => setSkipExpense(!e.target.checked)} className="accent-emerald-600 w-4 h-4" />
                       <span className="text-sm text-gray-700">Criar despesa automaticamente</span>
+                    </label>
+                  )}
+                  {uploadTipo === 'receita' && (
+                    <label className="flex items-center gap-2 mt-3 cursor-pointer select-none">
+                      <input type="checkbox" checked={createIncome} onChange={e => setCreateIncome(e.target.checked)} className="accent-emerald-600 w-4 h-4" />
+                      <span className="text-sm text-gray-700">Criar receita automaticamente</span>
                     </label>
                   )}
                 </div>
@@ -811,6 +824,7 @@ async function handleSaveEdit() {
                         <p className="text-xs text-blue-600">🤖 Detetado: {tipoLabels[r.detectedTipo] ?? r.detectedTipo}</p>
                       )}
                       {r.status === 'success' && r.autoExpense && <p className="text-xs text-emerald-600">✓ Despesa criada automaticamente</p>}
+                      {r.status === 'success' && (r as any).autoIncome && <p className="text-xs text-emerald-600">✓ Receita criada automaticamente</p>}
                       {r.status === 'success' && r.cashMovementCreated && <p className="text-xs text-emerald-600">✓ Movimento criado no Fundo de Maneio</p>}
                       {r.status === 'success' && !r.autoExpense && !r.cashMovementCreated && !r.detectedTipo && <p className="text-xs text-gray-500">✓ Documento guardado</p>}
                       {r.status === 'skipped' && <p className="text-xs text-gray-500">Saltado</p>}

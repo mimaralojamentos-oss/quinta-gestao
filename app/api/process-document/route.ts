@@ -17,6 +17,7 @@ export async function POST(request: Request) {
     const tipoCustom = formData.get('tipo_custom') as string ?? null
     const force = formData.get('force') === 'true'
     const skipExpense = formData.get('skip_expense') === 'true'
+    const createIncome = formData.get('create_income') === 'true'
 
     if (!file) return NextResponse.json({ error: 'Ficheiro não encontrado' }, { status: 400 })
 
@@ -315,7 +316,21 @@ Atenção especial ao tipo "transferencia_interna": usa este tipo quando o docum
       }
     }
 
-    return NextResponse.json({ success: true, document: doc, autoExpense, duplicate: false, expenseId, meterReadingCreated, cashMovementCreated, detectedTipo: tipo })
+    // ── CRIAR RECEITA automaticamente para documentos do tipo receita ──
+    let autoIncome = false
+    if (tipo === 'receita' && createIncome && doc && extracted.amount && extracted.doc_date) {
+      const { data: newIncome } = await supabase.from('income_records').insert({
+        description: extracted.items_summary ?? extracted.supplier_name ?? 'Receita',
+        amount: extracted.amount,
+        income_date: extracted.doc_date,
+        category: 'energia_solar',
+        document_id: doc.id,
+        notes: extracted.doc_number ? `Documento nº ${extracted.doc_number}` : null,
+      }).select().single()
+      if (newIncome) autoIncome = true
+    }
+
+    return NextResponse.json({ success: true, document: doc, autoExpense, autoIncome, duplicate: false, expenseId, meterReadingCreated, cashMovementCreated, detectedTipo: tipo })
 
   } catch (e: any) {
     console.error(e)

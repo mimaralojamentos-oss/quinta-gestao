@@ -31,6 +31,7 @@ const eletricidadeItems = [
 const financeItems = [
   { href: '/pagamentos', label: 'Rendas & Pagamentos', icon: CreditCard },
   { href: '/despesas', label: 'Despesas', icon: Receipt },
+  { href: '/financeiro/receitas', label: 'Receitas Extraordinárias', icon: TrendingUp },
   { href: '/caixa', label: 'Fundo de Maneio', icon: Wallet },
   { href: '/financeiro/bancos', label: 'Bancos', icon: Landmark },
 ]
