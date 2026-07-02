@@ -15,7 +15,6 @@ interface IncomeRecord {
   notes: string | null
   created_at: string
   document_id: string | null
-  document?: { id: string; file_url: string | null; original_filename: string | null } | null
 }
 
 const CATEGORIES = [
@@ -55,7 +54,7 @@ export default function ReceitasPage() {
     setLoading(true)
     const { data } = await supabase
       .from('income_records')
-      .select('*, document:document_id(id, file_url, original_filename)')
+      .select('*')
       .order('income_date', { ascending: false })
     setRecords(data ?? [])
     setLoading(false)
@@ -187,12 +186,7 @@ export default function ReceitasPage() {
                     <td className="table-cell"><span className="text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full">{categoryLabel(r.category)}</span></td>
                     <td className="table-cell text-right font-semibold text-emerald-700">{formatCurrency(r.amount)}</td>
                     <td className="table-cell text-right">
-                      {r.document?.file_url ? (
-                        <a href={r.document.file_url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
-                          className="text-blue-500 hover:text-blue-700">
-                          <FileText className="w-4 h-4" />
-                        </a>
-                      ) : <span className="text-gray-300">—</span>}
+                      <span className="text-gray-300">—</span>
                     </td>
                     <td className="table-cell text-right">
                       <button onClick={e => { e.stopPropagation(); setDeleteId(r.id) }}
