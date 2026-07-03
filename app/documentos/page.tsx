@@ -131,6 +131,8 @@ export default function DocumentosPage() {
   const [selectedMeterId, setSelectedMeterId] = useState('')
   const [linkingToQuadro, setLinkingToQuadro] = useState(false)
   const [linkDone, setLinkDone] = useState<'success' | 'duplicate' | null>(null)
+  const [createExpenseConfirm, setCreateExpenseConfirm] = useState<Document | null>(null)
+  const [creatingExpense, setCreatingExpense] = useState(false)
 
   const remainingFiles = useRef<{ file: File; index: number }[]>([])
 
@@ -143,6 +145,26 @@ export default function DocumentosPage() {
     setDocuments(docs ?? [])
     setContracts((leases ?? []) as Contrato[])
     setLoading(false)
+  }
+
+  async function handleCreateExpense(doc: Document) {
+    setCreatingExpense(true)
+    const { data: newExpense } = await supabase.from('expenses').insert({
+      expense_date: doc.doc_date ?? new Date().toISOString().slice(0, 10),
+      category: doc.category ?? 'outros',
+      type: 'pontual',
+      description: doc.items_summary ?? doc.supplier_name ?? doc.original_name ?? 'Despesa',
+      amount: doc.amount ?? 0,
+      payment_method: 'banco',
+      supplier: doc.supplier_name ?? null,
+      notes: doc.doc_number ? `Criado manualmente — Documento nº ${doc.doc_number}` : 'Criado manualmente a partir de documento',
+    }).select().single()
+    if (newExpense) {
+      await supabase.from('documents').update({ expense_id: newExpense.id }).eq('id', doc.id)
+      await fetchAll()
+    }
+    setCreatingExpense(false)
+    setCreateExpenseConfirm(null)
   }
 
   function getTenantName(tenant: any): string {
@@ -586,7 +608,14 @@ async function handleSaveEdit() {
                           ✅ Sim
                         </Link>
                       ) : doc._tipo === 'contrato' ? <span className="text-xs text-gray-400">—</span>
-                        : <span className="text-xs text-yellow-600">⚠ Não</span>}
+                        : ['receita', 'transferencia_interna'].includes(doc._tipo) ? <span className="text-xs text-gray-400">—</span>
+                        : (isAdmin || isCoAdmin) && doc._doc ? (
+                          <button onClick={() => setCreateExpenseConfirm(doc._doc!)}
+                            title="Clica para criar despesa"
+                            className="text-xs text-yellow-600 hover:text-yellow-800 hover:underline cursor-pointer">
+                            ⚠ Não
+                          </button>
+                        ) : <span className="text-xs text-yellow-600">⚠ Não</span>}
                     </td>
                     <td className="table-cell">
                       <div className="flex items-center gap-2">
@@ -881,6 +910,36 @@ async function handleSaveEdit() {
                 </button>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Modal Criar Despesa a partir de Documento */}
+      {createExpenseConfirm && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-semibold text-lg text-gray-900">Criar Despesa</h2>
+              <button onClick={() => setCreateExpenseConfirm(null)}><X className="w-5 h-5 text-gray-400" /></button>
+            </div>
+            <p className="text-sm text-gray-600 mb-4">Queres criar uma despesa a partir deste documento?</p>
+            <div className="bg-gray-50 rounded-lg p-4 space-y-2 mb-5 text-sm">
+              <p className="font-medium text-gray-900 truncate">{createExpenseConfirm.original_name}</p>
+              {createExpenseConfirm.supplier_name && <p className="text-gray-600">🏪 {createExpenseConfirm.supplier_name}</p>}
+              {createExpenseConfirm.doc_date && <p className="text-gray-600">📅 {formatDate(createExpenseConfirm.doc_date)}</p>}
+              {createExpenseConfirm.amount != null && (
+                <p className="text-gray-900 font-semibold">💶 {formatCurrency(createExpenseConfirm.amount)}</p>
+              )}
+              {!createExpenseConfirm.amount && (
+                <p className="text-yellow-600 text-xs">⚠ Sem valor extraído — a despesa será criada com 0€. Edita depois.</p>
+              )}
+            </div>
+            <div className="flex gap-3">
+              <button className="btn-secondary flex-1" onClick={() => setCreateExpenseConfirm(null)}>Cancelar</button>
+              <button className="btn-primary flex-1" onClick={() => handleCreateExpense(createExpenseConfirm)} disabled={creatingExpense}>
+                {creatingExpense ? 'A criar...' : 'Criar Despesa'}
+              </button>
+            </div>
           </div>
         </div>
       )}
