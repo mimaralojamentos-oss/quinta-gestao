@@ -94,16 +94,25 @@ function DespesasContent() {
 
   async function fetchAll() {
     setLoading(true)
-    const { data: expensesData } = await supabase.from('expenses').select('*, project:projects(id, name, type, location_label, space:spaces(ref))').order('expense_date', { ascending: false })
-    const { data: projectsData } = await supabase.from('projects').select('id, name, type, location_label, space:spaces(ref)').neq('status', 'concluido').order('name')
+    // Fetch expenses sem join FK (evita falha quando FK não existe no Supabase)
+    const { data: expensesRaw } = await supabase.from('expenses').select('*').order('expense_date', { ascending: false })
+    const { data: projectsRaw } = await supabase.from('projects').select('id, name, type, status, location_label, space:spaces(ref)').order('name')
     const { data: docsData } = await supabase.from('documents').select('id, expense_id, file_path, original_name').not('expense_id', 'is', null)
+    // Mapear projetos aos expenses manualmente
+    const projectsMap: Record<string, any> = {}
+    for (const p of projectsRaw ?? []) { projectsMap[p.id] = p }
+    const expensesData = (expensesRaw ?? []).map((e: any) => ({
+      ...e,
+      project: e.project_id ? (projectsMap[e.project_id] ?? null) : null,
+    }))
+    const projectsData = (projectsRaw ?? []).filter((p: any) => p.status !== 'concluido')
     const docsMap: Record<string, any> = {}
     for (const doc of docsData ?? []) { if (doc.expense_id) docsMap[doc.expense_id] = doc }
-    setExpenses(expensesData ?? [])
-    setProjects(projectsData ?? [])
+    setExpenses(expensesData)
+    setProjects(projectsData)
     setDocuments(docsMap)
-    const total = (expensesData ?? []).reduce((s, e) => s + e.amount, 0)
-    const cash = (expensesData ?? []).filter(e => e.payment_method === 'dinheiro').reduce((s, e) => s + e.amount, 0)
+    const total = expensesData.reduce((s: number, e: any) => s + e.amount, 0)
+    const cash = expensesData.filter((e: any) => e.payment_method === 'dinheiro').reduce((s: number, e: any) => s + e.amount, 0)
     setSummary({ total, cash, bank: total - cash })
     setLoading(false)
   }
