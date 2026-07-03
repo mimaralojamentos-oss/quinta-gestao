@@ -96,18 +96,27 @@ export default function ProjetosPage() {
 
   async function fetchProjects() {
     setLoading(true)
+    // Fetch sem join FK (pode não existir no Supabase)
     const { data: projectsData } = await supabase
       .from('projects')
-      .select('*, space:spaces(ref, type)')
+      .select('*')
       .order('created_at', { ascending: false })
+
+    const { data: spacesData } = await supabase
+      .from('spaces')
+      .select('id, ref, type')
 
     const { data: expensesData } = await supabase
       .from('expenses')
       .select('project_id, amount')
       .not('project_id', 'is', null)
 
+    const spacesMap: Record<string, any> = {}
+    for (const s of spacesData ?? []) { spacesMap[s.id] = s }
+
     const projectsWithSpent = (projectsData ?? []).map(p => ({
       ...p,
+      space: p.space_id ? (spacesMap[p.space_id] ?? null) : null,
       total_spent: (expensesData ?? [])
         .filter(e => e.project_id === p.id)
         .reduce((s, e) => s + (e.amount ?? 0), 0)
