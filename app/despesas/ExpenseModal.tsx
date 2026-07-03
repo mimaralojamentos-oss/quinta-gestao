@@ -3,8 +3,8 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { Expense } from '@/lib/types'
-import { X, Upload, FileText, Loader2, Sparkles } from 'lucide-react'
-import { formatCurrency } from '@/lib/utils'
+import { X, Upload, FileText, Loader2, Sparkles, Search, Link } from 'lucide-react'
+import { formatCurrency, formatDate } from '@/lib/utils'
 import { logAccess } from '@/lib/logAccess'
 
 interface Props {
@@ -32,6 +32,11 @@ export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
   const [processingOcr, setProcessingOcr] = useState(false)
   const [ocrDone, setOcrDone] = useState(false)
   const [error, setError] = useState('')
+  // Selecionar documento existente
+  const [docMode, setDocMode] = useState<'upload' | 'existing'>('upload')
+  const [docSearch, setDocSearch] = useState('')
+  const [existingDocs, setExistingDocs] = useState<any[]>([])
+  const [selectedDocId, setSelectedDocId] = useState<string | null>(null)
 
   useEffect(() => {
     async function fetchProjects() {
@@ -42,7 +47,17 @@ export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
         .order('name')
       setProjects(data ?? [])
     }
+    async function fetchDocs() {
+      const { data } = await supabase
+        .from('documents')
+        .select('id, original_name, supplier_name, amount, doc_date, tipo, items_summary')
+        .in('tipo', ['fatura', 'fatura_luz', 'fatura_agua', 'outro'])
+        .order('created_at', { ascending: false })
+        .limit(200)
+      setExistingDocs(data ?? [])
+    }
     fetchProjects()
+    fetchDocs()
   }, [])
 
   function projectLabel(p: any) {
@@ -171,6 +186,10 @@ export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
           await supabase.from('documents').update({ expense_id: newExpense.id }).eq('id', docId)
         }
       }
+      // Ligar documento existente selecionado
+      if (selectedDocId && newExpense) {
+        await supabase.from('documents').update({ expense_id: newExpense.id }).eq('id', selectedDocId)
+      }
 
       await logAccess({ action: 'criar', page: '/despesas', details: `Criou despesa "${form.description}" (${formatCurrency(parseFloat(form.amount))})` })
     }
@@ -189,59 +208,78 @@ export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
 
         <div className="space-y-4">
 
-          {/* Upload no topo — só para nova despesa */}
-          {!expense && (
-            <div>
-              <label className="label">
-                Fatura / Recibo
-                <span className="text-xs text-emerald-600 font-normal ml-2">✨ preenche automaticamente com IA</span>
-              </label>
+          {/* Fatura / Recibo */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="label mb-0">Fatura / Recibo</label>
+              <div className="flex gap-1 bg-gray-100 rounded-lg p-0.5">
+                <button onClick={() => setDocMode('upload')}
+                  className={`text-xs px-2.5 py-1 rounded-md transition-colors ${docMode === 'upload' ? 'bg-white text-gray-800 shadow-sm font-medium' : 'text-gray-500 hover:text-gray-700'}`}>
+                  <Upload className="w-3 h-3 inline mr-1" />Upload
+                </button>
+                <button onClick={() => setDocMode('existing')}
+                  className={`text-xs px-2.5 py-1 rounded-md transition-colors ${docMode === 'existing' ? 'bg-white text-gray-800 shadow-sm font-medium' : 'text-gray-500 hover:text-gray-700'}`}>
+                  <Link className="w-3 h-3 inline mr-1" />Existente
+                </button>
+              </div>
+            </div>
+
+            {docMode === 'upload' ? (
               <label className={`flex items-center gap-3 border-2 border-dashed rounded-lg p-4 cursor-pointer transition-colors ${
                 ocrDone ? 'border-emerald-400 bg-emerald-50' :
                 processingOcr ? 'border-blue-300 bg-blue-50' :
                 'border-gray-200 hover:border-emerald-400'
               }`}>
-                {processingOcr
-                  ? <Loader2 className="w-5 h-5 text-blue-500 animate-spin flex-shrink-0" />
-                  : ocrDone
-                  ? <Sparkles className="w-5 h-5 text-emerald-500 flex-shrink-0" />
-                  : <Upload className="w-5 h-5 text-gray-400 flex-shrink-0" />
-                }
+                {processingOcr ? <Loader2 className="w-5 h-5 text-blue-500 animate-spin flex-shrink-0" />
+                  : ocrDone ? <Sparkles className="w-5 h-5 text-emerald-500 flex-shrink-0" />
+                  : <Upload className="w-5 h-5 text-gray-400 flex-shrink-0" />}
                 <div>
-                  {processingOcr
-                    ? <p className="text-sm text-blue-600 font-medium">A ler fatura com IA...</p>
-                    : ocrDone
-                    ? <p className="text-sm text-emerald-600 font-medium">✓ Campos preenchidos automaticamente!</p>
-                    : <p className="text-sm text-gray-600">{invoiceFile ? invoiceFile.name : 'Clique para fazer upload (PDF, JPG, PNG)'}</p>
-                  }
-                  {!processingOcr && !ocrDone && (
-                    <p className="text-xs text-gray-400">PDF recomendado para melhor leitura automática</p>
-                  )}
-                  {ocrDone && invoiceFile && (
-                    <p className="text-xs text-emerald-500">{invoiceFile.name} — confirma os dados abaixo</p>
-                  )}
+                  {processingOcr ? <p className="text-sm text-blue-600 font-medium">A ler fatura com IA...</p>
+                    : ocrDone ? <p className="text-sm text-emerald-600 font-medium">✓ Campos preenchidos automaticamente!</p>
+                    : <p className="text-sm text-gray-600">{invoiceFile ? invoiceFile.name : expense ? 'Substituir fatura' : 'Clique para fazer upload (PDF, JPG, PNG)'}</p>}
+                  {!processingOcr && !ocrDone && <p className="text-xs text-gray-400">{expense ? 'PDF, JPG, PNG — máximo 10MB' : 'PDF recomendado para melhor leitura automática'}</p>}
+                  {ocrDone && invoiceFile && <p className="text-xs text-emerald-500">{invoiceFile.name}</p>}
                 </div>
                 <input type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden"
                   onChange={e => { const f = e.target.files?.[0]; if (f) handleFileChange(f) }} />
               </label>
-            </div>
-          )}
-
-          {/* Fatura existente (edição) */}
-          {expense && (
-            <div>
-              <label className="label">Fatura / Recibo</label>
-              <label className="flex items-center gap-3 border-2 border-dashed border-gray-200 rounded-lg p-4 cursor-pointer hover:border-emerald-400 transition-colors">
-                <Upload className="w-5 h-5 text-gray-400" />
-                <div>
-                  <p className="text-sm text-gray-600">{invoiceFile ? invoiceFile.name : 'Substituir fatura'}</p>
-                  <p className="text-xs text-gray-400">PDF, JPG, PNG — máximo 10MB</p>
+            ) : (
+              <div className="border border-gray-200 rounded-lg overflow-hidden">
+                <div className="relative border-b border-gray-100">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <input className="w-full pl-9 pr-3 py-2.5 text-sm outline-none"
+                    placeholder="Pesquisar por nome, fornecedor..."
+                    value={docSearch}
+                    onChange={e => setDocSearch(e.target.value)} />
                 </div>
-                <input type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden"
-                  onChange={e => setInvoiceFile(e.target.files?.[0] ?? null)} />
-              </label>
-            </div>
-          )}
+                <div className="max-h-48 overflow-y-auto">
+                  {existingDocs
+                    .filter(d => !docSearch || (d.original_name ?? '').toLowerCase().includes(docSearch.toLowerCase()) || (d.supplier_name ?? '').toLowerCase().includes(docSearch.toLowerCase()))
+                    .slice(0, 30)
+                    .map(d => (
+                      <button key={d.id} onClick={() => setSelectedDocId(d.id === selectedDocId ? null : d.id)}
+                        className={`w-full text-left px-3 py-2.5 text-sm border-b border-gray-50 hover:bg-gray-50 transition-colors flex items-start gap-2 ${selectedDocId === d.id ? 'bg-emerald-50 border-emerald-100' : ''}`}>
+                        <FileText className={`w-4 h-4 mt-0.5 flex-shrink-0 ${selectedDocId === d.id ? 'text-emerald-500' : 'text-gray-300'}`} />
+                        <div className="min-w-0 flex-1">
+                          <p className={`truncate font-medium ${selectedDocId === d.id ? 'text-emerald-700' : 'text-gray-700'}`}>{d.original_name ?? '—'}</p>
+                          <p className="text-xs text-gray-400 truncate">{d.supplier_name ?? ''}{d.doc_date ? ` · ${formatDate(d.doc_date)}` : ''}{d.amount ? ` · ${formatCurrency(d.amount)}` : ''}</p>
+                        </div>
+                        {selectedDocId === d.id && <span className="text-xs text-emerald-600 font-medium flex-shrink-0">✓</span>}
+                      </button>
+                    ))}
+                  {existingDocs.filter(d => !docSearch || (d.original_name ?? '').toLowerCase().includes(docSearch.toLowerCase()) || (d.supplier_name ?? '').toLowerCase().includes(docSearch.toLowerCase())).length === 0 && (
+                    <p className="text-sm text-gray-400 text-center py-6">Nenhum documento encontrado</p>
+                  )}
+                </div>
+                {selectedDocId && (
+                  <div className="bg-emerald-50 px-3 py-2 flex items-center justify-between">
+                    <span className="text-xs text-emerald-700 font-medium">✓ Documento selecionado</span>
+                    <button onClick={() => setSelectedDocId(null)} className="text-xs text-gray-400 hover:text-gray-600">Limpar</button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
 
           <div>
             <label className="label">Descrição *</label>
