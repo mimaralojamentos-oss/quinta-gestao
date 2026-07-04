@@ -222,7 +222,7 @@ export default function QuadrosEspacosPage() {
 
     const newValue = parseFloat(editForm.reading_value)
     const prevValue = editReadingModal.previous_value
-    const kwhConsumed = prevValue != null ? newValue - prevValue : editReadingModal.kwh_consumed
+    const kwhConsumed = prevValue != null ? parseFloat((newValue - prevValue).toFixed(2)) : editReadingModal.kwh_consumed
     const acc = editReadingModal.accumulated ? (editReadingModal.amount_calculated ?? 0) : 0
     const amountCalc = kwhConsumed != null ? parseFloat((kwhConsumed * priceWithVat).toFixed(2)) : editReadingModal.amount_calculated
 
@@ -315,7 +315,7 @@ export default function QuadrosEspacosPage() {
     const { space, lastReading } = readingModal
     const newValue = parseFloat(readingForm.reading_value)
     const prevValue = lastReading?.reading_value ?? null
-    const kwhConsumed = prevValue != null ? newValue - prevValue : null
+    const kwhConsumed = prevValue != null ? parseFloat((newValue - prevValue).toFixed(2)) : null
     const accumulatedSoFar = getAccumulatedAmount(space.id)
     const amountCalc = kwhConsumed != null ? parseFloat((kwhConsumed * priceWithVat + accumulatedSoFar).toFixed(2)) : null
     const charged = charge && amountCalc != null && amountCalc >= minCharge
@@ -655,7 +655,7 @@ export default function QuadrosEspacosPage() {
                                 <td className="py-2 text-sm">{formatDate(r.reading_date)}</td>
                                 <td className="py-2 text-sm font-mono">{r.reading_value}</td>
                                 <td className="py-2 text-sm font-mono text-gray-400">{r.previous_value ?? '—'}</td>
-                                <td className="py-2 text-sm">{r.kwh_consumed != null ? `${r.kwh_consumed} kWh` : '—'}</td>
+                                <td className="py-2 text-sm">{r.kwh_consumed != null ? `${Number(r.kwh_consumed).toFixed(2)} kWh` : '—'}</td>
                                 <td className="py-2 text-sm font-semibold">
                                   {r.amount_calculated != null ? formatCurrency(r.amount_calculated) : '—'}
                                 </td>
