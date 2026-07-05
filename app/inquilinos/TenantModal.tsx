@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Tenant } from '@/lib/types'
-import { X, User, Home, FileText, Plus, Trash2, Pencil, ChevronRight, ChevronLeft, Upload, Loader2, Sparkles, Printer, ReceiptText } from 'lucide-react'
+import { X, User, Home, FileText, Plus, Trash2, Pencil, ChevronRight, ChevronLeft, Upload, Loader2, Sparkles, Printer, ReceiptText, Banknote } from 'lucide-react'
 import { formatCurrency, formatDate, getCurrentMonth } from '@/lib/utils'
 import { logAccess } from '@/lib/logAccess'
 
@@ -86,6 +86,14 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
   })
   const [savingPayment, setSavingPayment] = useState(false)
   const [paymentError, setPaymentError] = useState('')
+
+  const [showRecebimentoForm, setShowRecebimentoForm] = useState(false)
+  const [recebimentoForm, setRecebimentoForm] = useState({
+    date: new Date().toISOString().slice(0, 10),
+    amount: '',
+    method: 'dinheiro',
+  })
+  const [savingRecebimento, setSavingRecebimento] = useState(false)
 
   useEffect(() => {
     async function loadSpaces() {
@@ -349,6 +357,59 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
       if (p.isManualDebt) return sum + (p.remainingAmount ?? 0)
       return sum + (p.amount ?? 0)
     }, 0) - totalAdvance
+
+  function computeAllocation(totalAmount: number) {
+    const outstanding = payments
+      .filter(p => !p.payment_date && !p.isManualDebt && !p.isElecCharge)
+      .sort((a, b) => (a.reference_month ?? '').localeCompare(b.reference_month ?? ''))
+    const result: Array<{ item: PaymentRow; paying: number }> = []
+    let remaining = totalAmount
+    for (const item of outstanding) {
+      if (remaining <= 0) break
+      const paying = parseFloat(Math.min(remaining, item.amount).toFixed(2))
+      result.push({ item, paying })
+      remaining = parseFloat((remaining - paying).toFixed(2))
+    }
+    return { allocation: result, leftover: parseFloat(remaining.toFixed(2)) }
+  }
+
+  async function handleSaveRecebimento() {
+    const total = parseFloat(recebimentoForm.amount)
+    if (!total || total <= 0) return
+    setSavingRecebimento(true)
+    const { allocation, leftover } = computeAllocation(total)
+    for (const { item, paying } of allocation) {
+      const leaseId = item.lease_id ?? item.lease?.id
+      if (!leaseId) continue
+      await supabase.from('rent_payments').insert({
+        lease_id: leaseId,
+        reference_month: item.reference_month.slice(0, 7) + '-01',
+        amount: paying,
+        payment_date: recebimentoForm.date,
+        payment_method: recebimentoForm.method,
+        tipo: 'renda',
+        notes: paying < item.amount ? 'Pagamento parcial' : null,
+      })
+    }
+    if (leftover > 0.01) {
+      const leaseId = leases.find((l: any) => l.status === 'ativo')?.id
+      if (leaseId) {
+        await supabase.from('rent_payments').insert({
+          lease_id: leaseId,
+          reference_month: recebimentoForm.date.slice(0, 7) + '-01',
+          amount: leftover,
+          payment_date: recebimentoForm.date,
+          payment_method: recebimentoForm.method,
+          tipo: 'adiantamento',
+          notes: 'Excedente (adiantamento)',
+        })
+      }
+    }
+    await fetchPayments()
+    setShowRecebimentoForm(false)
+    setRecebimentoForm({ date: new Date().toISOString().slice(0, 10), amount: '', method: 'dinheiro' })
+    setSavingRecebimento(false)
+  }
 
   function printContaCorrente() {
     const today = new Date().toLocaleDateString('pt-PT')
@@ -810,10 +871,14 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                   <p className="font-semibold text-gray-900">{payments.filter(p => !p.isMissing).length}</p>
                 </div>
               </div>
-              {!showPaymentForm && (
+              {!showPaymentForm && !showRecebimentoForm && (
                 <div className="flex gap-2 mb-4">
-                  <button onClick={handleNewPayment} className="btn-primary flex-1 justify-center">
-                    <Plus className="w-4 h-4" /> Registar Pagamento / Dívida
+                  <button onClick={() => setShowRecebimentoForm(true)}
+                    className="flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg border-2 border-blue-500 text-blue-600 bg-blue-50 hover:bg-blue-100 text-sm font-medium transition-colors">
+                    <Banknote className="w-4 h-4" /> Registar Recebimento
+                  </button>
+                  <button onClick={handleNewPayment} className="btn-secondary flex-1 justify-center">
+                    <Plus className="w-4 h-4" /> Registo Manual
                   </button>
                   <button onClick={printContaCorrente} className="btn-secondary px-3 justify-center" title="Imprimir conta corrente">
                     <Printer className="w-4 h-4" />
@@ -823,6 +888,80 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                   </button>
                 </div>
               )}
+
+              {showRecebimentoForm && (() => {
+                const total = parseFloat(recebimentoForm.amount) || 0
+                const { allocation, leftover } = computeAllocation(total)
+                return (
+                  <div className="border border-blue-200 bg-blue-50 rounded-xl p-4 mb-4">
+                    <h3 className="font-medium text-gray-800 mb-3">💰 Registar Recebimento</h3>
+                    <div className="grid grid-cols-2 gap-3 mb-3">
+                      <div>
+                        <label className="label">Data do recebimento</label>
+                        <input className="input" type="date" value={recebimentoForm.date}
+                          onChange={e => setRecebimentoForm(f => ({ ...f, date: e.target.value }))} />
+                      </div>
+                      <div>
+                        <label className="label">Valor recebido (€)</label>
+                        <input className="input" type="number" step="0.01" placeholder="0.00"
+                          value={recebimentoForm.amount}
+                          onChange={e => setRecebimentoForm(f => ({ ...f, amount: e.target.value }))} />
+                      </div>
+                    </div>
+                    <div className="mb-3">
+                      <label className="label">Método</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {['dinheiro', 'banco'].map(m => (
+                          <button key={m} onClick={() => setRecebimentoForm(f => ({ ...f, method: m }))}
+                            className={`py-2 rounded-lg border text-xs font-medium transition-colors ${recebimentoForm.method === m ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200'}`}>
+                            {m === 'dinheiro' ? '💵 Dinheiro' : '🏦 Banco'}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    {total > 0 && (
+                      <div className="border border-blue-200 rounded-lg overflow-hidden mb-3">
+                        <div className="bg-blue-100 px-3 py-2 text-xs font-semibold text-blue-800">Distribuição automática (do mês mais antigo para o mais recente)</div>
+                        {allocation.length === 0 ? (
+                          <p className="text-xs text-gray-400 p-3 text-center">Não há meses em dívida para cobrir.</p>
+                        ) : (
+                          <div className="divide-y divide-blue-50">
+                            {allocation.map((a, i) => (
+                              <div key={i} className="flex justify-between items-center px-3 py-2">
+                                <span className="text-xs text-gray-700">
+                                  🏠 Renda {a.item.reference_month?.slice(0, 7)}
+                                  {a.paying < a.item.amount && <span className="text-orange-500 ml-1">(parcial)</span>}
+                                </span>
+                                <span className="text-xs font-semibold">{formatCurrency(a.paying)}</span>
+                              </div>
+                            ))}
+                            {leftover > 0.01 && (
+                              <div className="flex justify-between items-center px-3 py-2 bg-purple-50">
+                                <span className="text-xs text-purple-700">💰 Excedente → adiantamento</span>
+                                <span className="text-xs font-semibold text-purple-700">{formatCurrency(leftover)}</span>
+                              </div>
+                            )}
+                            <div className="flex justify-between items-center px-3 py-2 bg-gray-50 border-t border-gray-200">
+                              <span className="text-xs font-bold text-gray-700">Total</span>
+                              <span className="text-xs font-bold">{formatCurrency(total)}</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    <div className="flex gap-2">
+                      <button className="btn-secondary flex-1" onClick={() => { setShowRecebimentoForm(false); setRecebimentoForm({ date: new Date().toISOString().slice(0, 10), amount: '', method: 'dinheiro' }) }}>
+                        Cancelar
+                      </button>
+                      <button onClick={handleSaveRecebimento} disabled={savingRecebimento || !recebimentoForm.amount || allocation.length === 0}
+                        className="flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium disabled:opacity-50 transition-colors">
+                        {savingRecebimento ? <Loader2 className="w-4 h-4 animate-spin" /> : <Banknote className="w-4 h-4" />}
+                        {savingRecebimento ? 'A guardar...' : 'Confirmar Recebimento'}
+                      </button>
+                    </div>
+                  </div>
+                )
+              })()}
               {showPaymentForm && (
                 <div className="border border-emerald-200 bg-emerald-50 rounded-xl p-4 mb-4">
                   <h3 className="font-medium text-gray-800 mb-3">{editingPaymentId ? '✏️ Editar Registo' : 'Novo Registo'}</h3>
