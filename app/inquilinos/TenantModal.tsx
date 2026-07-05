@@ -1027,7 +1027,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                       </div>
                     )}
                     <div className="flex gap-2">
-                      <button className="btn-secondary flex-1" onClick={() => { setShowRecebimentoForm(false); setRecebimentoForm({ date: new Date().toISOString().slice(0, 10), amount: '', method: 'dinheiro' }) }}>
+                      <button className="btn-secondary flex-1" onClick={() => { setShowRecebimentoForm(false); setRecebimentoForm({ date: new Date().toISOString().slice(0, 10), amount: '', method: 'dinheiro', includeElec: true, includeDebts: true }) }}>
                         Cancelar
                       </button>
                       <button onClick={handleSaveRecebimento} disabled={savingRecebimento || !recebimentoForm.amount || allocation.length === 0}
