@@ -51,7 +51,7 @@ export default function InquilinosPage() {
   const [filterSpaceType, setFilterSpaceType] = useState<'all' | 'pavilhao' | 'habitacao' | 'loja'>('all')
   const [filterDebt, setFilterDebt] = useState<'all' | 'com_divida' | 'sem_divida'>('all')
   const [filterContract, setFilterContract] = useState<'all' | '30dias' | '60dias' | '90dias' | '180dias' | 'expirado'>('all')
-  const [sortField, setSortField] = useState<SortField>(null)
+  const [sortField, setSortField] = useState<SortField>('spaces')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
   const [showTenantModal, setShowTenantModal] = useState(false)
   const [showLeaseModal, setShowLeaseModal] = useState(false)
@@ -287,7 +287,11 @@ export default function InquilinosPage() {
     if (sortField === 'spaces') {
       const aRef = a.spaces?.[0]?.ref ?? ''
       const bRef = b.spaces?.[0]?.ref ?? ''
-      return dir * aRef.localeCompare(bRef)
+      // Sem espaço → sempre no final, independentemente da direção
+      if (!aRef && !bRef) return 0
+      if (!aRef) return 1
+      if (!bRef) return -1
+      return dir * aRef.localeCompare(bRef, 'pt', { numeric: true })
     }
     if (sortField === 'rent') {
       const aRent = a.leases?.find(l => l.status === 'ativo')?.monthly_rent ?? 0
