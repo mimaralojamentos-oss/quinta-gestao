@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Tenant } from '@/lib/types'
-import { X, User, Home, FileText, Plus, Trash2, Pencil, ChevronRight, ChevronLeft, Upload, Loader2, Sparkles } from 'lucide-react'
+import { X, User, Home, FileText, Plus, Trash2, Pencil, ChevronRight, ChevronLeft, Upload, Loader2, Sparkles, Printer } from 'lucide-react'
 import { formatCurrency, formatDate, getCurrentMonth } from '@/lib/utils'
 import { logAccess } from '@/lib/logAccess'
 
@@ -339,6 +339,128 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
       return sum + (p.amount ?? 0)
     }, 0) - totalAdvance
 
+  function printContaCorrente() {
+    const today = new Date().toLocaleDateString('pt-PT')
+    const tenantName = tenant?.name ?? ''
+    const tenantNif = tenant?.nif ? `NIF: ${tenant.nif}` : ''
+    const tenantPhone = tenant?.phone ?? ''
+    const tenantEmail = tenant?.email ?? ''
+    const activeLease = leases.find((l: any) => l.status === 'ativo')
+    const spaceRef = activeLease?.space?.ref ?? leases[0]?.space?.ref ?? '—'
+    const monthlyRent = activeLease?.monthly_rent ?? leases[0]?.monthly_rent ?? 0
+
+    const tipoLabel: Record<string, string> = {
+      renda: 'Renda', caucao: 'Caução', extra: 'Extra', luz: 'Luz',
+      adiantamento: 'Adiantamento', divida: 'Dívida', eletricidade: 'Eletricidade',
+    }
+
+    const rows = payments.map((p: PaymentRow) => {
+      const isLiquidada = p.isManualDebt && p.payment_date === 'liquidada'
+      const isPago = !p.isManualDebt && !!p.payment_date && p.payment_date !== 'liquidada'
+      const estado = isLiquidada ? 'Liquidada' : isPago ? 'Pago' : p.isMissing ? 'Em falta' : 'Por pagar'
+      const estadoColor = isPago || isLiquidada ? '#16a34a' : '#dc2626'
+      const amount = p.isManualDebt ? (p.remainingAmount ?? p.amount) : p.amount
+      const periodo = p.reference_month?.slice(0, 7) ?? '—'
+      const tipo = tipoLabel[p.tipo] ?? p.tipo
+      return `<tr>
+        <td>${periodo}</td>
+        <td>${tipo}${p.notes ? ` — ${p.notes}` : ''}</td>
+        <td>${p.payment_date && p.payment_date !== 'liquidada' ? p.payment_date : '—'}</td>
+        <td style="color:${estadoColor};font-weight:600">${estado}</td>
+        <td style="text-align:right;font-weight:600">${formatCurrency(amount)}</td>
+      </tr>`
+    }).join('')
+
+    const totalPago = payments.filter((p: PaymentRow) => p.payment_date && p.payment_date !== 'liquidada').reduce((s: number, p: PaymentRow) => s + p.amount, 0)
+
+    const html = `<!DOCTYPE html>
+<html lang="pt">
+<head>
+  <meta charset="UTF-8">
+  <title>Conta Corrente — ${tenantName}</title>
+  <style>
+    @page { size: A4; margin: 18mm 15mm; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; font-size: 11px; color: #1a1a1a; }
+    .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; border-bottom: 2px solid #059669; padding-bottom: 10px; }
+    .property { font-size: 14px; font-weight: 700; color: #059669; }
+    .date { font-size: 10px; color: #666; margin-top: 2px; }
+    .tenant-block { margin-bottom: 12px; }
+    .tenant-name { font-size: 15px; font-weight: 700; }
+    .tenant-meta { font-size: 10px; color: #555; margin-top: 3px; }
+    .lease-row { background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 5px; padding: 7px 12px; margin-bottom: 14px; display: flex; gap: 32px; }
+    .lease-row span { font-size: 10px; color: #555; }
+    .lease-row strong { display: block; font-size: 12px; color: #111; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 14px; }
+    th { background: #f3f4f6; font-size: 10px; text-align: left; padding: 6px 7px; border-bottom: 2px solid #e5e7eb; }
+    td { padding: 5px 7px; border-bottom: 1px solid #f3f4f6; font-size: 10px; vertical-align: middle; }
+    tr:nth-child(even) td { background: #fafafa; }
+    .totals { border-top: 2px solid #111; padding-top: 10px; display: flex; justify-content: flex-end; gap: 40px; }
+    .total-item { text-align: right; }
+    .total-label { font-size: 9px; color: #666; margin-bottom: 2px; }
+    .total-value { font-size: 14px; font-weight: 700; }
+    .divida { color: #dc2626; }
+    .pago { color: #16a34a; }
+    .assinatura { margin-top: 36px; display: flex; justify-content: space-between; }
+    .assinatura-line { border-top: 1px solid #999; width: 200px; padding-top: 5px; font-size: 9px; color: #666; text-align: center; }
+    .footer { margin-top: 18px; font-size: 9px; color: #aaa; text-align: center; border-top: 1px solid #e5e7eb; padding-top: 7px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <div class="property">Serpa Pinto 131A — Évora</div>
+      <div class="date">Conta Corrente gerada em ${today}</div>
+    </div>
+    <div style="text-align:right">
+      <div class="date">Espaço: <strong style="font-size:12px;color:#111">${spaceRef}</strong></div>
+      ${monthlyRent ? `<div class="date">Renda mensal: <strong style="font-size:12px;color:#111">${formatCurrency(monthlyRent)}</strong></div>` : ''}
+    </div>
+  </div>
+
+  <div class="tenant-block">
+    <div class="tenant-name">${tenantName}</div>
+    <div class="tenant-meta">${[tenantNif, tenantPhone, tenantEmail].filter(Boolean).join(' · ')}</div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width:90px">Período</th>
+        <th>Descrição</th>
+        <th style="width:90px">Data Pag.</th>
+        <th style="width:80px">Estado</th>
+        <th style="width:80px;text-align:right">Valor</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>
+
+  <div class="totals">
+    <div class="total-item">
+      <div class="total-label">Total pago</div>
+      <div class="total-value pago">${formatCurrency(totalPago)}</div>
+    </div>
+    <div class="total-item">
+      <div class="total-label">${totalDebt > 0 ? 'Total em dívida' : totalDebt < 0 ? 'Crédito do inquilino' : 'Situação'}</div>
+      <div class="total-value ${totalDebt > 0 ? 'divida' : 'pago'}">${totalDebt !== 0 ? formatCurrency(Math.abs(totalDebt)) : '✓ Sem dívida'}</div>
+    </div>
+  </div>
+
+  <div class="assinatura">
+    <div class="assinatura-line">Proprietário / Gestor</div>
+    <div class="assinatura-line">Inquilino — ${tenantName}</div>
+  </div>
+
+  <div class="footer">Documento informativo gerado automaticamente em ${today} · Serpa Pinto 131A, Évora</div>
+  <script>window.onload = () => window.print()</script>
+</body>
+</html>`
+
+    const win = window.open('', '_blank')
+    if (win) { win.document.write(html); win.document.close() }
+  }
+
   const getTitle = () => {
     if (!isNew) return tenant!.name
     if (createMode === 'escolha') return 'Novo Inquilino'
@@ -569,9 +691,14 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                 </div>
               </div>
               {!showPaymentForm && (
-                <button onClick={handleNewPayment} className="btn-primary w-full mb-4 justify-center">
-                  <Plus className="w-4 h-4" /> Registar Pagamento / Dívida
-                </button>
+                <div className="flex gap-2 mb-4">
+                  <button onClick={handleNewPayment} className="btn-primary flex-1 justify-center">
+                    <Plus className="w-4 h-4" /> Registar Pagamento / Dívida
+                  </button>
+                  <button onClick={printContaCorrente} className="btn-secondary px-3 justify-center" title="Imprimir conta corrente">
+                    <Printer className="w-4 h-4" />
+                  </button>
+                </div>
               )}
               {showPaymentForm && (
                 <div className="border border-emerald-200 bg-emerald-50 rounded-xl p-4 mb-4">
