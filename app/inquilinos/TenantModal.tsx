@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Tenant } from '@/lib/types'
-import { X, User, Home, FileText, Plus, Trash2, Pencil, ChevronRight, ChevronLeft, Upload, Loader2, Sparkles, Printer } from 'lucide-react'
+import { X, User, Home, FileText, Plus, Trash2, Pencil, ChevronRight, ChevronLeft, Upload, Loader2, Sparkles, Printer, ReceiptText } from 'lucide-react'
 import { formatCurrency, formatDate, getCurrentMonth } from '@/lib/utils'
 import { logAccess } from '@/lib/logAccess'
 
@@ -472,6 +472,115 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
     if (win) { win.document.write(html); win.document.close() }
   }
 
+  function printPagamentos() {
+    const today = new Date().toLocaleDateString('pt-PT')
+    const tenantName = tenant?.name ?? ''
+    const tenantNif = tenant?.nif ? `NIF: ${tenant.nif}` : ''
+    const tenantPhone = tenant?.phone ?? ''
+    const tenantEmail = tenant?.email ?? ''
+    const activeLease = leases.find((l: any) => l.status === 'ativo')
+    const spaceRef = activeLease?.space?.ref ?? leases[0]?.space?.ref ?? '—'
+
+    const tipoLabel: Record<string, string> = {
+      renda: 'Renda', caucao: 'Caução', extra: 'Extra', luz: 'Luz',
+      adiantamento: 'Adiantamento', divida: 'Dívida', eletricidade: 'Eletricidade',
+    }
+    const methodLabel: Record<string, string> = {
+      dinheiro: 'Dinheiro', banco: 'Transferência Bancária',
+    }
+
+    // Agrupar pagamentos reais por (payment_date + payment_method)
+    const paid = payments.filter((p: PaymentRow) => p.payment_date && p.payment_date !== 'liquidada')
+    type Group = { date: string; method: string; items: PaymentRow[]; total: number }
+    const groupMap: Record<string, Group> = {}
+    for (const p of paid) {
+      const key = `${p.payment_date}__${p.payment_method ?? 'outro'}`
+      if (!groupMap[key]) groupMap[key] = { date: p.payment_date!, method: p.payment_method ?? 'outro', items: [], total: 0 }
+      groupMap[key].items.push(p)
+      groupMap[key].total = parseFloat((groupMap[key].total + (p.amount ?? 0)).toFixed(2))
+    }
+    const groups = Object.values(groupMap).sort((a, b) => b.date.localeCompare(a.date))
+
+    const groupRows = groups.map((g, idx) => {
+      const itemLines = g.items.map(p => {
+        const periodo = p.reference_month?.slice(0, 7) ?? '—'
+        const tipo = tipoLabel[p.tipo] ?? p.tipo
+        return `<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:10px;color:#555">
+          <span>↳ ${tipo} — ${periodo}${p.notes ? ` (${p.notes})` : ''}</span>
+          <span>${formatCurrency(p.amount)}</span>
+        </div>`
+      }).join('')
+
+      return `<div style="margin-bottom:12px;border:1px solid #e5e7eb;border-radius:6px;overflow:hidden">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:#f0fdf4;border-bottom:1px solid #bbf7d0">
+          <div>
+            <span style="font-size:12px;font-weight:700;color:#111">${new Date(g.date + 'T00:00:00').toLocaleDateString('pt-PT')}</span>
+            <span style="margin-left:10px;font-size:11px;color:#059669;font-weight:600">${methodLabel[g.method] ?? g.method}</span>
+          </div>
+          <span style="font-size:13px;font-weight:700;color:#059669">${formatCurrency(g.total)}</span>
+        </div>
+        <div style="padding:6px 12px 8px">${itemLines}</div>
+      </div>`
+    }).join('')
+
+    const totalPago = groups.reduce((s, g) => s + g.total, 0)
+
+    const html = `<!DOCTYPE html>
+<html lang="pt">
+<head>
+  <meta charset="UTF-8">
+  <title>Histórico de Pagamentos — ${tenantName}</title>
+  <style>
+    @page { size: A4; margin: 18mm 15mm; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; font-size: 11px; color: #1a1a1a; }
+    .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; border-bottom: 2px solid #059669; padding-bottom: 10px; }
+    .property { font-size: 14px; font-weight: 700; color: #059669; }
+    .date { font-size: 10px; color: #666; margin-top: 2px; }
+    .tenant-block { margin-bottom: 14px; }
+    .tenant-name { font-size: 15px; font-weight: 700; }
+    .tenant-meta { font-size: 10px; color: #555; margin-top: 3px; }
+    .total-bar { display: flex; justify-content: flex-end; gap: 40px; border-top: 2px solid #111; padding-top: 10px; margin-top: 4px; }
+    .total-item { text-align: right; }
+    .total-label { font-size: 9px; color: #666; margin-bottom: 2px; }
+    .total-value { font-size: 14px; font-weight: 700; color: #16a34a; }
+    .footer { margin-top: 18px; font-size: 9px; color: #aaa; text-align: center; border-top: 1px solid #e5e7eb; padding-top: 7px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <div class="property">Serpa Pinto 131A — Évora</div>
+      <div class="date">Histórico de Pagamentos · gerado em ${today}</div>
+    </div>
+    <div style="text-align:right">
+      <div class="date">Espaço: <strong style="font-size:12px;color:#111">${spaceRef}</strong></div>
+    </div>
+  </div>
+
+  <div class="tenant-block">
+    <div class="tenant-name">${tenantName}</div>
+    <div class="tenant-meta">${[tenantNif, tenantPhone, tenantEmail].filter(Boolean).join(' · ')}</div>
+  </div>
+
+  ${groups.length === 0 ? '<p style="color:#999;text-align:center;padding:20px 0">Sem pagamentos registados.</p>' : groupRows}
+
+  <div class="total-bar">
+    <div class="total-item">
+      <div class="total-label">Total recebido (${groups.length} pagamento${groups.length !== 1 ? 's' : ''})</div>
+      <div class="total-value">${formatCurrency(totalPago)}</div>
+    </div>
+  </div>
+
+  <div class="footer">Documento informativo gerado automaticamente em ${today} · Serpa Pinto 131A, Évora</div>
+  <script>window.onload = () => window.print()</script>
+</body>
+</html>`
+
+    const win = window.open('', '_blank')
+    if (win) { win.document.write(html); win.document.close() }
+  }
+
   const getTitle = () => {
     if (!isNew) return tenant!.name
     if (createMode === 'escolha') return 'Novo Inquilino'
@@ -708,6 +817,9 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                   </button>
                   <button onClick={printContaCorrente} className="btn-secondary px-3 justify-center" title="Imprimir conta corrente">
                     <Printer className="w-4 h-4" />
+                  </button>
+                  <button onClick={printPagamentos} className="btn-secondary px-3 justify-center" title="Imprimir histórico de pagamentos">
+                    <ReceiptText className="w-4 h-4" />
                   </button>
                 </div>
               )}
