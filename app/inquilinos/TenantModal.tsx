@@ -92,6 +92,8 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
     date: new Date().toISOString().slice(0, 10),
     amount: '',
     method: 'dinheiro',
+    includeElec: true,
+    includeDebts: true,
   })
   const [savingRecebimento, setSavingRecebimento] = useState(false)
 
@@ -358,18 +360,49 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
       return sum + (p.amount ?? 0)
     }, 0) - totalAdvance
 
-  function computeAllocation(totalAmount: number) {
-    const outstanding = payments
+  function computeAllocation(totalAmount: number, includeElec: boolean, includeDebts: boolean) {
+    let remaining = totalAmount
+    const result: Array<{ item: PaymentRow; paying: number }> = []
+
+    // 1ª PRIORIDADE: Rendas vencidas (do mais antigo para o mais recente, pagamento parcial permitido)
+    const rendas = payments
       .filter(p => !p.payment_date && !p.isManualDebt && !p.isElecCharge)
       .sort((a, b) => (a.reference_month ?? '').localeCompare(b.reference_month ?? ''))
-    const result: Array<{ item: PaymentRow; paying: number }> = []
-    let remaining = totalAmount
-    for (const item of outstanding) {
+    for (const item of rendas) {
       if (remaining <= 0) break
       const paying = parseFloat(Math.min(remaining, item.amount).toFixed(2))
       result.push({ item, paying })
       remaining = parseFloat((remaining - paying).toFixed(2))
     }
+
+    // 2ª PRIORIDADE: Eletricidade (pagamento total por cobrança — não se paga eletricidade a meias)
+    if (includeElec && remaining > 0) {
+      const elec = payments
+        .filter(p => !p.payment_date && p.isElecCharge)
+        .sort((a, b) => (a.reference_month ?? '').localeCompare(b.reference_month ?? ''))
+      for (const item of elec) {
+        if (remaining <= 0) break
+        if (remaining >= item.amount) {
+          result.push({ item, paying: item.amount })
+          remaining = parseFloat((remaining - item.amount).toFixed(2))
+        }
+      }
+    }
+
+    // 3ª PRIORIDADE: Outras dívidas manuais (do mais antigo para o mais recente, parcial permitido)
+    if (includeDebts && remaining > 0) {
+      const debts = payments
+        .filter(p => p.isManualDebt && p.payment_date !== 'liquidada' && !p.payment_date)
+        .sort((a, b) => (a.reference_month ?? '').localeCompare(b.reference_month ?? ''))
+      for (const item of debts) {
+        if (remaining <= 0) break
+        const owed = item.remainingAmount ?? item.amount
+        const paying = parseFloat(Math.min(remaining, owed).toFixed(2))
+        result.push({ item, paying })
+        remaining = parseFloat((remaining - paying).toFixed(2))
+      }
+    }
+
     return { allocation: result, leftover: parseFloat(remaining.toFixed(2)) }
   }
 
@@ -377,20 +410,40 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
     const total = parseFloat(recebimentoForm.amount)
     if (!total || total <= 0) return
     setSavingRecebimento(true)
-    const { allocation, leftover } = computeAllocation(total)
+    const { allocation, leftover } = computeAllocation(total, recebimentoForm.includeElec, recebimentoForm.includeDebts)
+
     for (const { item, paying } of allocation) {
-      const leaseId = item.lease_id ?? item.lease?.id
-      if (!leaseId) continue
-      await supabase.from('rent_payments').insert({
-        lease_id: leaseId,
-        reference_month: item.reference_month.slice(0, 7) + '-01',
-        amount: paying,
-        payment_date: recebimentoForm.date,
-        payment_method: recebimentoForm.method,
-        tipo: 'renda',
-        notes: paying < item.amount ? 'Pagamento parcial' : null,
-      })
+      if (item.isElecCharge && item.id) {
+        // Marcar cobrança de eletricidade como paga
+        await supabase.from('electricity_charges').update({
+          paid: true,
+          payment_date: recebimentoForm.date,
+          payment_method: recebimentoForm.method,
+        }).eq('id', item.id)
+      } else if (item.isManualDebt && item.id) {
+        // Registar pagamento de dívida manual
+        await supabase.from('debt_payments').insert({
+          debt_id: item.id,
+          amount: paying,
+          payment_date: recebimentoForm.date,
+          payment_method: recebimentoForm.method,
+        })
+      } else {
+        // Registar pagamento de renda
+        const leaseId = item.lease_id ?? item.lease?.id
+        if (!leaseId) continue
+        await supabase.from('rent_payments').insert({
+          lease_id: leaseId,
+          reference_month: item.reference_month.slice(0, 7) + '-01',
+          amount: paying,
+          payment_date: recebimentoForm.date,
+          payment_method: recebimentoForm.method,
+          tipo: 'renda',
+          notes: paying < item.amount ? 'Pagamento parcial' : null,
+        })
+      }
     }
+
     if (leftover > 0.01) {
       const leaseId = leases.find((l: any) => l.status === 'ativo')?.id
       if (leaseId) {
@@ -405,9 +458,10 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
         })
       }
     }
+
     await fetchPayments()
     setShowRecebimentoForm(false)
-    setRecebimentoForm({ date: new Date().toISOString().slice(0, 10), amount: '', method: 'dinheiro' })
+    setRecebimentoForm({ date: new Date().toISOString().slice(0, 10), amount: '', method: 'dinheiro', includeElec: true, includeDebts: true })
     setSavingRecebimento(false)
   }
 
@@ -891,7 +945,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
 
               {showRecebimentoForm && (() => {
                 const total = parseFloat(recebimentoForm.amount) || 0
-                const { allocation, leftover } = computeAllocation(total)
+                const { allocation, leftover } = computeAllocation(total, recebimentoForm.includeElec, recebimentoForm.includeDebts)
                 return (
                   <div className="border border-blue-200 bg-blue-50 rounded-xl p-4 mb-4">
                     <h3 className="font-medium text-gray-800 mb-3">💰 Registar Recebimento</h3>
@@ -919,22 +973,45 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                         ))}
                       </div>
                     </div>
+                    <div className="mb-3">
+                      <label className="label">Cobrir com este pagamento</label>
+                      <div className="flex gap-2">
+                        {[
+                          { key: 'includeElec', label: '⚡ Eletricidade', desc: '2ª prioridade' },
+                          { key: 'includeDebts', label: '📋 Outras dívidas', desc: '3ª prioridade' },
+                        ].map(({ key, label, desc }) => (
+                          <button key={key}
+                            onClick={() => setRecebimentoForm(f => ({ ...f, [key]: !f[key as keyof typeof f] }))}
+                            className={`flex-1 py-2 px-2 rounded-lg border text-xs font-medium transition-colors ${(recebimentoForm as any)[key] ? 'bg-blue-100 border-blue-400 text-blue-700' : 'bg-white border-gray-200 text-gray-400'}`}>
+                            {label}<span className="block text-[10px] font-normal opacity-70">{desc}</span>
+                          </button>
+                        ))}
+                      </div>
+                      <p className="text-[10px] text-gray-400 mt-1">🏠 Rendas são sempre 1ª prioridade</p>
+                    </div>
+
                     {total > 0 && (
                       <div className="border border-blue-200 rounded-lg overflow-hidden mb-3">
-                        <div className="bg-blue-100 px-3 py-2 text-xs font-semibold text-blue-800">Distribuição automática (do mês mais antigo para o mais recente)</div>
+                        <div className="bg-blue-100 px-3 py-2 text-xs font-semibold text-blue-800">Distribuição automática</div>
                         {allocation.length === 0 ? (
-                          <p className="text-xs text-gray-400 p-3 text-center">Não há meses em dívida para cobrir.</p>
+                          <p className="text-xs text-gray-400 p-3 text-center">Não há valores em dívida para cobrir.</p>
                         ) : (
                           <div className="divide-y divide-blue-50">
-                            {allocation.map((a, i) => (
-                              <div key={i} className="flex justify-between items-center px-3 py-2">
-                                <span className="text-xs text-gray-700">
-                                  🏠 Renda {a.item.reference_month?.slice(0, 7)}
-                                  {a.paying < a.item.amount && <span className="text-orange-500 ml-1">(parcial)</span>}
-                                </span>
-                                <span className="text-xs font-semibold">{formatCurrency(a.paying)}</span>
-                              </div>
-                            ))}
+                            {allocation.map((a, i) => {
+                              const icon = a.item.isElecCharge ? '⚡' : a.item.isManualDebt ? '📋' : '🏠'
+                              const label = a.item.isElecCharge ? `Eletricidade ${a.item.reference_month?.slice(0, 7)}`
+                                : a.item.isManualDebt ? (a.item.notes ?? `Dívida ${a.item.reference_month?.slice(0, 7)}`)
+                                : `Renda ${a.item.reference_month?.slice(0, 7)}`
+                              return (
+                                <div key={i} className="flex justify-between items-center px-3 py-2">
+                                  <span className="text-xs text-gray-700">
+                                    {icon} {label}
+                                    {a.paying < a.item.amount && <span className="text-orange-500 ml-1">(parcial)</span>}
+                                  </span>
+                                  <span className="text-xs font-semibold">{formatCurrency(a.paying)}</span>
+                                </div>
+                              )
+                            })}
                             {leftover > 0.01 && (
                               <div className="flex justify-between items-center px-3 py-2 bg-purple-50">
                                 <span className="text-xs text-purple-700">💰 Excedente → adiantamento</span>
