@@ -136,11 +136,22 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
       const cursor = new Date(start)
       while (cursor <= today) {
         const monthStr = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`
-        const hasPayment = enriched.some(p => p.lease_id === lease.id && p.reference_month?.slice(0, 7) === monthStr && (p.tipo === 'renda' || !p.tipo))
-        if (!hasPayment) missingRows.push({
-          reference_month: monthStr + '-01', amount: lease.monthly_rent,
-          payment_date: null, payment_method: null, tipo: 'renda', lease, isMissing: true, isManualDebt: false, isElecCharge: false
-        })
+        const monthPayments = enriched.filter(p => p.lease_id === lease.id && p.reference_month?.slice(0, 7) === monthStr && (p.tipo === 'renda' || !p.tipo))
+        const totalPaidThisMonth = monthPayments.reduce((s, p) => s + (p.amount ?? 0), 0)
+        const hasPayment = monthPayments.length > 0
+        if (!hasPayment) {
+          missingRows.push({
+            reference_month: monthStr + '-01', amount: lease.monthly_rent,
+            payment_date: null, payment_method: null, tipo: 'renda', lease, isMissing: true, isManualDebt: false, isElecCharge: false
+          })
+        } else if (totalPaidThisMonth < lease.monthly_rent - 0.01) {
+          const shortfall = parseFloat((lease.monthly_rent - totalPaidThisMonth).toFixed(2))
+          missingRows.push({
+            reference_month: monthStr + '-01', amount: shortfall,
+            payment_date: null, payment_method: null, tipo: 'renda', lease, isMissing: true, isManualDebt: false, isElecCharge: false,
+            notes: `Pagamento parcial — faltam ${formatCurrency(shortfall)}`
+          })
+        }
         cursor.setMonth(cursor.getMonth() + 1)
       }
     }
