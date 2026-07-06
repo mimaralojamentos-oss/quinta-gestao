@@ -39,6 +39,7 @@ interface DebtItem {
   referenceMonth?: string
   chargeId?: string
   debtId?: string
+  creditApplied?: number  // crédito de adiantamento já descontado
 }
 
 interface PaymentEntry {
@@ -53,6 +54,7 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
   const [editingPayment, setEditingPayment] = useState<any | null>(null)
   const [debtItems, setDebtItems] = useState<DebtItem[]>([])
   const [paymentEntries, setPaymentEntries] = useState<PaymentEntry[]>([])
+  const [adiantamentosToUse, setAdiantamentosToUse] = useState<{ id: string; amount: number }[]>([])
   const [loadingDebts, setLoadingDebts] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -143,9 +145,27 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
       })
     }
 
-    setDebtItems(items)
-    // Inicializar entradas de pagamento vazias
-    setPaymentEntries(items.map(d => ({
+    // Buscar adiantamentos disponíveis (crédito não usado)
+    const { data: advData } = await supabase
+      .from('rent_payments')
+      .select('id, amount')
+      .eq('lease_id', lease.id)
+      .eq('tipo', 'adiantamento')
+      .or('used.is.null,used.eq.false')
+      .order('payment_date', { ascending: true })
+
+    // Aplicar crédito às rendas (mais antigas primeiro)
+    let creditLeft = (advData ?? []).reduce((s: number, a: any) => s + a.amount, 0)
+    const adjustedItems = items.map(item => {
+      if (item.type !== 'renda' || creditLeft <= 0) return item
+      const credit = parseFloat(Math.min(creditLeft, item.remainingAmount).toFixed(2))
+      creditLeft = parseFloat((creditLeft - credit).toFixed(2))
+      return { ...item, remainingAmount: parseFloat((item.remainingAmount - credit).toFixed(2)), creditApplied: credit }
+    })
+
+    setAdiantamentosToUse(advData ?? [])
+    setDebtItems(adjustedItems)
+    setPaymentEntries(adjustedItems.map(d => ({
       debtItem: d,
       amount: '',
       payment_date: new Date().toISOString().slice(0, 10),
@@ -324,6 +344,26 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
               })
             }
           }
+        }
+      }
+    }
+
+    // Marcar adiantamentos consumidos como usados
+    if (adiantamentosToUse.length > 0) {
+      const totalCreditUsed = debtItems
+        .filter(d => d.type === 'renda')
+        .reduce((s, d) => s + (d.creditApplied ?? 0), 0)
+      let toConsume = totalCreditUsed
+      for (const adv of adiantamentosToUse) {
+        if (toConsume <= 0) break
+        if (adv.amount <= toConsume) {
+          await supabase.from('rent_payments').update({ used: true }).eq('id', adv.id)
+          toConsume = parseFloat((toConsume - adv.amount).toFixed(2))
+        } else {
+          // Consumo parcial: reduz o valor restante e marca como usado
+          const remaining = parseFloat((adv.amount - toConsume).toFixed(2))
+          await supabase.from('rent_payments').update({ amount: remaining, used: false }).eq('id', adv.id)
+          toConsume = 0
         }
       }
     }
@@ -551,6 +591,11 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
                               <span className="ml-1 text-gray-400">(original: {formatCurrency(entry.debtItem.originalAmount)})</span>
                             )}
                           </p>
+                          {(entry.debtItem.creditApplied ?? 0) > 0 && (
+                            <p className="text-xs text-purple-600 mt-0.5">
+                              💰 {formatCurrency(entry.debtItem.creditApplied!)} de crédito (adiantamento) será aplicado automaticamente
+                            </p>
+                          )}
                         </div>
                         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
                           entry.debtItem.type === 'renda' ? 'bg-gray-100 text-gray-600'
