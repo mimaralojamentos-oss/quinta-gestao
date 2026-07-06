@@ -285,12 +285,42 @@ export default function QuadrosPage() {
       }
       if (!matchedMeter) { results.push({ fileName: doc.original_name ?? doc.file_path, status: 'error', error: 'Quadro não identificado' }); continue }
       const { data: existingReading } = await supabase.from('meter_readings').select('id').eq('meter_id', matchedMeter.id).eq('reading_date', doc.doc_date).single()
-      if (existingReading) { results.push({ fileName: doc.original_name ?? doc.file_path, status: 'duplicate', meterName: matchedMeter.name }); continue }
+      if (existingReading) {
+        // Leitura já existe — mas verifica se despesa está ligada
+        if (doc.amount && doc.doc_date && !doc.expense_id) {
+          const { data: newExpense } = await supabase.from('expenses').insert({
+            expense_date: doc.doc_date,
+            category: 'eletricidade',
+            type: 'pontual',
+            description: doc.items_summary ?? doc.supplier_name ?? 'Fatura EDP',
+            amount: doc.amount,
+            payment_method: 'transferencia',
+            supplier: doc.supplier_name ?? null,
+            notes: `Criado automaticamente a partir do documento ${doc.doc_number ?? ''}`.trim(),
+          }).select().single()
+          if (newExpense) await supabase.from('documents').update({ expense_id: newExpense.id }).eq('id', doc.id)
+        }
+        results.push({ fileName: doc.original_name ?? doc.file_path, status: 'duplicate', meterName: matchedMeter.name }); continue
+      }
       await supabase.from('meter_readings').insert({
         meter_id: matchedMeter.id, reading_date: doc.doc_date, reading_value: 0,
         invoice_amount: doc.amount ?? null, invoice_number: doc.doc_number ?? null,
         notes: `Importado de documento existente: ${doc.original_name ?? ''}`,
       })
+      // Criar despesa se o documento ainda não tiver uma associada
+      if (doc.amount && doc.doc_date && !doc.expense_id) {
+        const { data: newExpense } = await supabase.from('expenses').insert({
+          expense_date: doc.doc_date,
+          category: 'eletricidade',
+          type: 'pontual',
+          description: doc.items_summary ?? doc.supplier_name ?? 'Fatura EDP',
+          amount: doc.amount,
+          payment_method: 'transferencia',
+          supplier: doc.supplier_name ?? null,
+          notes: `Criado automaticamente a partir do documento ${doc.doc_number ?? ''}`.trim(),
+        }).select().single()
+        if (newExpense) await supabase.from('documents').update({ expense_id: newExpense.id }).eq('id', doc.id)
+      }
       results.push({ fileName: doc.original_name ?? doc.file_path, status: 'success', meterName: matchedMeter.name })
     }
     setImportResults(results); setImporting(false); setImportDone(true); fetchAll()
