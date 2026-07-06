@@ -215,7 +215,16 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
     }
 
     const allRows = [...enriched, ...missingRows, ...manualDebtRows, ...elecChargeRows]
-      .sort((a, b) => b.reference_month.localeCompare(a.reference_month))
+      .sort((a, b) => {
+        // 1. Mês descendente
+        const monthDiff = b.reference_month.localeCompare(a.reference_month)
+        if (monthDiff !== 0) return monthDiff
+        // 2. Dentro do mesmo mês: em dívida/por pagar primeiro, pago depois
+        const aIsPaid = !a.isMissing && !!a.payment_date
+        const bIsPaid = !b.isMissing && !!b.payment_date
+        if (aIsPaid !== bIsPaid) return aIsPaid ? 1 : -1
+        return 0
+      })
 
     setPayments(allRows)
     setLoadingPayments(false)
