@@ -1,7 +1,7 @@
 'use client'
 
 import AppLayout from '@/components/layout/AppLayout'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatDate } from '@/lib/utils'
 import { BarChart3, TrendingUp, Home, FileText, Calendar, ChevronDown, ChevronUp, Edit2, X, Save, ClipboardList, Download, Loader2, Receipt } from 'lucide-react'
@@ -60,7 +60,9 @@ export default function RelatoriosPage() {
   // Pagamentos dos Inquilinos
   const [pagamentos, setPagamentos] = useState<any>(null)
   const [allSpaces, setAllSpaces] = useState<any[]>([])
-  const [pagamentosEspaco, setPagamentosEspaco] = useState('todos')
+  const [pagamentosEspacos, setPagamentosEspacos] = useState<string[]>([])
+  const [showPagamentosSpaceDropdown, setShowPagamentosSpaceDropdown] = useState(false)
+  const pagamentosSpaceRef = useRef<HTMLDivElement>(null)
   const [pagamentosMes, setPagamentosMes] = useState('year')
 
   useEffect(() => {
@@ -73,7 +75,17 @@ export default function RelatoriosPage() {
 
   useEffect(() => {
     if (activeReport === 'pagamentos') fetchPagamentos()
-  }, [pagamentosEspaco, pagamentosMes])
+  }, [pagamentosEspacos, pagamentosMes])
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (pagamentosSpaceRef.current && !pagamentosSpaceRef.current.contains(e.target as Node)) {
+        setShowPagamentosSpaceDropdown(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   async function fetchRendasData() {
     const startDate = `${selectedMonth}-01`
@@ -247,16 +259,14 @@ export default function RelatoriosPage() {
       const { data: spacesData } = await supabase.from('spaces').select('id, ref').order('ref')
       setAllSpaces(spacesData ?? [])
 
-      // Buscar todos os contratos do espaço selecionado (incluindo inativos)
-      // via tabela spaces para não depender do nome da coluna FK
+      // Buscar contratos dos espaços selecionados (vazio = todos)
       let leaseIdFilter: string[] | null = null
-      if (pagamentosEspaco !== 'todos') {
-        const { data: spaceData } = await supabase
+      if (pagamentosEspacos.length > 0) {
+        const { data: spacesFiltered } = await supabase
           .from('spaces')
           .select('id, leases(id)')
-          .eq('ref', pagamentosEspaco)
-          .single()
-        leaseIdFilter = ((spaceData as any)?.leases ?? []).map((l: any) => String(l.id))
+          .in('ref', pagamentosEspacos)
+        leaseIdFilter = (spacesFiltered ?? []).flatMap((s: any) => (s.leases ?? []).map((l: any) => String(l.id)))
       }
 
       const noResults = ['00000000-0000-0000-0000-000000000000']
@@ -1031,18 +1041,36 @@ export default function RelatoriosPage() {
                 <div className="bg-white border border-gray-200 rounded-xl p-4">
                   <div className="flex flex-wrap gap-4 items-end">
                     <div>
-                      <label className="text-xs font-medium text-gray-500 block mb-1">Espaco</label>
-                      <div className="relative">
-                        <select
-                          value={pagamentosEspaco}
-                          onChange={e => setPagamentosEspaco(e.target.value)}
-                          className="appearance-none bg-white border border-gray-200 rounded-lg px-3 py-1.5 pr-8 text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-teal-500">
-                          <option value="todos">Todos os espacos</option>
-                          {allSpaces.map((s: any) => (
-                            <option key={s.id} value={s.ref}>{s.ref}</option>
-                          ))}
-                        </select>
-                        <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                      <label className="text-xs font-medium text-gray-500 block mb-1">Espaço</label>
+                      <div className="relative" ref={pagamentosSpaceRef}>
+                        <button
+                          onClick={() => setShowPagamentosSpaceDropdown(v => !v)}
+                          className={`appearance-none bg-white border rounded-lg px-3 py-1.5 pr-8 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500 flex items-center gap-2 min-w-[160px] ${pagamentosEspacos.length > 0 ? 'border-teal-400 text-teal-700' : 'border-gray-200 text-gray-700'}`}>
+                          <span className="truncate">
+                            {pagamentosEspacos.length === 0 ? 'Todos os espaços' : pagamentosEspacos.length === 1 ? pagamentosEspacos[0] : `${pagamentosEspacos.length} espaços`}
+                          </span>
+                          <ChevronDown className="w-4 h-4 flex-shrink-0 ml-auto text-gray-400" />
+                        </button>
+                        {showPagamentosSpaceDropdown && (
+                          <div className="absolute z-20 top-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg max-h-64 overflow-y-auto min-w-[160px]">
+                            <div className="p-2 border-b border-gray-100">
+                              <button onClick={() => setPagamentosEspacos([])} className="text-xs text-gray-500 hover:text-teal-600 hover:underline">
+                                Limpar seleção
+                              </button>
+                            </div>
+                            <div className="p-2 grid grid-cols-3 gap-1">
+                              {allSpaces.map((s: any) => (
+                                <label key={s.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-50 cursor-pointer">
+                                  <input type="checkbox"
+                                    checked={pagamentosEspacos.includes(s.ref)}
+                                    onChange={() => setPagamentosEspacos(prev => prev.includes(s.ref) ? prev.filter(r => r !== s.ref) : [...prev, s.ref])}
+                                    className="accent-teal-600 w-3.5 h-3.5" />
+                                  <span className="text-sm text-gray-700">{s.ref}</span>
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
 
