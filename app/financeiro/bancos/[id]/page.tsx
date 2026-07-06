@@ -1330,6 +1330,7 @@ function MatchModalComponent({ tx, tenants, leases, expenses, documents, autoMat
   const [ruleKeyword, setRuleKeyword] = useState('')
   const [incomeId, setIncomeId] = useState('')
   const [incomeRecords, setIncomeRecords] = useState<any[]>([])
+  const [wideSearch, setWideSearch] = useState(false)
   const supabase = createClient()
 
   useEffect(() => {
@@ -1359,6 +1360,16 @@ function MatchModalComponent({ tx, tenants, leases, expenses, documents, autoMat
     const diff = Math.abs(new Date(e.expense_date).getTime() - txDate.getTime())
     return diff <= 15 * 24 * 60 * 60 * 1000
   }).length
+
+  const wideMatches = wideSearch ? (() => {
+    const amt = Math.abs(tx.amount)
+    const dateFrom = new Date(txDate); dateFrom.setDate(dateFrom.getDate() - 60)
+    const dateTo = new Date(txDate); dateTo.setDate(dateTo.getDate() + 60)
+    return expenses.filter(e => {
+      const eDate = new Date(e.expense_date)
+      return Math.abs(e.amount - amt) <= 0.02 && eDate >= dateFrom && eDate <= dateTo
+    })
+  })() : []
 
   const tiposComNotes = ['outro', 'custos_bancarios', 'impostos', 'transferencia_interna', 'receita_extraordinaria']
 
@@ -1399,11 +1410,11 @@ function MatchModalComponent({ tx, tenants, leases, expenses, documents, autoMat
           </div>
         </div>
 
-        {autoMatches.length > 0 && (
-          <div className="mb-4">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-1">
-              <Sparkles className="w-3.5 h-3.5 text-blue-500" /> Sugestões automáticas
-            </p>
+        <div className="mb-4">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-1">
+            <Sparkles className="w-3.5 h-3.5 text-blue-500" /> Sugestões automáticas
+          </p>
+          {autoMatches.length > 0 ? (
             <div className="space-y-2">
               {autoMatches.map((match, i) => (
                 <div key={i} className="flex items-center justify-between bg-blue-50 border border-blue-100 rounded-lg p-2.5">
@@ -1423,11 +1434,35 @@ function MatchModalComponent({ tx, tenants, leases, expenses, documents, autoMat
                 </div>
               ))}
             </div>
-            <div className="border-t border-gray-100 mt-3 pt-3">
-              <p className="text-xs text-gray-400 mb-2">Ou escolhe manualmente:</p>
+          ) : (
+            <p className="text-xs text-gray-400 mb-2">Nenhuma sugestão automática encontrada (±15 dias).</p>
+          )}
+          {!wideSearch && tx.amount < 0 && (
+            <button onClick={() => setWideSearch(true)} className="mt-2 text-xs text-blue-600 hover:text-blue-800 underline">
+              🔍 Procurar despesas com ±60 dias de diferença
+            </button>
+          )}
+          {wideSearch && wideMatches.length > 0 && (
+            <div className="mt-2 space-y-2">
+              <p className="text-xs font-medium text-orange-600">Despesas com valor igual encontradas (±60 dias):</p>
+              {wideMatches.map((e, i) => (
+                <div key={i} className="flex items-center justify-between bg-orange-50 border border-orange-100 rounded-lg p-2.5">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium text-orange-800 truncate">💸 {e.description ?? '—'}</p>
+                    <p className="text-xs text-orange-600">{formatDate(e.expense_date)} · {formatCurrency(e.amount)}</p>
+                  </div>
+                  <button onClick={() => { setType('despesa'); setExpenseId(e.id) }} className="text-xs bg-orange-500 text-white px-2 py-1 rounded-lg hover:bg-orange-600 ml-3 flex-shrink-0">Usar</button>
+                </div>
+              ))}
             </div>
+          )}
+          {wideSearch && wideMatches.length === 0 && (
+            <p className="text-xs text-gray-400 mt-2">Nenhuma despesa com valor igual encontrada em ±60 dias.</p>
+          )}
+          <div className="border-t border-gray-100 mt-3 pt-3">
+            <p className="text-xs text-gray-400 mb-2">Ou escolhe manualmente:</p>
           </div>
-        )}
+        </div>
 
         <div className="space-y-4">
           <div>
