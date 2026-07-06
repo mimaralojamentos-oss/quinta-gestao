@@ -4,7 +4,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Zap, Trash2, X, ChevronDown, ChevronRight, Settings, Save, Pencil, Search } from 'lucide-react'
+import { Zap, Trash2, X, ChevronDown, ChevronRight, Settings, Save, Pencil, Search, Printer } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 
 interface ElectricityConfig {
@@ -170,6 +170,113 @@ export default function QuadrosEspacosPage() {
       return latest.amount_calculated ?? 0
     }
     return 0
+  }
+
+  function printElectricity(space: Space) {
+    const spaceReadings = readings[space.id] ?? []
+    const tenantName = getTenantName(space.tenant)
+    const accumulated = getAccumulatedAmount(space.id)
+    const today = new Date().toLocaleDateString('pt-PT')
+
+    const rows = spaceReadings.map(r => `
+      <tr>
+        <td>${r.reading_date ? new Date(r.reading_date).toLocaleDateString('pt-PT') : '—'}</td>
+        <td style="font-family:monospace">${r.reading_value ?? '—'}</td>
+        <td style="font-family:monospace;color:#888">${r.previous_value ?? '—'}</td>
+        <td>${r.kwh_consumed != null ? Number(r.kwh_consumed).toFixed(2) + ' kWh' : '—'}</td>
+        <td style="font-weight:600">${r.amount_calculated != null ? r.amount_calculated.toFixed(2) + ' €' : '—'}</td>
+        <td><span style="padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;${r.charged ? 'background:#d1fae5;color:#065f46' : 'background:#fef3c7;color:#92400e'}">${r.charged ? 'Cobrado' : 'Acumulado'}</span></td>
+      </tr>`).join('')
+
+    const totalCobrado = spaceReadings.filter(r => r.charged && r.amount_calculated).reduce((s, r) => s + (r.amount_calculated ?? 0), 0)
+
+    const html = `<!DOCTYPE html>
+<html lang="pt">
+<head>
+  <meta charset="UTF-8">
+  <title>Leituras de Luz — ${space.ref}</title>
+  <style>
+    @page { size: A4 portrait; margin: 20mm 18mm; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, sans-serif; font-size: 13px; color: #1a1a1a; }
+    .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 28px; border-bottom: 2px solid #059669; padding-bottom: 16px; }
+    .logo-area h1 { font-size: 20px; font-weight: 700; color: #059669; }
+    .logo-area p { font-size: 12px; color: #666; margin-top: 2px; }
+    .meta { text-align: right; font-size: 12px; color: #555; }
+    .section-title { font-size: 14px; font-weight: 700; color: #374151; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.05em; }
+    .info-box { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 14px 18px; margin-bottom: 24px; display: flex; gap: 40px; }
+    .info-item label { font-size: 11px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; display: block; }
+    .info-item span { font-size: 14px; font-weight: 600; color: #111827; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
+    thead tr { background: #059669; color: white; }
+    thead th { padding: 9px 10px; text-align: left; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+    tbody tr { border-bottom: 1px solid #f3f4f6; }
+    tbody tr:nth-child(even) { background: #f9fafb; }
+    tbody td { padding: 9px 10px; font-size: 13px; }
+    .totals { background: #ecfdf5; border: 1px solid #6ee7b7; border-radius: 8px; padding: 14px 18px; margin-bottom: 32px; display: flex; gap: 40px; }
+    .totals label { font-size: 11px; color: #065f46; text-transform: uppercase; display: block; }
+    .totals span { font-size: 16px; font-weight: 700; color: #065f46; }
+    .acum span { color: #92400e; }
+    .acum { background: #fffbeb; border-color: #fcd34d; }
+    .footer { margin-top: 40px; border-top: 1px solid #e5e7eb; padding-top: 16px; display: flex; justify-content: space-between; font-size: 11px; color: #9ca3af; }
+    .signature { margin-top: 48px; display: flex; justify-content: space-between; }
+    .signature-line { text-align: center; }
+    .signature-line div { border-top: 1px solid #374151; width: 200px; padding-top: 6px; font-size: 11px; color: #6b7280; margin-top: 40px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="logo-area">
+      <h1>⚡ Consumo de Eletricidade</h1>
+      <p>Rua Serpa Pinto 131A, Évora</p>
+    </div>
+    <div class="meta">
+      <p>Emitido em: <strong>${today}</strong></p>
+    </div>
+  </div>
+
+  <div class="info-box">
+    <div class="info-item"><label>Fração</label><span>${space.ref}</span></div>
+    ${tenantName ? `<div class="info-item"><label>Inquilino</label><span>${tenantName}</span></div>` : ''}
+    <div class="info-item"><label>Preço/kWh (c/ IVA)</label><span>${(pricePerKwh * (1 + vatRate)).toFixed(4)} €</span></div>
+  </div>
+
+  <p class="section-title">Histórico de Leituras</p>
+  <table>
+    <thead>
+      <tr>
+        <th>Data</th>
+        <th>Leitura</th>
+        <th>Anterior</th>
+        <th>kWh</th>
+        <th>Valor</th>
+        <th>Estado</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>
+
+  <div class="totals${accumulated > 0 ? ' acum' : ''}">
+    <div><label>Total Cobrado</label><span>${totalCobrado.toFixed(2)} €</span></div>
+    ${accumulated > 0 ? `<div><label>Valor em Acumulado (por cobrar)</label><span>${accumulated.toFixed(2)} €</span></div>` : ''}
+  </div>
+
+  <div class="signature">
+    <div class="signature-line"><div>Proprietário</div></div>
+    <div class="signature-line"><div>Inquilino</div></div>
+  </div>
+
+  <div class="footer">
+    <span>Rua Serpa Pinto 131A · Évora</span>
+    <span>Documento gerado automaticamente</span>
+  </div>
+
+  <script>window.onload = () => window.print()</script>
+</body>
+</html>`
+
+    const w = window.open('', '_blank')
+    if (w) { w.document.write(html); w.document.close() }
   }
 
   function openReadingModal(space: Space) {
@@ -626,6 +733,14 @@ export default function QuadrosEspacosPage() {
                           onClick={e => { e.stopPropagation(); openReadingModal(space) }}
                           className="text-xs text-blue-600 hover:underline font-medium whitespace-nowrap">
                           + Leitura
+                        </button>
+                      )}
+                      {spaceReadings.length > 0 && (
+                        <button
+                          onClick={e => { e.stopPropagation(); printElectricity(space) }}
+                          className="text-gray-400 hover:text-emerald-600 transition-colors"
+                          title="Imprimir leituras">
+                          <Printer className="w-4 h-4" />
                         </button>
                       )}
                       {isOpen ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
