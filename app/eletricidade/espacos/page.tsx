@@ -545,9 +545,9 @@ export default function QuadrosEspacosPage() {
                     Limpar
                   </button>
                 </div>
-                <div className="p-2 grid grid-cols-3 gap-1">
-                  {spaces.map(s => (
-                    <label key={s.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-50 cursor-pointer">
+                <div className="p-1">
+                  {[...spaces].sort((a, b) => a.ref.localeCompare(b.ref, 'pt', { numeric: true })).map(s => (
+                    <label key={s.id} className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-gray-50 cursor-pointer">
                       <input type="checkbox" checked={filterSpaces.includes(s.ref)} onChange={() => toggleSpace(s.ref)} className="accent-emerald-600 w-3.5 h-3.5 flex-shrink-0" />
                       <span className="text-sm text-gray-700">{s.ref}</span>
                     </label>

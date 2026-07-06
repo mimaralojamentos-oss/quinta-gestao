@@ -294,9 +294,9 @@ export default function PagamentosPage() {
                       Limpar seleção
                     </button>
                   </div>
-                  <div className="p-2 grid grid-cols-3 gap-1">
-                    {allSpaceRefs.map(ref => (
-                      <label key={ref} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-50 cursor-pointer">
+                  <div className="p-1">
+                    {[...allSpaceRefs].sort((a, b) => a.localeCompare(b, 'pt', { numeric: true })).map(ref => (
+                      <label key={ref} className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-gray-50 cursor-pointer">
                         <input type="checkbox" checked={filterSpaces.includes(ref)} onChange={() => toggleSpace(ref)} className="accent-emerald-600 w-3.5 h-3.5 flex-shrink-0" />
                         <span className="text-sm text-gray-700">{ref}</span>
                       </label>

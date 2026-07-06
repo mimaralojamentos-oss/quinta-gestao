@@ -1058,9 +1058,9 @@ export default function RelatoriosPage() {
                                 Limpar seleção
                               </button>
                             </div>
-                            <div className="p-2 grid grid-cols-3 gap-1">
-                              {allSpaces.map((s: any) => (
-                                <label key={s.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-50 cursor-pointer">
+                            <div className="p-1">
+                              {[...allSpaces].sort((a: any, b: any) => a.ref.localeCompare(b.ref, 'pt', { numeric: true })).map((s: any) => (
+                                <label key={s.id} className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-gray-50 cursor-pointer">
                                   <input type="checkbox"
                                     checked={pagamentosEspacos.includes(s.ref)}
                                     onChange={() => setPagamentosEspacos(prev => prev.includes(s.ref) ? prev.filter(r => r !== s.ref) : [...prev, s.ref])}

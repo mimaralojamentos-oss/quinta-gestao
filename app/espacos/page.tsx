@@ -246,9 +246,9 @@ export default function EspacosPage() {
                   <div className="p-2 border-b border-gray-100">
                     <button onClick={() => setFilterRefs([])} className="text-xs text-gray-500 hover:text-emerald-600 hover:underline">Limpar seleção</button>
                   </div>
-                  <div className="p-2 grid grid-cols-3 gap-1">
-                    {allRefs.map(ref => (
-                      <label key={ref} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-50 cursor-pointer">
+                  <div className="p-1">
+                    {[...allRefs].sort((a, b) => a.localeCompare(b, 'pt', { numeric: true })).map(ref => (
+                      <label key={ref} className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-gray-50 cursor-pointer">
                         <input type="checkbox" checked={filterRefs.includes(ref)} onChange={() => toggleRef(ref)} className="accent-emerald-600 w-3.5 h-3.5 flex-shrink-0" />
                         <span className="text-sm text-gray-700">{ref}</span>
                       </label>
