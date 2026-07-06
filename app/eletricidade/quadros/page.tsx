@@ -262,44 +262,52 @@ export default function QuadrosPage() {
       setImportResults([{ fileName: 'Nenhuma fatura EDP encontrada nos documentos', status: 'error' }])
       setImporting(false); setImportDone(true); return
     }
+    const { data: allMeters } = await supabase.from('meters').select('id, name, contract_number')
     const results: UploadResult[] = []
+
+    async function ensureExpense(doc: any) {
+      if (!doc.amount || !doc.doc_date || doc.expense_id) return
+      const { data: newExpense } = await supabase.from('expenses').insert({
+        expense_date: doc.doc_date,
+        category: 'eletricidade',
+        type: 'pontual',
+        description: doc.items_summary ?? doc.supplier_name ?? 'Fatura EDP',
+        amount: doc.amount,
+        payment_method: 'transferencia',
+        supplier: doc.supplier_name ?? null,
+        notes: `Criado automaticamente a partir do documento ${doc.doc_number ?? ''}`.trim(),
+      }).select().single()
+      if (newExpense) await supabase.from('documents').update({ expense_id: newExpense.id }).eq('id', doc.id)
+    }
+
+    function matchMeter(doc: any) {
+      if (!allMeters) return null
+      const docName = (doc.original_name ?? '').toLowerCase().replace(/\s+/g, '')
+      const docSummary = (doc.items_summary ?? '').toLowerCase()
+      for (const m of allMeters) {
+        // 1. contrato
+        if (m.contract_number && (docSummary.includes(m.contract_number.replace(/\s/g, '').toLowerCase()) || (doc.items_summary ?? '').includes(m.contract_number))) return m
+        // 2. nome completo normalizado (ex: "9005-painéis")
+        const meterNorm = m.name.replace('Quadro ', '').toLowerCase().replace(/\s+/g, '')
+        if (docName.includes(meterNorm)) return m
+        // 3. só o número do quadro (ex: "9005" ou "9002")
+        const meterNum = m.name.match(/\d+/)?.[0]
+        if (meterNum && docName.includes(`edp${meterNum}`) || meterNum && docName.includes(`edp-${meterNum}`) || meterNum && docName.includes(` ${meterNum} `) || meterNum && new RegExp(`edp.{0,2}${meterNum}`).test(docName)) return m
+      }
+      return null
+    }
+
     for (const doc of docs) {
       if (!doc.doc_date) { results.push({ fileName: doc.original_name ?? doc.file_path, status: 'error', error: 'Sem data' }); continue }
-      const { data: allMeters } = await supabase.from('meters').select('id, name, contract_number')
-      let matchedMeter = null
-      if (allMeters && doc.items_summary) {
-        for (const m of allMeters) {
-          const normalizedDocName = (doc.original_name ?? '').toLowerCase().replace(/\s+/g, '')
-          const normalizedMeterName = m.name.replace('Quadro ', '').toLowerCase().replace(/\s+/g, '')
-          if (doc.items_summary?.includes(m.contract_number) || normalizedDocName.includes(normalizedMeterName)) {
-            matchedMeter = m; break
-          }
-        }
+      const matchedMeter = matchMeter(doc)
+      if (!matchedMeter) {
+        // Sem quadro identificado — mas ainda assim garante despesa
+        await ensureExpense(doc)
+        results.push({ fileName: doc.original_name ?? doc.file_path, status: 'error', error: 'Quadro não identificado' }); continue
       }
-      if (!matchedMeter && allMeters && doc.original_name) {
-        for (const m of allMeters) {
-          const normalizedDocName2 = doc.original_name.toLowerCase().replace(/\s+/g, '')
-          const normalizedMeterName2 = m.name.replace('Quadro ', '').toLowerCase().replace(/\s+/g, '')
-          if (normalizedDocName2.includes(normalizedMeterName2)) { matchedMeter = m; break }
-        }
-      }
-      if (!matchedMeter) { results.push({ fileName: doc.original_name ?? doc.file_path, status: 'error', error: 'Quadro não identificado' }); continue }
       const { data: existingReading } = await supabase.from('meter_readings').select('id').eq('meter_id', matchedMeter.id).eq('reading_date', doc.doc_date).single()
       if (existingReading) {
-        // Leitura já existe — mas verifica se despesa está ligada
-        if (doc.amount && doc.doc_date && !doc.expense_id) {
-          const { data: newExpense } = await supabase.from('expenses').insert({
-            expense_date: doc.doc_date,
-            category: 'eletricidade',
-            type: 'pontual',
-            description: doc.items_summary ?? doc.supplier_name ?? 'Fatura EDP',
-            amount: doc.amount,
-            payment_method: 'transferencia',
-            supplier: doc.supplier_name ?? null,
-            notes: `Criado automaticamente a partir do documento ${doc.doc_number ?? ''}`.trim(),
-          }).select().single()
-          if (newExpense) await supabase.from('documents').update({ expense_id: newExpense.id }).eq('id', doc.id)
-        }
+        await ensureExpense(doc)
         results.push({ fileName: doc.original_name ?? doc.file_path, status: 'duplicate', meterName: matchedMeter.name }); continue
       }
       await supabase.from('meter_readings').insert({
@@ -307,20 +315,7 @@ export default function QuadrosPage() {
         invoice_amount: doc.amount ?? null, invoice_number: doc.doc_number ?? null,
         notes: `Importado de documento existente: ${doc.original_name ?? ''}`,
       })
-      // Criar despesa se o documento ainda não tiver uma associada
-      if (doc.amount && doc.doc_date && !doc.expense_id) {
-        const { data: newExpense } = await supabase.from('expenses').insert({
-          expense_date: doc.doc_date,
-          category: 'eletricidade',
-          type: 'pontual',
-          description: doc.items_summary ?? doc.supplier_name ?? 'Fatura EDP',
-          amount: doc.amount,
-          payment_method: 'transferencia',
-          supplier: doc.supplier_name ?? null,
-          notes: `Criado automaticamente a partir do documento ${doc.doc_number ?? ''}`.trim(),
-        }).select().single()
-        if (newExpense) await supabase.from('documents').update({ expense_id: newExpense.id }).eq('id', doc.id)
-      }
+      await ensureExpense(doc)
       results.push({ fileName: doc.original_name ?? doc.file_path, status: 'success', meterName: matchedMeter.name })
     }
     setImportResults(results); setImporting(false); setImportDone(true); fetchAll()
