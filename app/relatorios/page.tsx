@@ -53,7 +53,8 @@ export default function RelatoriosPage() {
   const [editForm, setEditForm] = useState<any>({})
   const [savingExpense, setSavingExpense] = useState(false)
 
-  const [cobrancasSort, setCobrancasSort] = useState<'nome' | 'espaco'>('nome')
+  const [cobrancasSort, setCobrancasSort] = useState<'espaco' | 'nome' | 'renda'>('espaco')
+  const [cobrancasSortDir, setCobrancasSortDir] = useState<'asc' | 'desc'>('asc')
 
   const [exportingPDF, setExportingPDF] = useState(false)
 
@@ -955,9 +956,19 @@ export default function RelatoriosPage() {
             {activeReport === 'cobrancas' && rendas && (() => {
               const totalEmFalta = rendas.emFalta.reduce((s: number, l: any) => s + (l.monthly_rent ?? 0), 0)
               const sortedEmFalta = [...rendas.emFalta].sort((a: any, b: any) => {
-                if (cobrancasSort === 'espaco') return (a.space?.ref ?? '').localeCompare(b.space?.ref ?? '')
-                return (a.tenant?.name ?? '').localeCompare(b.tenant?.name ?? '')
+                const dir = cobrancasSortDir === 'asc' ? 1 : -1
+                if (cobrancasSort === 'espaco') return dir * (a.space?.ref ?? '').localeCompare(b.space?.ref ?? '', 'pt', { numeric: true })
+                if (cobrancasSort === 'renda') return dir * ((a.monthly_rent ?? 0) - (b.monthly_rent ?? 0))
+                return dir * (a.tenant?.name ?? '').localeCompare(b.tenant?.name ?? '', 'pt')
               })
+              function toggleSort(col: 'espaco' | 'nome' | 'renda') {
+                if (cobrancasSort === col) setCobrancasSortDir(d => d === 'asc' ? 'desc' : 'asc')
+                else { setCobrancasSort(col); setCobrancasSortDir('asc') }
+              }
+              function SortIcon({ col }: { col: string }) {
+                if (cobrancasSort !== col) return <span className="ml-1 text-gray-300">↕</span>
+                return <span className="ml-1 text-emerald-600">{cobrancasSortDir === 'asc' ? '↑' : '↓'}</span>
+              }
               const monthLabel = MONTHS.find(m => m.value === selectedMonth)?.label ?? selectedMonth
 
               return (
@@ -973,17 +984,7 @@ export default function RelatoriosPage() {
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-between print:hidden">
-                    <div className="flex gap-2">
-                      <button onClick={() => setCobrancasSort('nome')}
-                        className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${cobrancasSort === 'nome' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
-                        Ordenar por Nome
-                      </button>
-                      <button onClick={() => setCobrancasSort('espaco')}
-                        className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${cobrancasSort === 'espaco' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
-                        Ordenar por Espaco
-                      </button>
-                    </div>
+                  <div className="flex items-center justify-end print:hidden">
                     <button onClick={() => window.print()}
                       className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-medium bg-gray-800 text-white hover:bg-gray-900 transition-colors">
                       Imprimir
@@ -1004,9 +1005,15 @@ export default function RelatoriosPage() {
                       <table className="w-full text-sm">
                         <thead>
                           <tr className="border-b border-gray-200">
-                            <th className="text-left py-2 px-2 text-xs font-semibold text-gray-500 uppercase">Espaco</th>
-                            <th className="text-left py-2 px-2 text-xs font-semibold text-gray-500 uppercase">Inquilino</th>
-                            <th className="text-right py-2 px-2 text-xs font-semibold text-gray-500 uppercase">Renda</th>
+                            <th className="text-left py-2 px-2 text-xs font-semibold text-gray-500 uppercase cursor-pointer select-none hover:text-gray-800 print:cursor-default" onClick={() => toggleSort('espaco')}>
+                              Espaço<SortIcon col="espaco" />
+                            </th>
+                            <th className="text-left py-2 px-2 text-xs font-semibold text-gray-500 uppercase cursor-pointer select-none hover:text-gray-800 print:cursor-default" onClick={() => toggleSort('nome')}>
+                              Inquilino<SortIcon col="nome" />
+                            </th>
+                            <th className="text-right py-2 px-2 text-xs font-semibold text-gray-500 uppercase cursor-pointer select-none hover:text-gray-800 print:cursor-default" onClick={() => toggleSort('renda')}>
+                              Renda<SortIcon col="renda" />
+                            </th>
                             <th className="text-center py-2 px-2 text-xs font-semibold text-gray-500 uppercase w-20">Pago</th>
                           </tr>
                         </thead>
