@@ -38,12 +38,16 @@ export default function CaixaPage() {
 
   useEffect(() => { fetchData() }, [])
 
+  const cashStartDate = process.env.NEXT_PUBLIC_CASH_FUND_START_DATE ?? null
+
   async function fetchData() {
     setLoading(true)
-    const { data } = await supabase
+    let query = supabase
       .from('cash_fund_movements')
       .select('*')
       .order('movement_date', { ascending: false })
+    if (cashStartDate) query = query.gte('movement_date', cashStartDate)
+    const { data } = await query
     setMovements(data ?? [])
     setLoading(false)
   }
@@ -147,7 +151,10 @@ export default function CaixaPage() {
         <div className="flex items-center justify-between mb-4">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Fundo de Maneio</h1>
-            <p className="text-sm text-gray-500 mt-0.5">Controlo de saldo em dinheiro</p>
+            <p className="text-sm text-gray-500 mt-0.5">
+              Controlo de saldo em dinheiro
+              {cashStartDate && <span className="ml-2 text-amber-600 font-medium">· desde {new Date(cashStartDate + 'T00:00:00').toLocaleDateString('pt-PT', { day: 'numeric', month: 'long', year: 'numeric' })}</span>}
+            </p>
           </div>
           {(isAdmin || isCoAdmin) && (
             <button className="btn-primary" onClick={() => setShowModal(true)}>
