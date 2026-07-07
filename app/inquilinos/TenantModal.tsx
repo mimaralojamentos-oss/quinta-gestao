@@ -2,7 +2,8 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Tenant } from '@/lib/types'
-import { X, User, Home, FileText, Plus, Trash2, Pencil, ChevronRight, ChevronLeft, Upload, Loader2, Sparkles, Printer, ReceiptText, Banknote } from 'lucide-react'
+import { X, User, Home, FileText, Plus, Trash2, Pencil, ChevronRight, ChevronLeft, Upload, Loader2, Sparkles, Printer, ReceiptText, Banknote, Mail } from 'lucide-react'
+import EmailModal from '@/components/EmailModal'
 import { formatCurrency, formatDate, getCurrentMonth } from '@/lib/utils'
 import { logAccess } from '@/lib/logAccess'
 
@@ -86,6 +87,8 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
   })
   const [savingPayment, setSavingPayment] = useState(false)
   const [paymentError, setPaymentError] = useState('')
+
+  const [showEmailModal, setShowEmailModal] = useState(false)
 
   const [showRecebimentoForm, setShowRecebimentoForm] = useState(false)
   const [recebimentoForm, setRecebimentoForm] = useState({
@@ -713,6 +716,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
   }
 
   return (
+    <>
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6 max-h-[90vh] flex flex-col">
         <div className="flex items-center justify-between mb-4">
@@ -948,6 +952,9 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                   </button>
                   <button onClick={printPagamentos} className="btn-secondary px-3 justify-center" title="Imprimir histórico de pagamentos">
                     <ReceiptText className="w-4 h-4" />
+                  </button>
+                  <button onClick={() => setShowEmailModal(true)} className="btn-secondary px-3 justify-center" title="Enviar e-mail ao inquilino">
+                    <Mail className="w-4 h-4" />
                   </button>
                 </div>
               )}
@@ -1248,5 +1255,15 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
         )}
       </div>
     </div>
+
+    {showEmailModal && tenant && (
+      <EmailModal
+        tenantName={tenant.name}
+        tenantEmail={tenant.email}
+        spaceRef={leases.find((l: any) => l.status === 'ativo')?.space?.ref ?? leases[0]?.space?.ref}
+        onClose={() => setShowEmailModal(false)}
+      />
+    )}
+    </>
   )
 }

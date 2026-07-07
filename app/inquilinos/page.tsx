@@ -9,6 +9,7 @@ import { Plus, Search, FileText, Phone, Mail, X, AlertTriangle, ArrowUpDown, Arr
 import TenantModal from './TenantModal'
 import LeaseModal from './LeaseModal'
 import { useAuth } from '@/lib/auth-context'
+import EmailModal from '@/components/EmailModal'
 import { logAccess } from '@/lib/logAccess'
 import Link from 'next/link'
 
@@ -64,6 +65,7 @@ export default function InquilinosPage() {
   const [debtTenant, setDebtTenant] = useState<TenantWithLease | null>(null)
   const [debts, setDebts] = useState<Debt[]>([])
   const [loadingDebts, setLoadingDebts] = useState(false)
+  const [emailTenant, setEmailTenant] = useState<TenantWithLease | null>(null)
   const [showNewDebt, setShowNewDebt] = useState(false)
   const [showNewPayment, setShowNewPayment] = useState<string | null>(null)
   const [savingDebt, setSavingDebt] = useState(false)
@@ -509,6 +511,10 @@ export default function InquilinosPage() {
                               className="text-xs text-blue-600 hover:underline font-medium">Contrato</button>
                             <button onClick={() => openDebtModal(tenant)}
                               className="text-xs text-red-500 hover:underline font-medium">Dívidas</button>
+                            <button onClick={() => setEmailTenant(tenant)}
+                              className="text-xs text-purple-600 hover:underline font-medium" title="Enviar e-mail">
+                              <Mail className="w-3.5 h-3.5 inline" />
+                            </button>
                           </div>
                         </td>
                       )}
@@ -741,6 +747,15 @@ export default function InquilinosPage() {
       {showLeaseModal && selectedTenant && (isAdmin || isCoAdmin) && (
         <LeaseModal tenant={selectedTenant} onClose={() => setShowLeaseModal(false)}
           onSaved={() => { setShowLeaseModal(false); fetchTenants() }} />
+      )}
+
+      {emailTenant && (
+        <EmailModal
+          tenantName={emailTenant.name}
+          tenantEmail={emailTenant.email}
+          spaceRef={emailTenant.spaces?.[0]?.ref ?? emailTenant.leases?.find((l: any) => l.status === 'ativo')?.space?.ref}
+          onClose={() => setEmailTenant(null)}
+        />
       )}
     </AppLayout>
   )

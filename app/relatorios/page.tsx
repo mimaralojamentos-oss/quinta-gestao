@@ -4,7 +4,8 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatDate } from '@/lib/utils'
-import { BarChart3, TrendingUp, Home, FileText, Calendar, ChevronDown, ChevronUp, Edit2, X, Save, ClipboardList, Download, Loader2, Receipt } from 'lucide-react'
+import { BarChart3, TrendingUp, Home, FileText, Calendar, ChevronDown, ChevronUp, Edit2, X, Save, ClipboardList, Download, Loader2, Receipt, Mail } from 'lucide-react'
+import EmailModal from '@/components/EmailModal'
 
 interface MonthOption { label: string; value: string }
 
@@ -55,6 +56,7 @@ export default function RelatoriosPage() {
 
   const [cobrancasSort, setCobrancasSort] = useState<'espaco' | 'nome' | 'renda'>('espaco')
   const [cobrancasSortDir, setCobrancasSortDir] = useState<'asc' | 'desc'>('asc')
+  const [emailTarget, setEmailTarget] = useState<{ name: string; email: string | null; spaceRef?: string } | null>(null)
 
   const [exportingPDF, setExportingPDF] = useState(false)
 
@@ -559,6 +561,7 @@ export default function RelatoriosPage() {
   const showMonthPicker = activeReport === 'rendas' || activeReport === 'financeiro' || activeReport === 'cobrancas'
 
   return (
+    <>
     <AppLayout>
       {/* Cabecalho fixo */}
       <div className="sticky top-0 z-10 bg-white border-b border-gray-100 px-8 py-4">
@@ -1016,6 +1019,7 @@ export default function RelatoriosPage() {
                               Renda<SortIcon col="renda" />
                             </th>
                             <th className="text-center py-2 px-2 text-xs font-semibold text-gray-500 uppercase w-20">Pago</th>
+                            <th className="text-center py-2 px-2 text-xs font-semibold text-gray-500 uppercase w-10 print:hidden">Email</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1026,6 +1030,12 @@ export default function RelatoriosPage() {
                               <td className="py-2 px-2 text-right font-semibold text-gray-900">{fmt(l.monthly_rent ?? 0)}</td>
                               <td className="py-2 px-2">
                                 <div className="w-5 h-5 mx-auto border-2 border-gray-400 print:border-black rounded-sm" />
+                              </td>
+                              <td className="py-2 px-2 text-center print:hidden">
+                                <button onClick={() => setEmailTarget({ name: l.tenant?.name ?? '', email: l.tenant?.email ?? null, spaceRef: l.space?.ref })}
+                                  className="text-gray-400 hover:text-purple-600 transition-colors" title="Enviar e-mail">
+                                  <Mail className="w-4 h-4" />
+                                </button>
                               </td>
                             </tr>
                           ))}
@@ -1357,5 +1367,15 @@ export default function RelatoriosPage() {
         </div>
       )}
     </AppLayout>
+
+    {emailTarget && (
+      <EmailModal
+        tenantName={emailTarget.name}
+        tenantEmail={emailTarget.email}
+        spaceRef={emailTarget.spaceRef}
+        onClose={() => setEmailTarget(null)}
+      />
+    )}
+    </>
   )
 }
