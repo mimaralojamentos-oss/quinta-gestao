@@ -439,6 +439,11 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
     setSavingRecebimento(true)
     const { allocation, leftover } = computeAllocation(total, recebimentoForm.includeElec, recebimentoForm.includeDebts)
 
+    const isCash = recebimentoForm.method === 'dinheiro'
+    const activeLease = leases.find((l: any) => l.status === 'ativo') ?? leases[0]
+    const spaceRef = activeLease?.space?.ref ?? ''
+    const tenantName = tenant?.name ?? ''
+
     for (const { item, paying } of allocation) {
       if (item.isElecCharge && item.id) {
         // Marcar cobrança de eletricidade como paga
@@ -447,19 +452,42 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
           payment_date: recebimentoForm.date,
           payment_method: recebimentoForm.method,
         }).eq('id', item.id)
+        // Fundo de Maneio
+        if (isCash) {
+          await supabase.from('cash_fund_movements').insert({
+            movement_date: recebimentoForm.date,
+            description: `⚡ Eletricidade ${item.reference_month.slice(0, 7)} — ${spaceRef} (${tenantName})`,
+            amount: paying,
+            type: 'entrada',
+            source: 'renda',
+            source_id: item.id,
+          })
+        }
       } else if (item.isManualDebt && item.id) {
         // Registar pagamento de dívida manual
-        await supabase.from('debt_payments').insert({
+        const { data: debtPayment } = await supabase.from('debt_payments').insert({
           debt_id: item.id,
           amount: paying,
           payment_date: recebimentoForm.date,
           payment_method: recebimentoForm.method,
-        })
+        }).select().single()
+        // Fundo de Maneio
+        if (isCash) {
+          await supabase.from('cash_fund_movements').insert({
+            movement_date: recebimentoForm.date,
+            description: `⚠️ ${item.notes ?? 'Dívida'} — ${tenantName}`,
+            amount: paying,
+            type: 'entrada',
+            source: 'divida',
+            source_id: item.id,
+          })
+        }
       } else {
         // Registar pagamento de renda
         const leaseId = item.lease_id ?? item.lease?.id
         if (!leaseId) continue
-        await supabase.from('rent_payments').insert({
+        const monthLabel = item.reference_month.slice(0, 7)
+        const { data: newPayment } = await supabase.from('rent_payments').insert({
           lease_id: leaseId,
           reference_month: item.reference_month.slice(0, 7) + '-01',
           amount: paying,
@@ -467,22 +495,45 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
           payment_method: recebimentoForm.method,
           tipo: 'renda',
           notes: paying < item.amount ? 'Pagamento parcial' : null,
-        })
+        }).select().single()
+        // Fundo de Maneio
+        if (isCash && newPayment) {
+          await supabase.from('cash_fund_movements').insert({
+            movement_date: recebimentoForm.date,
+            description: `🏠 Renda ${monthLabel} — ${spaceRef} (${tenantName})`,
+            amount: paying,
+            type: 'entrada',
+            source: 'renda',
+            source_id: newPayment.id,
+          })
+        }
       }
     }
 
     if (leftover > 0.01) {
-      const leaseId = leases.find((l: any) => l.status === 'ativo')?.id
+      const leaseId = activeLease?.id
       if (leaseId) {
-        await supabase.from('rent_payments').insert({
+        const monthLabel = recebimentoForm.date.slice(0, 7)
+        const { data: advPayment } = await supabase.from('rent_payments').insert({
           lease_id: leaseId,
-          reference_month: recebimentoForm.date.slice(0, 7) + '-01',
+          reference_month: monthLabel + '-01',
           amount: leftover,
           payment_date: recebimentoForm.date,
           payment_method: recebimentoForm.method,
           tipo: 'adiantamento',
           notes: 'Excedente (adiantamento)',
-        })
+        }).select().single()
+        // Fundo de Maneio
+        if (isCash && advPayment) {
+          await supabase.from('cash_fund_movements').insert({
+            movement_date: recebimentoForm.date,
+            description: `💰 Adiantamento ${monthLabel} — ${spaceRef} (${tenantName})`,
+            amount: leftover,
+            type: 'entrada',
+            source: 'renda',
+            source_id: advPayment.id,
+          })
+        }
       }
     }
 
