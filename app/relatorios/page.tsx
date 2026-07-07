@@ -278,6 +278,7 @@ export default function RelatoriosPage() {
         .select('*, lease:leases(id, space:spaces(id, ref), tenant:tenants(name))')
         .gte('reference_month', startDate)
         .lt('reference_month', endDate)
+        .not('payment_date', 'is', null)
         .order('reference_month', { ascending: false })
 
       if (leaseIdFilter !== null) {
@@ -1101,8 +1102,8 @@ export default function RelatoriosPage() {
 
                 {pagamentos && (() => {
                   function printPagamentos() {
-                    const withPayment = pagamentos.payments.filter((p: any) => p.payment_date)
-                    const withoutPayment = pagamentos.payments.filter((p: any) => !p.payment_date)
+                    const withPayment = pagamentos.payments
+                    const withoutPayment: any[] = []
                     const groupMap: Record<string, any> = {}
                     for (const p of withPayment) {
                       const key = `${p.payment_date}__${p.payment_method}__${p.lease?.tenant?.name ?? ''}__${p.lease?.space?.ref ?? ''}`
@@ -1207,8 +1208,8 @@ export default function RelatoriosPage() {
                         </div>
                       ) : (() => {
                         // Agrupar por evento de pagamento: data + método + inquilino + espaço
-                        const withPayment = pagamentos.payments.filter((p: any) => p.payment_date)
-                        const withoutPayment = pagamentos.payments.filter((p: any) => !p.payment_date)
+                        const withPayment = pagamentos.payments
+                        const withoutPayment: any[] = []
 
                         const groupMap: Record<string, { key: string; date: string; method: string; tenant: string; space: string; items: any[]; total: number }> = {}
                         for (const p of withPayment) {
