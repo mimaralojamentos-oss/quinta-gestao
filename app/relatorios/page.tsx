@@ -1115,63 +1115,103 @@ export default function RelatoriosPage() {
                       ))}
                     </div>
 
-                    <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                    <div className="space-y-3">
                       {pagamentos.payments.length === 0 ? (
-                        <div className="text-center py-12 text-gray-400">
+                        <div className="bg-white border border-gray-200 rounded-xl text-center py-12 text-gray-400">
                           <Receipt className="w-10 h-10 mx-auto mb-3 text-gray-300" />
                           <p className="text-sm">Sem pagamentos para o periodo e filtro selecionados.</p>
                         </div>
-                      ) : (
-                        <table className="w-full text-sm">
-                          <thead>
-                            <tr className="border-b border-gray-200 bg-gray-50">
-                              <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 uppercase">Mes</th>
-                              <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 uppercase">Inquilino</th>
-                              <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 uppercase">Espaco</th>
-                              <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 uppercase">Tipo</th>
-                              <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 uppercase">Pagamento</th>
-                              <th className="text-right py-3 px-4 text-xs font-semibold text-gray-500 uppercase">Valor</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {pagamentos.payments.map((p: any) => (
-                              <tr key={p.id} className="border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors">
-                                <td className="py-2.5 px-4 text-gray-700">
-                                  {p.reference_month
-                                    ? new Date(p.reference_month).toLocaleDateString('pt-PT', { month: 'short', year: 'numeric' })
-                                    : '—'}
-                                </td>
-                                <td className="py-2.5 px-4 font-medium text-gray-800">{p.lease?.tenant?.name ?? '—'}</td>
-                                <td className="py-2.5 px-4 text-gray-600">{p.lease?.space?.ref ?? '—'}</td>
-                                <td className="py-2.5 px-4">
-                                  <span className={`inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full ${
-                                    (p.tipo || 'renda') === 'renda' ? 'bg-emerald-100 text-emerald-700' :
-                                    p.tipo === 'luz' ? 'bg-yellow-100 text-yellow-700' :
-                                    p.tipo === 'caucao' ? 'bg-gray-100 text-gray-700' :
-                                    p.tipo === 'adiantamento' ? 'bg-purple-100 text-purple-700' :
-                                    'bg-blue-100 text-blue-700'
-                                  }`}>
-                                    {TIPO_LABELS[p.tipo || 'renda'] ?? p.tipo}
-                                  </span>
-                                </td>
-                                <td className="py-2.5 px-4 text-xs text-gray-400">
-                                  {p.payment_date ? formatDate(p.payment_date) : '—'}
-                                  {p.payment_method ? ` · ${p.payment_method === 'dinheiro' ? 'Dinheiro' : 'Banco'}` : ''}
-                                </td>
-                                <td className="py-2.5 px-4 text-right font-semibold text-gray-900">{fmt(p.amount ?? 0)}</td>
-                              </tr>
+                      ) : (() => {
+                        // Agrupar por evento de pagamento: data + método + inquilino + espaço
+                        const withPayment = pagamentos.payments.filter((p: any) => p.payment_date)
+                        const withoutPayment = pagamentos.payments.filter((p: any) => !p.payment_date)
+
+                        const groupMap: Record<string, { key: string; date: string; method: string; tenant: string; space: string; items: any[]; total: number }> = {}
+                        for (const p of withPayment) {
+                          const key = `${p.payment_date}__${p.payment_method}__${p.lease?.tenant?.name ?? ''}__${p.lease?.space?.ref ?? ''}`
+                          if (!groupMap[key]) groupMap[key] = { key, date: p.payment_date, method: p.payment_method, tenant: p.lease?.tenant?.name ?? '—', space: p.lease?.space?.ref ?? '—', items: [], total: 0 }
+                          groupMap[key].items.push(p)
+                          groupMap[key].total += p.amount ?? 0
+                        }
+                        const groups = Object.values(groupMap).sort((a, b) => a.date.localeCompare(b.date))
+
+                        return (
+                          <>
+                            {groups.map((g) => (
+                              <div key={g.key} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                                {/* Cabeçalho do evento de pagamento */}
+                                <div className="flex items-center justify-between px-4 py-3 bg-teal-50 border-b border-teal-100">
+                                  <div className="flex items-center gap-3">
+                                    <div>
+                                      <p className="text-sm font-semibold text-teal-800">
+                                        {formatDate(g.date)} · {g.method === 'dinheiro' ? '💵 Dinheiro' : '🏦 Banco'}
+                                      </p>
+                                      <p className="text-xs text-teal-600">{g.tenant} · {g.space}</p>
+                                    </div>
+                                  </div>
+                                  <p className="text-base font-bold text-teal-700">{fmt(g.total)}</p>
+                                </div>
+                                {/* Linhas do que este pagamento cobriu */}
+                                <table className="w-full text-sm">
+                                  <tbody>
+                                    {g.items.sort((a: any, b: any) => (a.reference_month ?? '').localeCompare(b.reference_month ?? '')).map((p: any) => (
+                                      <tr key={p.id} className="border-b border-gray-50 last:border-0 hover:bg-gray-50">
+                                        <td className="py-2 px-4 text-gray-500 text-xs w-8">↳</td>
+                                        <td className="py-2 px-4 text-gray-700">
+                                          {p.reference_month
+                                            ? new Date(p.reference_month).toLocaleDateString('pt-PT', { month: 'long', year: 'numeric' })
+                                            : '—'}
+                                        </td>
+                                        <td className="py-2 px-4">
+                                          <span className={`inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full ${
+                                            (p.tipo || 'renda') === 'renda' ? 'bg-emerald-100 text-emerald-700' :
+                                            p.tipo === 'luz' ? 'bg-yellow-100 text-yellow-700' :
+                                            p.tipo === 'caucao' ? 'bg-gray-100 text-gray-700' :
+                                            p.tipo === 'adiantamento' ? 'bg-purple-100 text-purple-700' :
+                                            'bg-blue-100 text-blue-700'
+                                          }`}>
+                                            {TIPO_LABELS[p.tipo || 'renda'] ?? p.tipo}
+                                          </span>
+                                        </td>
+                                        {p.notes && <td className="py-2 px-4 text-xs text-gray-400 italic">{p.notes}</td>}
+                                        {!p.notes && <td className="py-2 px-4" />}
+                                        <td className="py-2 px-4 text-right font-semibold text-gray-900">{fmt(p.amount ?? 0)}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
                             ))}
-                          </tbody>
-                          <tfoot>
-                            <tr className="border-t-2 border-gray-200 bg-teal-50">
-                              <td colSpan={5} className="py-3 px-4 text-sm font-semibold text-teal-700">
-                                Total ({pagamentos.payments.length} pagamentos)
-                              </td>
-                              <td className="py-3 px-4 text-right text-base font-bold text-teal-700">{fmt(pagamentos.total)}</td>
-                            </tr>
-                          </tfoot>
-                        </table>
-                      )}
+
+                            {/* Pagamentos sem data (registos sem payment_date) */}
+                            {withoutPayment.length > 0 && (
+                              <div className="bg-white border border-orange-200 rounded-xl overflow-hidden">
+                                <div className="px-4 py-3 bg-orange-50 border-b border-orange-100">
+                                  <p className="text-sm font-semibold text-orange-700">⚠ Sem data de pagamento registada</p>
+                                </div>
+                                <table className="w-full text-sm">
+                                  <tbody>
+                                    {withoutPayment.map((p: any) => (
+                                      <tr key={p.id} className="border-b border-gray-50 last:border-0">
+                                        <td className="py-2 px-4 text-gray-700">
+                                          {p.reference_month ? new Date(p.reference_month).toLocaleDateString('pt-PT', { month: 'long', year: 'numeric' }) : '—'}
+                                        </td>
+                                        <td className="py-2 px-4 text-gray-600">{p.lease?.tenant?.name ?? '—'} · {p.lease?.space?.ref ?? '—'}</td>
+                                        <td className="py-2 px-4 text-right font-semibold text-gray-900">{fmt(p.amount ?? 0)}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+
+                            <div className="bg-teal-50 border border-teal-200 rounded-xl px-4 py-3 flex justify-between items-center">
+                              <p className="text-sm font-semibold text-teal-700">{groups.length} evento(s) de pagamento · {pagamentos.payments.length} registos</p>
+                              <p className="text-base font-bold text-teal-700">{fmt(pagamentos.total)}</p>
+                            </div>
+                          </>
+                        )
+                      })()}
                     </div>
                   </>
                 )}
