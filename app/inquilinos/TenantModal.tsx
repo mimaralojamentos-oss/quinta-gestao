@@ -129,6 +129,20 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
     const activeLease = (leasesData ?? []).find(l => l.status === 'ativo')
     if (activeLease) setPaymentForm(f => ({ ...f, lease_id: activeLease.id, amount: String(activeLease.monthly_rent) }))
 
+    // Histórico de rendas (para calcular renda correta por mês)
+    const { data: rentHistoryRaw } = leaseIds.length > 0
+      ? await supabase.from('lease_rent_history').select('*').in('lease_id', leaseIds).order('effective_date', { ascending: true })
+      : { data: [] }
+    const rentHistoryAll = rentHistoryRaw ?? []
+
+    const getRentForMonth = (leaseId: string, monthStr: string, fallback: number): number => {
+      const monthStart = monthStr + '-01'
+      const applicable = rentHistoryAll
+        .filter((h: any) => h.lease_id === leaseId && h.effective_date <= monthStart)
+        .sort((a: any, b: any) => b.effective_date.localeCompare(a.effective_date))
+      return applicable[0]?.monthly_rent ?? fallback
+    }
+
     // Pagamentos normais
     const { data: pays } = leaseIds.length > 0
       ? await supabase.from('rent_payments').select('*').in('lease_id', leaseIds).order('reference_month', { ascending: false })
@@ -152,13 +166,14 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
         const monthPayments = enriched.filter(p => p.lease_id === lease.id && p.reference_month?.slice(0, 7) === monthStr && (p.tipo === 'renda' || !p.tipo))
         const totalPaidThisMonth = monthPayments.reduce((s, p) => s + (p.amount ?? 0), 0)
         const hasPayment = monthPayments.length > 0
+        const rentForMonth = getRentForMonth(lease.id, monthStr, lease.monthly_rent)
         if (!hasPayment) {
           missingRows.push({
-            reference_month: monthStr + '-01', amount: lease.monthly_rent,
+            reference_month: monthStr + '-01', amount: rentForMonth,
             payment_date: null, payment_method: null, tipo: 'renda', lease, isMissing: true, isManualDebt: false, isElecCharge: false
           })
-        } else if (totalPaidThisMonth < lease.monthly_rent - 0.01) {
-          const shortfall = parseFloat((lease.monthly_rent - totalPaidThisMonth).toFixed(2))
+        } else if (totalPaidThisMonth < rentForMonth - 0.01) {
+          const shortfall = parseFloat((rentForMonth - totalPaidThisMonth).toFixed(2))
           missingRows.push({
             reference_month: monthStr + '-01', amount: shortfall,
             payment_date: null, payment_method: null, tipo: 'renda', lease, isMissing: true, isManualDebt: false, isElecCharge: false,

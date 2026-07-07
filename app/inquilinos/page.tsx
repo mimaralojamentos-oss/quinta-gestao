@@ -757,6 +757,7 @@ export default function InquilinosPage() {
           onClose={() => setEmailTenant(null)}
         />
       )}
+
     </AppLayout>
   )
 }

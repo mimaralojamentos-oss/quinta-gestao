@@ -25,6 +25,9 @@ export default function LeaseModal({ tenant, onClose, onSaved }: Props) {
     notes: '',
     status: 'ativo',
   })
+  const [originalRent, setOriginalRent] = useState('')
+  const [rentChangeDate, setRentChangeDate] = useState(new Date().toISOString().slice(0, 10))
+  const [rentHistory, setRentHistory] = useState<any[]>([])
   const [contractFile, setContractFile] = useState<File | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -45,6 +48,7 @@ export default function LeaseModal({ tenant, onClose, onSaved }: Props) {
 
       if (leaseData) {
         setExistingLease(leaseData)
+        setOriginalRent(String(leaseData.monthly_rent))
         setForm({
           space_id: leaseData.space_id,
           monthly_rent: String(leaseData.monthly_rent),
@@ -54,6 +58,12 @@ export default function LeaseModal({ tenant, onClose, onSaved }: Props) {
           notes: leaseData.notes ?? '',
           status: leaseData.status,
         })
+        const { data: histData } = await supabase
+          .from('lease_rent_history')
+          .select('*')
+          .eq('lease_id', leaseData.id)
+          .order('effective_date', { ascending: false })
+        setRentHistory(histData ?? [])
       }
     }
     load()
@@ -145,12 +155,39 @@ export default function LeaseModal({ tenant, onClose, onSaved }: Props) {
       contract_file_path: contractPath,
     }
 
+    const rentChanged = !!existingLease && originalRent !== '' && form.monthly_rent !== originalRent
+
     let err
     if (existingLease) {
       ;({ error: err } = await supabase.from('leases').update(payload).eq('id', existingLease.id))
+      if (!err && rentChanged) {
+        // Seed renda inicial no histórico se ainda não existir
+        if (rentHistory.length === 0) {
+          await supabase.from('lease_rent_history').insert({
+            lease_id: existingLease.id,
+            monthly_rent: parseFloat(originalRent),
+            effective_date: existingLease.start_date,
+            notes: 'Renda inicial',
+          })
+        }
+        await supabase.from('lease_rent_history').insert({
+          lease_id: existingLease.id,
+          monthly_rent: parseFloat(form.monthly_rent),
+          effective_date: rentChangeDate,
+          notes: 'Atualização de renda',
+        })
+      }
     } else {
-      ;({ error: err } = await supabase.from('leases').insert(payload))
-      if (!err) {
+      const { data: newLeaseData, error: insertErr } = await supabase.from('leases').insert(payload).select().single()
+      err = insertErr
+      if (!err && newLeaseData) {
+        // Seed renda inicial para novo contrato
+        await supabase.from('lease_rent_history').insert({
+          lease_id: newLeaseData.id,
+          monthly_rent: parseFloat(form.monthly_rent),
+          effective_date: form.start_date,
+          notes: 'Renda inicial',
+        })
         await supabase.from('spaces').update({ status: 'arrendado' }).eq('id', form.space_id)
       }
     }
@@ -257,9 +294,45 @@ export default function LeaseModal({ tenant, onClose, onSaved }: Props) {
             </div>
           </div>
 
+          {/* Aviso de alteração de renda */}
+          {existingLease && originalRent !== '' && form.monthly_rent !== originalRent && form.monthly_rent !== '' && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2">
+              <p className="text-sm font-medium text-amber-800">
+                Alteracao de renda: {formatCurrency(parseFloat(originalRent || '0'))} para {formatCurrency(parseFloat(form.monthly_rent || '0'))}
+              </p>
+              <div>
+                <label className="label text-amber-700">Aplicar a partir de *</label>
+                <input
+                  className="input border-amber-300 focus:ring-amber-400"
+                  type="date"
+                  value={rentChangeDate}
+                  onChange={e => setRentChangeDate(e.target.value)}
+                />
+                <p className="text-xs text-amber-600 mt-1">
+                  Meses anteriores a esta data mantem a renda atual ({formatCurrency(parseFloat(originalRent || '0'))})
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Historico de rendas */}
+          {rentHistory.length > 0 && (
+            <div>
+              <label className="label">Historico de rendas</label>
+              <div className="space-y-1">
+                {rentHistory.map((h, i) => (
+                  <div key={h.id} className="flex justify-between items-center text-sm py-1.5 px-3 rounded-lg bg-gray-50 border border-gray-100">
+                    <span className="text-gray-600">{new Date(h.effective_date + 'T00:00:00').toLocaleDateString('pt-PT', { month: 'long', year: 'numeric' })}</span>
+                    <span className={`font-medium ${i === 0 ? 'text-emerald-700' : 'text-gray-500'}`}>{formatCurrency(h.monthly_rent)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="label">Data de Início *</label>
+              <label className="label">Data de Inicio *</label>
               <input className="input" type="date" value={form.start_date}
                 onChange={e => setForm(f => ({ ...f, start_date: e.target.value }))} />
             </div>
@@ -292,7 +365,7 @@ export default function LeaseModal({ tenant, onClose, onSaved }: Props) {
           <button className="btn-secondary" onClick={onClose}>Cancelar</button>
           <button className="btn-primary" onClick={handleSave} disabled={saving || processingOCR}>
             {saving ? 'A guardar...' : 'Guardar'}
-          </button>
+                </button>
         </div>
       </div>
     </div>
