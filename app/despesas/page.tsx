@@ -80,7 +80,9 @@ function DespesasContent() {
 
   const today = new Date()
   const currentMonthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`
-  const [selectedPeriod, setSelectedPeriod] = useState<string>(currentMonthStr)
+  const [selectedPeriod, setSelectedPeriod] = useState<string>(() =>
+    searchParams.get('expense_id') ? 'all' : currentMonthStr
+  )
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -91,6 +93,14 @@ function DespesasContent() {
   }, [])
 
   useEffect(() => { fetchAll() }, [])
+
+  useEffect(() => {
+    if (!filterExpenseId || loading) return
+    setTimeout(() => {
+      const el = document.getElementById(`expense-${filterExpenseId}`)
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 300)
+  }, [filterExpenseId, loading])
 
   async function fetchAll() {
     setLoading(true)
@@ -471,7 +481,7 @@ function DespesasContent() {
                 {filtered.map(expense => {
                   const hasDoc = !!documents[expense.id]
                   return (
-                    <tr key={expense.id} className={`hover:bg-gray-50 ${!expense.project_id ? 'bg-yellow-50/30' : ''}`}>
+                    <tr key={expense.id} id={`expense-${expense.id}`} className={`hover:bg-gray-50 transition-colors ${filterExpenseId === expense.id ? 'ring-2 ring-inset ring-blue-400 bg-blue-50' : !expense.project_id ? 'bg-yellow-50/30' : ''}`}>
                       <td className="table-cell text-sm">{formatDate(expense.expense_date)}</td>
                       <td className="table-cell">
                         <p className="font-medium text-gray-800">{expense.description}</p>
