@@ -1099,8 +1099,92 @@ export default function RelatoriosPage() {
                   </div>
                 </div>
 
-                {pagamentos && (
-                  <>
+                {pagamentos && (() => {
+                  function printPagamentos() {
+                    const withPayment = pagamentos.payments.filter((p: any) => p.payment_date)
+                    const withoutPayment = pagamentos.payments.filter((p: any) => !p.payment_date)
+                    const groupMap: Record<string, any> = {}
+                    for (const p of withPayment) {
+                      const key = `${p.payment_date}__${p.payment_method}__${p.lease?.tenant?.name ?? ''}__${p.lease?.space?.ref ?? ''}`
+                      if (!groupMap[key]) groupMap[key] = { key, date: p.payment_date, method: p.payment_method, tenant: p.lease?.tenant?.name ?? '—', space: p.lease?.space?.ref ?? '—', items: [], total: 0 }
+                      groupMap[key].items.push(p)
+                      groupMap[key].total += p.amount ?? 0
+                    }
+                    const groups = Object.values(groupMap).sort((a: any, b: any) => a.date.localeCompare(b.date))
+                    const periodoLabel = pagamentosMes === 'year' ? `Ano ${new Date().getFullYear()}` : MONTHS.find(m => m.value === pagamentosMes)?.label ?? pagamentosMes
+                    const espacoLabel = pagamentosEspacos.length === 0 ? 'Todos os espaços' : pagamentosEspacos.join(', ')
+                    const today = new Date().toLocaleDateString('pt-PT')
+
+                    const groupsHtml = groups.map((g: any) => {
+                      const rows = [...g.items].sort((a: any, b: any) => (a.reference_month ?? '').localeCompare(b.reference_month ?? '')).map((p: any) => {
+                        const mes = p.reference_month ? new Date(p.reference_month).toLocaleDateString('pt-PT', { month: 'long', year: 'numeric' }) : '—'
+                        const tipoLabel = TIPO_LABELS[p.tipo || 'renda'] ?? p.tipo ?? 'Renda'
+                        const tipoColor = (p.tipo || 'renda') === 'renda' ? '#065f46;background:#d1fae5' : p.tipo === 'adiantamento' ? '#5b21b6;background:#ede9fe' : '#92400e;background:#fef3c7'
+                        return `<tr>
+                          <td style="padding:6px 8px;color:#6b7280;font-size:12px">↳ ${mes}</td>
+                          <td style="padding:6px 8px"><span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:12px;color:${tipoColor}">${tipoLabel}</span></td>
+                          <td style="padding:6px 8px;color:#6b7280;font-size:12px;font-style:italic">${p.notes ?? ''}</td>
+                          <td style="padding:6px 8px;text-align:right;font-weight:600;font-size:13px">${(p.amount ?? 0).toFixed(2)} €</td>
+                        </tr>`
+                      }).join('')
+                      const dateStr = new Date(g.date).toLocaleDateString('pt-PT')
+                      const methodStr = g.method === 'dinheiro' ? '💵 Dinheiro' : '🏦 Banco'
+                      return `<div style="margin-bottom:16px;border:1px solid #99f6e4;border-radius:8px;overflow:hidden;page-break-inside:avoid">
+                        <div style="background:#f0fdfa;padding:10px 14px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #99f6e4">
+                          <div>
+                            <p style="font-size:13px;font-weight:700;color:#0f766e;margin:0">${dateStr} · ${methodStr}</p>
+                            <p style="font-size:11px;color:#0d9488;margin:2px 0 0">${g.tenant} · ${g.space}</p>
+                          </div>
+                          <p style="font-size:15px;font-weight:700;color:#0f766e;margin:0">${g.total.toFixed(2)} €</p>
+                        </div>
+                        <table style="width:100%;border-collapse:collapse"><tbody>${rows}</tbody></table>
+                      </div>`
+                    }).join('')
+
+                    const semDataHtml = withoutPayment.length > 0 ? `<div style="margin-bottom:16px;border:1px solid #fed7aa;border-radius:8px;overflow:hidden">
+                      <div style="background:#fff7ed;padding:10px 14px;border-bottom:1px solid #fed7aa"><p style="font-size:13px;font-weight:600;color:#c2410c;margin:0">⚠ Sem data de pagamento registada</p></div>
+                      <table style="width:100%;border-collapse:collapse"><tbody>${withoutPayment.map((p: any) => `<tr><td style="padding:6px 8px">${p.reference_month ? new Date(p.reference_month).toLocaleDateString('pt-PT', { month: 'long', year: 'numeric' }) : '—'}</td><td style="padding:6px 8px;text-align:right;font-weight:600">${(p.amount ?? 0).toFixed(2)} €</td></tr>`).join('')}</tbody></table>
+                    </div>` : ''
+
+                    const html = `<!DOCTYPE html><html lang="pt"><head><meta charset="UTF-8">
+                    <title>Pagamentos — ${espacoLabel}</title>
+                    <style>
+                      @page { size: A4 portrait; margin: 18mm 16mm; }
+                      * { box-sizing: border-box; margin: 0; padding: 0; }
+                      body { font-family: Arial, sans-serif; font-size: 13px; color: #1a1a1a; }
+                      .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #0d9488; padding-bottom: 14px; margin-bottom: 20px; }
+                      .header h1 { font-size: 18px; font-weight: 700; color: #0d9488; }
+                      .header p { font-size: 11px; color: #6b7280; margin-top: 3px; }
+                      .meta { text-align: right; font-size: 11px; color: #6b7280; }
+                      .summary { display: flex; gap: 24px; background: #f0fdfa; border: 1px solid #99f6e4; border-radius: 8px; padding: 12px 16px; margin-bottom: 20px; }
+                      .summary-item label { font-size: 10px; color: #0d9488; text-transform: uppercase; letter-spacing: 0.05em; display: block; }
+                      .summary-item span { font-size: 16px; font-weight: 700; color: #0f766e; }
+                      .footer { margin-top: 24px; border-top: 1px solid #e5e7eb; padding-top: 12px; display: flex; justify-content: space-between; font-size: 10px; color: #9ca3af; }
+                    </style></head><body>
+                    <div class="header">
+                      <div><h1>Histórico de Pagamentos</h1><p>${espacoLabel} · ${periodoLabel}</p></div>
+                      <div class="meta"><p>Emitido em: <strong>${today}</strong></p></div>
+                    </div>
+                    <div class="summary">
+                      <div class="summary-item"><label>Total Recebido</label><span>${pagamentos.total.toFixed(2)} €</span></div>
+                      <div class="summary-item"><label>Eventos de Pagamento</label><span>${groups.length}</span></div>
+                      <div class="summary-item"><label>Registos</label><span>${pagamentos.payments.length}</span></div>
+                    </div>
+                    ${groupsHtml}${semDataHtml}
+                    <div class="footer"><span>Documento gerado automaticamente</span><span>Total: ${pagamentos.total.toFixed(2)} €</span></div>
+                    <script>window.onload=()=>window.print()</script>
+                    </body></html>`
+
+                    const w = window.open('', '_blank')
+                    if (w) { w.document.write(html); w.document.close() }
+                  }
+
+                  return <>
+                    <div className="flex justify-end">
+                      <button onClick={printPagamentos} className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-medium bg-gray-800 text-white hover:bg-gray-900 transition-colors">
+                        🖨️ Imprimir
+                      </button>
+                    </div>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                       <div className="bg-teal-50 border border-teal-200 rounded-xl p-4 col-span-2 sm:col-span-1">
                         <p className="text-xs text-teal-600 font-medium mb-1">Total Recebido</p>
@@ -1214,7 +1298,7 @@ export default function RelatoriosPage() {
                       })()}
                     </div>
                   </>
-                )}
+                })()}
               </div>
             )}
 
