@@ -14,6 +14,7 @@ type DocTipo = 'despesa' | 'receita' | 'nota'
 
 interface FormState {
   tipo: DocTipo
+  title: string
   supplier: string
   doc_date: string
   doc_number: string
@@ -24,11 +25,19 @@ interface FormState {
   addToFundo: boolean
 }
 
+async function computeHash(blob: Blob): Promise<string> {
+  const buffer = await blob.arrayBuffer()
+  const hashBuffer = await crypto.subtle.digest('SHA-256', buffer)
+  const hashArray = Array.from(new Uint8Array(hashBuffer))
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
 export default function ManualDocumentModal({ onClose, onSaved }: Props) {
   const today = new Date().toISOString().slice(0, 10)
 
   const [form, setForm] = useState<FormState>({
     tipo: 'despesa',
+    title: '',
     supplier: '',
     doc_date: today,
     doc_number: '',
@@ -49,7 +58,7 @@ export default function ManualDocumentModal({ onClose, onSaved }: Props) {
     setForm(f => ({ ...f, [field]: value }))
   }
 
-  async function generatePDF(): Promise<Blob> {
+  async function generatePDF(autoDocNum: string): Promise<Blob> {
     const { default: jsPDF } = await import('jspdf')
     const pdf = new jsPDF('p', 'mm', 'a4')
     const pageWidth = pdf.internal.pageSize.getWidth()
@@ -71,13 +80,13 @@ export default function ManualDocumentModal({ onClose, onSaved }: Props) {
 
     y = 28
 
-    // — Document number & date —
-    const autoDocNum = form.doc_number || `DOC-${Date.now().toString().slice(-6)}`
+    // — Title —
     pdf.setFont('helvetica', 'bold')
     pdf.setFontSize(18)
-    pdf.text('Documento Manual', margin, y)
+    pdf.text(form.title || 'Documento Manual', margin, y)
     y += 7
 
+    // — Doc number & date —
     pdf.setFont('helvetica', 'normal')
     pdf.setFontSize(9)
     pdf.setTextColor(100)
@@ -127,7 +136,7 @@ export default function ManualDocumentModal({ onClose, onSaved }: Props) {
     pdf.setFont('helvetica', 'bold')
     pdf.setFontSize(9)
     pdf.setTextColor(100)
-    pdf.text('DESCRIÇÃO', margin, y)
+    pdf.text('DESCRICAO', margin, y)
     y += 5
     pdf.setFont('helvetica', 'normal')
     pdf.setFontSize(10)
@@ -148,7 +157,7 @@ export default function ManualDocumentModal({ onClose, onSaved }: Props) {
       pdf.text('VALOR TOTAL', margin, y)
       y += 6
 
-      const amountStr = `${parseFloat(form.amount).toLocaleString('pt-PT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
+      const amountStr = `${parseFloat(form.amount).toLocaleString('pt-PT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR`
       pdf.setFontSize(20)
       if (form.tipo === 'despesa') pdf.setTextColor(200, 40, 40)
       else if (form.tipo === 'receita') pdf.setTextColor(16, 122, 86)
@@ -166,7 +175,7 @@ export default function ManualDocumentModal({ onClose, onSaved }: Props) {
     pdf.setFontSize(7.5)
     pdf.setTextColor(140)
     pdf.text(
-      `Documento gerado internamente para uso exclusivo  ·  ${new Date().toLocaleDateString('pt-PT')} ${new Date().toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' })}`,
+      `Documento gerado internamente para uso exclusivo  -  ${new Date().toLocaleDateString('pt-PT')} ${new Date().toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' })}`,
       pageWidth / 2, pageHeight - 12, { align: 'center' }
     )
 
@@ -181,23 +190,29 @@ export default function ManualDocumentModal({ onClose, onSaved }: Props) {
     setSaving(true); setError('')
 
     try {
-      // 1. Generate PDF
-      const blob = await generatePDF()
       const autoDocNum = form.doc_number || `DOC-${Date.now().toString().slice(-6)}`
+
+      // 1. Generate PDF
+      const blob = await generatePDF(autoDocNum)
+
+      // 2. Compute hash
+      const fileHash = await computeHash(blob)
+
+      // 3. Upload to storage
       const safeName = form.supplier.trim().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 30)
       const fileName = `manual/${form.doc_date}_${safeName}_${autoDocNum}.pdf`
 
-      // 2. Upload to storage
       const { error: uploadErr } = await supabase.storage
         .from('documents')
         .upload(fileName, blob, { contentType: 'application/pdf', upsert: false })
       if (uploadErr) { setError('Erro ao guardar PDF: ' + uploadErr.message); setSaving(false); return }
 
-      // 3. Insert document record
+      // 4. Insert document record
       const tipoCustom = form.tipo === 'despesa' ? 'Despesa Manual' : form.tipo === 'receita' ? 'Receita Manual' : 'Nota Manual'
+      const docTitle = form.title || tipoCustom
       const { data: newDoc, error: docErr } = await supabase.from('documents').insert({
         file_path: fileName,
-        original_name: `${tipoCustom} — ${form.supplier} — ${autoDocNum}.pdf`,
+        original_name: `${docTitle} — ${form.supplier} — ${autoDocNum}.pdf`,
         tipo: 'outro',
         tipo_custom: tipoCustom,
         supplier_name: form.supplier || null,
@@ -208,19 +223,18 @@ export default function ManualDocumentModal({ onClose, onSaved }: Props) {
         category: form.tipo === 'despesa' ? 'outros' : null,
         ocr_done: false,
         status: 'ativo',
+        file_hash: fileHash,
       }).select().single()
 
       if (docErr) { setError('Erro ao criar documento: ' + docErr.message); setSaving(false); return }
 
-      let expenseId: string | null = null
-
-      // 4. Create expense (optional)
+      // 5. Create expense (optional)
       if (form.tipo === 'despesa' && form.createExpense && form.amount && parseFloat(form.amount) > 0) {
         const { data: newExpense, error: expErr } = await supabase.from('expenses').insert({
           expense_date: form.doc_date,
           category: 'outros',
           type: 'pontual',
-          description: form.description,
+          description: form.title || form.description,
           amount: parseFloat(form.amount),
           payment_method: form.payment_method,
           supplier: form.supplier || null,
@@ -229,18 +243,17 @@ export default function ManualDocumentModal({ onClose, onSaved }: Props) {
         }).select().single()
 
         if (!expErr && newExpense) {
-          expenseId = newExpense.id
           await supabase.from('documents').update({ expense_id: newExpense.id }).eq('id', newDoc.id)
         }
       }
 
-      // 5. Add to Fundo de Maneio (optional)
+      // 6. Add to Fundo de Maneio (optional)
       if (form.addToFundo && form.amount && parseFloat(form.amount) > 0) {
         const isSaida = form.tipo === 'despesa'
         const amtVal = parseFloat(form.amount)
         await supabase.from('cash_fund_movements').insert({
           movement_date: form.doc_date,
-          description: `${tipoCustom} — ${form.supplier}`,
+          description: `${docTitle} — ${form.supplier}`,
           amount: isSaida ? -Math.abs(amtVal) : Math.abs(amtVal),
           type: isSaida ? 'saida' : 'entrada',
           source: 'documento_manual',
@@ -252,11 +265,11 @@ export default function ManualDocumentModal({ onClose, onSaved }: Props) {
       await logAccess({
         action: 'criar',
         page: '/documentos',
-        details: `Criou documento manual "${tipoCustom}" — ${form.supplier}${form.amount ? ` (${form.amount}€)` : ''}`,
+        details: `Criou documento manual "${docTitle}" — ${form.supplier}${form.amount ? ` (${form.amount}EUR)` : ''}`,
       })
 
       setPdfBlob(blob)
-      setPdfName(`${tipoCustom}_${form.supplier}_${autoDocNum}.pdf`)
+      setPdfName(`${docTitle}_${form.supplier}_${autoDocNum}.pdf`)
       setDone(true)
       onSaved()
     } catch (e: any) {
@@ -324,12 +337,23 @@ export default function ManualDocumentModal({ onClose, onSaved }: Props) {
               </div>
             </div>
 
+            {/* Título */}
+            <div>
+              <label className="label">Título do Documento</label>
+              <input
+                className="input"
+                placeholder="ex: Pagamento Wabo Junho, Reparação Canalização..."
+                value={form.title}
+                onChange={e => set('title', e.target.value)}
+              />
+            </div>
+
             {/* Fornecedor */}
             <div>
               <label className="label">Fornecedor / Entidade *</label>
               <input
                 className="input"
-                placeholder="ex: Ferreira Construções, Câmara Municipal..."
+                placeholder="ex: Wabo, Câmara Municipal..."
                 value={form.supplier}
                 onChange={e => set('supplier', e.target.value)}
               />
@@ -373,7 +397,7 @@ export default function ManualDocumentModal({ onClose, onSaved }: Props) {
               />
             </div>
 
-            {/* Opções extras — apenas se houver valor */}
+            {/* Opções extras */}
             {form.amount && parseFloat(form.amount) > 0 && (
               <div className="bg-gray-50 rounded-lg p-4 space-y-3 border border-gray-100">
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Opções adicionais</p>
