@@ -8,6 +8,7 @@ import { formatCurrency, formatDate } from '@/lib/utils'
 import { Search, FileText, Eye, FolderOpen, Trash2, X, Plus, Upload, Loader2, CheckCircle, AlertCircle, Edit2, Filter, ChevronDown, ChevronUp, ArrowUpDown, ArrowUp, ArrowDown, Zap } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import { logAccess } from '@/lib/logAccess'
+import ManualDocumentModal from '@/components/ManualDocumentModal'
 
 interface Document {
   id: string
@@ -111,6 +112,7 @@ export default function DocumentosPage() {
   const [sortDir, setSortDir] = useState<SortDir>('desc')
 
   const [showUpload, setShowUpload] = useState(false)
+  const [showManualModal, setShowManualModal] = useState(false)
   const [uploadTipo, setUploadTipo] = useState('automatico')
   const [uploadTipoCustom, setUploadTipoCustom] = useState('')
   const [files, setFiles] = useState<File[]>([])
@@ -476,9 +478,14 @@ async function handleSaveEdit() {
             <p className="text-sm text-gray-500 mt-1">{allDocs.length} ficheiros guardados</p>
           </div>
           {(isAdmin || isCoAdmin) && (
-            <button className="btn-primary" onClick={() => setShowUpload(true)}>
-              <Plus className="w-4 h-4" /> Carregar Documento
-            </button>
+            <div className="flex gap-2">
+              <button className="btn-secondary" onClick={() => setShowManualModal(true)}>
+                <Plus className="w-4 h-4" /> Documento Manual
+              </button>
+              <button className="btn-primary" onClick={() => setShowUpload(true)}>
+                <Plus className="w-4 h-4" /> Carregar Documento
+              </button>
+            </div>
           )}
         </div>
 
@@ -997,6 +1004,13 @@ async function handleSaveEdit() {
             )}
           </div>
         </div>
+      )}
+      {/* Modal Documento Manual */}
+      {showManualModal && (
+        <ManualDocumentModal
+          onClose={() => setShowManualModal(false)}
+          onSaved={() => { setShowManualModal(false); fetchAll() }}
+        />
       )}
     </AppLayout>
   )
