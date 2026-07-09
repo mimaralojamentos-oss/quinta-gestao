@@ -181,9 +181,10 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
     }
     for (const item of elec) {
       if (remaining <= 0) break
-      const paying = parseFloat(Math.min(remaining, item.remainingAmount).toFixed(2))
-      result.push({ item, paying })
-      remaining = parseFloat((remaining - paying).toFixed(2))
+      if (remaining >= item.remainingAmount) {
+        result.push({ item, paying: item.remainingAmount })
+        remaining = parseFloat((remaining - item.remainingAmount).toFixed(2))
+      }
     }
     for (const item of manual) {
       if (remaining <= 0) break

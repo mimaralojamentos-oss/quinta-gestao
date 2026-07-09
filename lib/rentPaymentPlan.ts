@@ -115,16 +115,10 @@ export async function buildRentPaymentPlan(supabase: any, params: BuildPlanParam
     lines.push(`Adiantamento: ${formatCurrency(adiantamento)}`)
   }
 
-  let underpaymentDebt = 0
-  if (!rendaFullyPaid) {
-    underpaymentDebt = parseFloat((monthlyRent - rendaAmount).toFixed(2))
-    lines.push(`Nova dívida (diferença de renda): ${formatCurrency(underpaymentDebt)}`)
-  }
-
   return {
     monthlyRent, rendaAmount, rendaFullyPaid,
     electricityCharges, electricityTotal,
-    debtPayments, adiantamento, underpaymentDebt,
+    debtPayments, adiantamento, underpaymentDebt: 0,
     summary: lines.join(', '),
   }
 }
@@ -182,15 +176,6 @@ export async function applyRentPaymentPlan(supabase: any, plan: RentPaymentPlan,
       used: false,
     }).select().single()
     adiantamentoPayment = data
-  }
-
-  if (plan.underpaymentDebt > 0 && tenantId) {
-    await supabase.from('debts').insert({
-      tenant_id: tenantId,
-      original_amount: plan.underpaymentDebt,
-      description: `Pagamento parcial - renda de ${formatReferenceMonthPT(referenceMonth)}`,
-      created_at: new Date().toISOString(),
-    })
   }
 
   return { rendaPayment, adiantamentoPayment }
