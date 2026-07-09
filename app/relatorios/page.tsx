@@ -296,9 +296,9 @@ export default function RelatoriosPage() {
         .from('electricity_charges')
         .select('*, lease:leases(id, space:spaces(id, ref), tenant:tenants(name))')
         .eq('paid', true)
-        .gte('reference_month', startDate)
-        .lt('reference_month', endDate)
-        .order('reference_month', { ascending: false })
+        .gte('payment_date', startDate)
+        .lt('payment_date', endDate)
+        .order('payment_date', { ascending: false })
 
       if (leaseIdFilter !== null) {
         ecQuery = ecQuery.in('lease_id', leaseIdFilter.length ? leaseIdFilter : noResults)
@@ -307,12 +307,18 @@ export default function RelatoriosPage() {
       const { data: elecData } = await ecQuery
 
       // Normalizar electricity_charges para o mesmo formato que rent_payments
-      const elecNorm = (elecData ?? []).map((e: any) => ({
-        ...e,
-        tipo: 'luz',
-        payment_date: e.payment_date,
-        payment_method: e.payment_method,
-      }))
+      const elecNorm = (elecData ?? []).map((e: any) => {
+        const refMonth = e.reference_month
+          ? new Date(e.reference_month).toLocaleDateString('pt-PT', { month: 'long', year: 'numeric' })
+          : null
+        return {
+          ...e,
+          tipo: 'luz',
+          payment_date: e.payment_date,
+          payment_method: e.payment_method,
+          notes: refMonth ? `Eletricidade de ${refMonth}` : 'Eletricidade',
+        }
+      })
 
       const filtered = [...(paymentsData ?? []), ...elecNorm].sort((a: any, b: any) =>
         (b.reference_month ?? '').localeCompare(a.reference_month ?? '')
