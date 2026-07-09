@@ -42,19 +42,14 @@ interface DebtItem {
   creditApplied?: number  // crédito de adiantamento já descontado
 }
 
-interface PaymentEntry {
-  debtItem: DebtItem
-  amount: string
-  payment_date: string
-  payment_method: string
-}
-
 export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: Props) {
   const [mode, setMode] = useState<'debts' | 'new'>('debts')
   const [editingPayment, setEditingPayment] = useState<any | null>(null)
   const [debtItems, setDebtItems] = useState<DebtItem[]>([])
-  const [paymentEntries, setPaymentEntries] = useState<PaymentEntry[]>([])
   const [adiantamentosToUse, setAdiantamentosToUse] = useState<{ id: string; amount: number }[]>([])
+  const [singleAmount, setSingleAmount] = useState('')
+  const [singleDate, setSingleDate] = useState(new Date().toISOString().slice(0, 10))
+  const [singleMethod, setSingleMethod] = useState('dinheiro')
   const [loadingDebts, setLoadingDebts] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -165,194 +160,124 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
 
     setAdiantamentosToUse(advData ?? [])
     setDebtItems(adjustedItems)
-    setPaymentEntries(adjustedItems.map(d => ({
-      debtItem: d,
-      amount: '',
-      payment_date: new Date().toISOString().slice(0, 10),
-      payment_method: 'dinheiro',
-    })))
     setLoadingDebts(false)
   }
 
-  function updateEntry(index: number, field: string, value: string) {
-    setPaymentEntries(prev => prev.map((e, i) => i === index ? { ...e, [field]: value } : e))
+  function computeAllocation(total: number) {
+    let remaining = total
+    const result: { item: DebtItem; paying: number }[] = []
+
+    const rendas = [...debtItems].filter(d => d.type === 'renda' && d.remainingAmount > 0)
+      .sort((a, b) => (a.referenceMonth ?? '').localeCompare(b.referenceMonth ?? ''))
+    const elec = [...debtItems].filter(d => d.type === 'eletricidade' && d.remainingAmount > 0)
+      .sort((a, b) => (a.referenceMonth ?? '').localeCompare(b.referenceMonth ?? ''))
+    const manual = [...debtItems].filter(d => d.type === 'manual' && d.remainingAmount > 0)
+
+    for (const item of rendas) {
+      if (remaining <= 0) break
+      const paying = parseFloat(Math.min(remaining, item.remainingAmount).toFixed(2))
+      result.push({ item, paying })
+      remaining = parseFloat((remaining - paying).toFixed(2))
+    }
+    for (const item of elec) {
+      if (remaining <= 0) break
+      const paying = parseFloat(Math.min(remaining, item.remainingAmount).toFixed(2))
+      result.push({ item, paying })
+      remaining = parseFloat((remaining - paying).toFixed(2))
+    }
+    for (const item of manual) {
+      if (remaining <= 0) break
+      const paying = parseFloat(Math.min(remaining, item.remainingAmount).toFixed(2))
+      result.push({ item, paying })
+      remaining = parseFloat((remaining - paying).toFixed(2))
+    }
+
+    return { allocation: result, leftover: parseFloat(remaining.toFixed(2)) }
   }
 
   async function handleSaveDebts() {
-    const toSave = paymentEntries.filter(e => e.amount && parseFloat(e.amount) > 0)
-    if (toSave.length === 0) { setError('Preenche pelo menos um valor'); return }
+    const total = parseFloat(singleAmount)
+    if (!total || total <= 0) { setError('Introduz o valor recebido'); return }
     setSaving(true); setError('')
 
-    for (const entry of toSave) {
-      const amount = parseFloat(entry.amount)
-      const { type, referenceMonth, debtId, chargeId } = entry.debtItem
+    const { allocation, leftover } = computeAllocation(total)
+
+    for (const { item, paying } of allocation) {
+      const { type, referenceMonth, debtId, chargeId } = item
 
       if (type === 'renda') {
-        const debtAmount = entry.debtItem.remainingAmount
-        const rendaAmount = Math.min(amount, debtAmount)
-        const adiantamentoAmount = Math.max(0, amount - debtAmount)
-
-        // Registar pagamento de renda
         const { data: newPayment } = await supabase.from('rent_payments').insert({
           lease_id: lease.id,
-          reference_month: referenceMonth + '-01',
-          payment_date: entry.payment_date,
-          amount: rendaAmount,
-          payment_method: entry.payment_method,
+          reference_month: (referenceMonth ?? '') + '-01',
+          payment_date: singleDate,
+          amount: paying,
+          payment_method: singleMethod,
           tipo: 'renda',
+          notes: paying < item.remainingAmount ? 'Pagamento parcial' : null,
         }).select().single()
-
-        // Fundo de Maneio se dinheiro
-        if (entry.payment_method === 'dinheiro' && newPayment) {
+        if (singleMethod === 'dinheiro' && newPayment) {
           await supabase.from('cash_fund_movements').insert({
-            movement_date: entry.payment_date,
+            movement_date: singleDate,
             description: `🏠 Renda ${referenceMonth} — ${lease.space?.ref} (${lease.tenant?.name})`,
-            amount: rendaAmount,
-            type: 'entrada',
-            source: 'renda',
-            source_id: newPayment.id,
+            amount: paying, type: 'entrada', source: 'renda', source_id: newPayment.id,
           })
         }
+        await logAccess({ action: 'criar', page: '/pagamentos', details: `Registou pagamento de ${item.label} (${formatCurrency(paying)}) de ${lease.tenant?.name} (${lease.space?.ref})` })
 
-        await logAccess({ action: 'criar', page: '/pagamentos', details: `Registou pagamento de ${entry.debtItem.label} (${formatCurrency(rendaAmount)}) de ${lease.tenant?.name} (${lease.space?.ref})` })
-
-        // Diferença paga a mais fica registada como adiantamento
-        if (adiantamentoAmount > 0) {
-          const { data: newAdvance } = await supabase.from('rent_payments').insert({
-            lease_id: lease.id,
-            reference_month: referenceMonth + '-01',
-            payment_date: entry.payment_date,
-            amount: adiantamentoAmount,
-            payment_method: entry.payment_method,
-            tipo: 'adiantamento',
-          }).select().single()
-
-          if (entry.payment_method === 'dinheiro' && newAdvance) {
-            await supabase.from('cash_fund_movements').insert({
-              movement_date: entry.payment_date,
-              description: `💰 Adiantamento — ${lease.space?.ref} (${lease.tenant?.name})`,
-              amount: adiantamentoAmount,
-              type: 'entrada',
-              source: 'renda',
-              source_id: newAdvance.id,
-            })
-          }
-
-          await logAccess({ action: 'criar', page: '/pagamentos', details: `Registou adiantamento (${formatCurrency(adiantamentoAmount)}) de ${lease.tenant?.name} (${lease.space?.ref})` })
-        }
       } else if (type === 'manual' && debtId) {
-        // Registar pagamento de dívida manual
         await supabase.from('debt_payments').insert({
-          debt_id: debtId,
-          payment_date: entry.payment_date,
-          amount,
-          payment_method: entry.payment_method,
-          notes: null,
+          debt_id: debtId, payment_date: singleDate, amount: paying, payment_method: singleMethod, notes: null,
         })
-        // Fundo de Maneio se dinheiro
-        if (entry.payment_method === 'dinheiro') {
+        if (singleMethod === 'dinheiro') {
           await supabase.from('cash_fund_movements').insert({
-            movement_date: entry.payment_date,
-            description: `⚠️ ${entry.debtItem.label} — ${lease.tenant?.name}`,
-            amount,
-            type: 'entrada',
-            source: 'divida',
-            source_id: debtId,
+            movement_date: singleDate,
+            description: `⚠️ ${item.label} — ${lease.tenant?.name}`,
+            amount: paying, type: 'entrada', source: 'divida', source_id: debtId,
           })
         }
+        await logAccess({ action: 'criar', page: '/pagamentos', details: `Registou pagamento de "${item.label}" (${formatCurrency(paying)}) de ${lease.tenant?.name}` })
 
-        await logAccess({ action: 'criar', page: '/pagamentos', details: `Registou pagamento de "${entry.debtItem.label}" (${formatCurrency(amount)}) de ${lease.tenant?.name}` })
       } else if (type === 'eletricidade' && chargeId) {
-        const elecDebt = entry.debtItem.remainingAmount
-        const elecPaid = Math.min(amount, elecDebt)
-        const elecExcesso = parseFloat((amount - elecDebt).toFixed(2))
-
-        // Marcar cobrança de eletricidade como paga
-        await supabase.from('electricity_charges').update({
-          paid: true,
-          payment_date: entry.payment_date,
-          payment_method: entry.payment_method,
-        }).eq('id', chargeId)
-
-        // Fundo de Maneio — apenas o valor da dívida (não o excesso, que vai para dívidas)
-        if (entry.payment_method === 'dinheiro') {
+        const isPaidFull = paying >= item.remainingAmount
+        if (isPaidFull) {
+          await supabase.from('electricity_charges').update({
+            paid: true, payment_date: singleDate, payment_method: singleMethod,
+          }).eq('id', chargeId)
+        }
+        if (singleMethod === 'dinheiro') {
           await supabase.from('cash_fund_movements').insert({
-            movement_date: entry.payment_date,
-            description: `⚡ ${entry.debtItem.label} — ${lease.space?.ref} (${lease.tenant?.name})`,
-            amount: elecPaid,
-            type: 'entrada',
-            source: 'eletricidade',
-            source_id: chargeId,
+            movement_date: singleDate,
+            description: `⚡ ${item.label} — ${lease.space?.ref} (${lease.tenant?.name})`,
+            amount: paying, type: 'entrada', source: 'eletricidade', source_id: chargeId,
           })
         }
+        await logAccess({ action: 'criar', page: '/pagamentos', details: `Registou pagamento de ${item.label} (${formatCurrency(paying)}) de ${lease.tenant?.name} (${lease.space?.ref})` })
+      }
+    }
 
-        await logAccess({ action: 'criar', page: '/pagamentos', details: `Registou pagamento de ${entry.debtItem.label} (${formatCurrency(elecPaid)}) de ${lease.tenant?.name} (${lease.space?.ref})` })
-
-        // Se pagou a mais, aplica o excesso às dívidas manuais mais antigas
-        if (elecExcesso > 0 && lease.tenant?.id) {
-          const { data: debtsData } = await supabase
-            .from('debts')
-            .select('id, original_amount, description, payments:debt_payments(amount)')
-            .eq('tenant_id', lease.tenant.id)
-            .order('reference_date', { ascending: true })
-
-          let restante = elecExcesso
-          for (const debt of debtsData ?? []) {
-            if (restante <= 0) break
-            const paid = (debt.payments ?? []).reduce((s: number, p: any) => s + p.amount, 0)
-            const emDivida = parseFloat((debt.original_amount - paid).toFixed(2))
-            if (emDivida <= 0) continue
-            const toApply = parseFloat(Math.min(emDivida, restante).toFixed(2))
-            await supabase.from('debt_payments').insert({
-              debt_id: debt.id,
-              payment_date: entry.payment_date,
-              amount: toApply,
-              payment_method: entry.payment_method,
-              notes: `Excesso de pagamento de eletricidade aplicado automaticamente`,
-            })
-            if (entry.payment_method === 'dinheiro') {
-              await supabase.from('cash_fund_movements').insert({
-                movement_date: entry.payment_date,
-                description: `⚠️ ${debt.description} (excesso elétricidade) — ${lease.tenant?.name}`,
-                amount: toApply,
-                type: 'entrada',
-                source: 'divida',
-                source_id: debt.id,
-              })
-            }
-            restante = parseFloat((restante - toApply).toFixed(2))
-          }
-
-          // Se ainda sobrar depois das dívidas, regista como adiantamento
-          if (restante > 0) {
-            const { data: advPayment } = await supabase.from('rent_payments').insert({
-              lease_id: lease.id,
-              reference_month: new Date().toISOString().slice(0, 7) + '-01',
-              payment_date: entry.payment_date,
-              amount: restante,
-              payment_method: entry.payment_method,
-              tipo: 'adiantamento',
-            }).select().single()
-            if (entry.payment_method === 'dinheiro' && advPayment) {
-              await supabase.from('cash_fund_movements').insert({
-                movement_date: entry.payment_date,
-                description: `💰 Adiantamento (excesso eletricidade) — ${lease.space?.ref} (${lease.tenant?.name})`,
-                amount: restante,
-                type: 'entrada',
-                source: 'renda',
-                source_id: advPayment.id,
-              })
-            }
-          }
-        }
+    // Excedente → adiantamento
+    if (leftover > 0.01) {
+      const { data: advPayment } = await supabase.from('rent_payments').insert({
+        lease_id: lease.id,
+        reference_month: singleDate.slice(0, 7) + '-01',
+        payment_date: singleDate,
+        amount: leftover,
+        payment_method: singleMethod,
+        tipo: 'adiantamento',
+        notes: 'Excedente (adiantamento)',
+      }).select().single()
+      if (singleMethod === 'dinheiro' && advPayment) {
+        await supabase.from('cash_fund_movements').insert({
+          movement_date: singleDate,
+          description: `💰 Adiantamento — ${lease.space?.ref} (${lease.tenant?.name})`,
+          amount: leftover, type: 'entrada', source: 'renda', source_id: advPayment.id,
+        })
       }
     }
 
     // Marcar adiantamentos consumidos como usados
     if (adiantamentosToUse.length > 0) {
-      const totalCreditUsed = debtItems
-        .filter(d => d.type === 'renda')
-        .reduce((s, d) => s + (d.creditApplied ?? 0), 0)
+      const totalCreditUsed = debtItems.filter(d => d.type === 'renda').reduce((s, d) => s + (d.creditApplied ?? 0), 0)
       let toConsume = totalCreditUsed
       for (const adv of adiantamentosToUse) {
         if (toConsume <= 0) break
@@ -360,9 +285,7 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
           await supabase.from('rent_payments').update({ used: true }).eq('id', adv.id)
           toConsume = parseFloat((toConsume - adv.amount).toFixed(2))
         } else {
-          // Consumo parcial: reduz o valor restante e marca como usado
-          const remaining = parseFloat((adv.amount - toConsume).toFixed(2))
-          await supabase.from('rent_payments').update({ amount: remaining, used: false }).eq('id', adv.id)
+          await supabase.from('rent_payments').update({ amount: parseFloat((adv.amount - toConsume).toFixed(2)), used: false }).eq('id', adv.id)
           toConsume = 0
         }
       }
@@ -537,7 +460,6 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
     onSaved()
   }
 
-  const totalToPay = paymentEntries.reduce((s, e) => s + (parseFloat(e.amount) || 0), 0)
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
@@ -578,87 +500,94 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
                   <p className="text-sm">Sem dívidas pendentes! ✓</p>
                 </div>
               ) : (
-                <div className="space-y-3">
-                  <p className="text-xs text-gray-500">Preenche o valor pago em cada dívida. Deixa em branco as que não foram pagas.</p>
-                  {paymentEntries.map((entry, i) => (
-                    <div key={entry.debtItem.id} className="border border-gray-200 rounded-xl p-4">
-                      <div className="flex items-center justify-between mb-3">
+                <div className="space-y-4">
+                  {/* Lista de dívidas — apenas informação */}
+                  <div className="space-y-2">
+                    {debtItems.map(item => (
+                      <div key={item.id} className="flex items-center justify-between px-3 py-2 rounded-lg bg-gray-50 border border-gray-100">
                         <div>
-                          <p className="text-sm font-semibold text-gray-800">{entry.debtItem.label}</p>
-                          <p className="text-xs text-gray-500">
-                            Em dívida: <span className="font-medium text-red-600">{formatCurrency(entry.debtItem.remainingAmount)}</span>
-                            {entry.debtItem.originalAmount !== entry.debtItem.remainingAmount && (
-                              <span className="ml-1 text-gray-400">(original: {formatCurrency(entry.debtItem.originalAmount)})</span>
-                            )}
-                          </p>
-                          {(entry.debtItem.creditApplied ?? 0) > 0 && (
-                            <p className="text-xs text-purple-600 mt-0.5">
-                              💰 {formatCurrency(entry.debtItem.creditApplied!)} de crédito (adiantamento) será aplicado automaticamente
-                            </p>
+                          <p className="text-sm font-medium text-gray-800">{item.label}</p>
+                          {(item.creditApplied ?? 0) > 0 && (
+                            <p className="text-xs text-purple-600">💰 {formatCurrency(item.creditApplied!)} de crédito será aplicado</p>
                           )}
                         </div>
-                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                          entry.debtItem.type === 'renda' ? 'bg-gray-100 text-gray-600'
-                          : entry.debtItem.type === 'manual' ? 'bg-red-100 text-red-700'
-                          : 'bg-yellow-100 text-yellow-700'
-                        }`}>
-                          {entry.debtItem.type === 'renda' ? '🏠 Renda' : entry.debtItem.type === 'manual' ? '⚠️ Dívida' : '⚡ Luz'}
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-3 gap-2">
-                        <div>
-                          <label className="text-xs text-gray-500 block mb-1">Valor pago (€)</label>
-                          <input
-                            type="number" step="0.01" min="0"
-                            max={entry.debtItem.type === 'renda' ? undefined : entry.debtItem.remainingAmount}
-                            placeholder={entry.debtItem.type === 'renda' ? formatCurrency(entry.debtItem.remainingAmount) : `max ${formatCurrency(entry.debtItem.remainingAmount)}`}
-                            className="input text-sm w-full"
-                            value={entry.amount}
-                            onChange={e => updateEntry(i, 'amount', e.target.value)}
-                          />
-                        </div>
-                        <div>
-                          <label className="text-xs text-gray-500 block mb-1">Data</label>
-                          <input type="date" className="input text-sm w-full"
-                            value={entry.payment_date}
-                            onChange={e => updateEntry(i, 'payment_date', e.target.value)} />
-                        </div>
-                        <div>
-                          <label className="text-xs text-gray-500 block mb-1">Método</label>
-                          <select className="input text-sm w-full"
-                            value={entry.payment_method}
-                            onChange={e => updateEntry(i, 'payment_method', e.target.value)}>
-                            <option value="dinheiro">💵 Dinheiro</option>
-                            <option value="banco">🏦 Banco</option>
-                          </select>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-semibold text-red-600">{formatCurrency(item.remainingAmount)}</span>
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                            item.type === 'renda' ? 'bg-emerald-100 text-emerald-700'
+                            : item.type === 'manual' ? 'bg-red-100 text-red-700'
+                            : 'bg-yellow-100 text-yellow-700'
+                          }`}>
+                            {item.type === 'renda' ? '🏠 Renda' : item.type === 'manual' ? '⚠️ Dívida' : '⚡ Luz'}
+                          </span>
                         </div>
                       </div>
-                      {entry.amount && parseFloat(entry.amount) > 0 && parseFloat(entry.amount) < entry.debtItem.remainingAmount && (
-                        <p className="text-xs text-orange-600 mt-1.5">
-                          ⚠ Pagamento parcial — ficará {formatCurrency(entry.debtItem.remainingAmount - parseFloat(entry.amount))} em dívida
-                        </p>
-                      )}
-                      {entry.amount && parseFloat(entry.amount) >= entry.debtItem.remainingAmount && (
-                        <p className="text-xs text-emerald-600 mt-1.5">✓ Dívida liquidada</p>
-                      )}
-                      {entry.debtItem.type === 'renda' && entry.amount && parseFloat(entry.amount) > entry.debtItem.remainingAmount && (
-                        <p className="text-xs text-purple-600 mt-1.5">
-                          💰 Os {formatCurrency(parseFloat(entry.amount) - entry.debtItem.remainingAmount)} extra serão guardados como adiantamento
-                        </p>
-                      )}
-                      {entry.debtItem.type === 'eletricidade' && entry.amount && parseFloat(entry.amount) > entry.debtItem.remainingAmount && (
-                        <p className="text-xs text-purple-600 mt-1.5">
-                          💰 Os {formatCurrency(parseFloat(entry.amount) - entry.debtItem.remainingAmount)} extra serão aplicados a dívidas pendentes ou guardados como adiantamento
-                        </p>
-                      )}
+                    ))}
+                  </div>
+
+                  {/* Formulário único */}
+                  <div className="border border-blue-200 bg-blue-50 rounded-xl p-4 space-y-3">
+                    <h3 className="text-sm font-semibold text-blue-800">💰 Registar Recebimento</h3>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-xs text-gray-500 block mb-1">Data</label>
+                        <input type="date" className="input text-sm w-full" value={singleDate}
+                          onChange={e => setSingleDate(e.target.value)} />
+                      </div>
+                      <div>
+                        <label className="text-xs text-gray-500 block mb-1">Valor recebido (€)</label>
+                        <input type="number" step="0.01" min="0" className="input text-sm w-full"
+                          placeholder="0.00" value={singleAmount}
+                          onChange={e => setSingleAmount(e.target.value)} />
+                      </div>
                     </div>
-                  ))}
-                  {totalToPay > 0 && (
-                    <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-2 flex items-center justify-between">
-                      <p className="text-sm text-emerald-700 font-medium">Total a registar:</p>
-                      <p className="text-lg font-bold text-emerald-700">{formatCurrency(totalToPay)}</p>
+                    <div>
+                      <label className="text-xs text-gray-500 block mb-1">Método</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {['dinheiro', 'banco'].map(m => (
+                          <button key={m} type="button" onClick={() => setSingleMethod(m)}
+                            className={`py-2 rounded-lg border text-xs font-medium transition-colors ${singleMethod === m ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200'}`}>
+                            {m === 'dinheiro' ? '💵 Dinheiro' : '🏦 Banco'}
+                          </button>
+                        ))}
+                      </div>
                     </div>
-                  )}
+                  </div>
+
+                  {/* Preview distribuição */}
+                  {parseFloat(singleAmount) > 0 && (() => {
+                    const { allocation, leftover } = computeAllocation(parseFloat(singleAmount))
+                    return (
+                      <div className="border border-blue-200 rounded-lg overflow-hidden">
+                        <div className="bg-blue-100 px-3 py-2 text-xs font-semibold text-blue-800">Distribuição automática</div>
+                        <div className="divide-y divide-blue-50">
+                          {allocation.map((a, i) => {
+                            const icon = a.item.type === 'eletricidade' ? '⚡' : a.item.type === 'manual' ? '📋' : '🏠'
+                            const isPartial = a.paying < a.item.remainingAmount
+                            return (
+                              <div key={i} className="flex justify-between items-center px-3 py-2">
+                                <span className="text-xs text-gray-700">
+                                  {icon} {a.item.label}
+                                  {isPartial && <span className="text-orange-500 ml-1">(parcial)</span>}
+                                </span>
+                                <span className="text-xs font-semibold">{formatCurrency(a.paying)}</span>
+                              </div>
+                            )
+                          })}
+                          {leftover > 0.01 && (
+                            <div className="flex justify-between items-center px-3 py-2 bg-purple-50">
+                              <span className="text-xs text-purple-700">💰 Excedente → adiantamento</span>
+                              <span className="text-xs font-semibold text-purple-700">{formatCurrency(leftover)}</span>
+                            </div>
+                          )}
+                          <div className="flex justify-between items-center px-3 py-2 bg-gray-50 border-t border-gray-200">
+                            <span className="text-xs font-bold text-gray-700">Total</span>
+                            <span className="text-xs font-bold">{formatCurrency(parseFloat(singleAmount))}</span>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })()}
                 </div>
               )}
             </div>
@@ -752,8 +681,8 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
             {editingPayment ? 'Cancelar edição' : 'Cancelar'}
           </button>
           {mode === 'debts' ? (
-            <button className="btn-primary" onClick={handleSaveDebts} disabled={saving || totalToPay === 0}>
-              {saving ? 'A guardar...' : `Guardar ${totalToPay > 0 ? formatCurrency(totalToPay) : ''}`}
+            <button className="btn-primary" onClick={handleSaveDebts} disabled={saving || !singleAmount || parseFloat(singleAmount) <= 0}>
+              {saving ? 'A guardar...' : `Guardar ${parseFloat(singleAmount) > 0 ? formatCurrency(parseFloat(singleAmount)) : ''}`}
             </button>
           ) : (
             <button className="btn-primary" onClick={handleSaveNew} disabled={saving}>

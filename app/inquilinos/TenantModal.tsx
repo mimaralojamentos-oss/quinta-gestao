@@ -95,8 +95,6 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
     date: new Date().toISOString().slice(0, 10),
     amount: '',
     method: 'dinheiro',
-    includeElec: true,
-    includeDebts: true,
   })
   const [savingRecebimento, setSavingRecebimento] = useState(false)
 
@@ -437,7 +435,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
     const total = parseFloat(recebimentoForm.amount)
     if (!total || total <= 0) return
     setSavingRecebimento(true)
-    const { allocation, leftover } = computeAllocation(total, recebimentoForm.includeElec, recebimentoForm.includeDebts)
+    const { allocation, leftover } = computeAllocation(total, true, true)
 
     const isCash = recebimentoForm.method === 'dinheiro'
     const activeLease = leases.find((l: any) => l.status === 'ativo') ?? leases[0]
@@ -539,7 +537,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
 
     await fetchPayments()
     setShowRecebimentoForm(false)
-    setRecebimentoForm({ date: new Date().toISOString().slice(0, 10), amount: '', method: 'dinheiro', includeElec: true, includeDebts: true })
+    setRecebimentoForm({ date: new Date().toISOString().slice(0, 10), amount: '', method: 'dinheiro' })
     setSavingRecebimento(false)
   }
 
@@ -1027,7 +1025,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
 
               {showRecebimentoForm && (() => {
                 const total = parseFloat(recebimentoForm.amount) || 0
-                const { allocation, leftover } = computeAllocation(total, recebimentoForm.includeElec, recebimentoForm.includeDebts)
+                const { allocation, leftover } = computeAllocation(total, true, true)
                 return (
                   <div className="border border-blue-200 bg-blue-50 rounded-xl p-4 mb-4">
                     <h3 className="font-medium text-gray-800 mb-3">💰 Registar Recebimento</h3>
@@ -1055,22 +1053,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                         ))}
                       </div>
                     </div>
-                    <div className="mb-3">
-                      <label className="label">Cobrir com este pagamento</label>
-                      <div className="flex gap-2">
-                        {[
-                          { key: 'includeElec', label: '⚡ Eletricidade', desc: '2ª prioridade' },
-                          { key: 'includeDebts', label: '📋 Outras dívidas', desc: '3ª prioridade' },
-                        ].map(({ key, label, desc }) => (
-                          <button key={key}
-                            onClick={() => setRecebimentoForm(f => ({ ...f, [key]: !f[key as keyof typeof f] }))}
-                            className={`flex-1 py-2 px-2 rounded-lg border text-xs font-medium transition-colors ${(recebimentoForm as any)[key] ? 'bg-blue-100 border-blue-400 text-blue-700' : 'bg-white border-gray-200 text-gray-400'}`}>
-                            {label}<span className="block text-[10px] font-normal opacity-70">{desc}</span>
-                          </button>
-                        ))}
-                      </div>
-                      <p className="text-[10px] text-gray-400 mt-1">🏠 Rendas são sempre 1ª prioridade</p>
-                    </div>
+
 
                     {total > 0 && (
                       <div className="border border-blue-200 rounded-lg overflow-hidden mb-3">
@@ -1109,7 +1092,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                       </div>
                     )}
                     <div className="flex gap-2">
-                      <button className="btn-secondary flex-1" onClick={() => { setShowRecebimentoForm(false); setRecebimentoForm({ date: new Date().toISOString().slice(0, 10), amount: '', method: 'dinheiro', includeElec: true, includeDebts: true }) }}>
+                      <button className="btn-secondary flex-1" onClick={() => { setShowRecebimentoForm(false); setRecebimentoForm({ date: new Date().toISOString().slice(0, 10), amount: '', method: 'dinheiro' }) }}>
                         Cancelar
                       </button>
                       <button onClick={handleSaveRecebimento} disabled={savingRecebimento || !recebimentoForm.amount || allocation.length === 0}
