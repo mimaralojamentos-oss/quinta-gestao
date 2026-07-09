@@ -1469,7 +1469,7 @@ function MatchModalComponent({ tx, tenants, leases, expenses, documents, autoMat
             {/* Linha 1 */}
             <div className="grid grid-cols-3 gap-2 mb-2">
               {[
-                { value: 'renda', label: '🏠 Renda' },
+                { value: 'renda', label: '🏠 Renda / Luz / Dívida' },
                 { value: 'despesa', label: '💸 Despesa' },
                 { value: 'outro', label: '📝 Outro' },
               ].map(opt => (
