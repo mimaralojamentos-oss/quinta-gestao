@@ -287,6 +287,9 @@ export default function RelatoriosPage() {
         rpQuery = rpQuery.in('lease_id', leaseIdFilter.length ? leaseIdFilter : noResults)
       }
 
+      // Excluir registos internos de crédito (não representam dinheiro físico recebido)
+      rpQuery = rpQuery.neq('notes', 'Crédito de adiantamento aplicado')
+
       const { data: paymentsData } = await rpQuery
 
       // --- electricity_charges (pagas) ---

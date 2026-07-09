@@ -276,6 +276,22 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
       }
     }
 
+    // Registar rent_payments para créditos de adiantamento aplicados (preenche o gap na conta corrente)
+    for (const item of debtItems) {
+      const credit = item.creditApplied ?? 0
+      if (credit > 0 && item.type === 'renda') {
+        await supabase.from('rent_payments').insert({
+          lease_id: lease.id,
+          reference_month: (item.referenceMonth ?? '') + '-01',
+          payment_date: singleDate,
+          amount: credit,
+          payment_method: singleMethod,
+          tipo: 'renda',
+          notes: 'Crédito de adiantamento aplicado',
+        })
+      }
+    }
+
     // Marcar adiantamentos consumidos como usados
     if (adiantamentosToUse.length > 0) {
       const totalCreditUsed = debtItems.filter(d => d.type === 'renda').reduce((s, d) => s + (d.creditApplied ?? 0), 0)
