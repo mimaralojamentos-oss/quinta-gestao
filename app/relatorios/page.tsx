@@ -287,10 +287,9 @@ export default function RelatoriosPage() {
         rpQuery = rpQuery.in('lease_id', leaseIdFilter.length ? leaseIdFilter : noResults)
       }
 
+      const { data: paymentsDataRaw } = await rpQuery
       // Excluir registos internos de crédito (não representam dinheiro físico recebido)
-      rpQuery = rpQuery.neq('notes', 'Crédito de adiantamento aplicado')
-
-      const { data: paymentsData } = await rpQuery
+      const paymentsData = (paymentsDataRaw ?? []).filter((p: any) => p.notes !== 'Crédito de adiantamento aplicado')
 
       // --- electricity_charges (pagas) ---
       let ecQuery = supabase
