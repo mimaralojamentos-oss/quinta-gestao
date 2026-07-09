@@ -320,7 +320,35 @@ export default function RelatoriosPage() {
         }
       })
 
-      const filtered = [...(paymentsData ?? []), ...elecNorm].sort((a: any, b: any) =>
+      // --- debt_payments (pagamentos de dívidas manuais) ---
+      let dpQuery = supabase
+        .from('debt_payments')
+        .select('*, debt:debts(id, description, tenant_id, tenant:tenants(id, name, leases:leases(id, space:spaces(id, ref))))')
+        .gte('payment_date', startDate)
+        .lt('payment_date', endDate)
+
+      const { data: debtPayData } = await dpQuery
+
+      // Filtrar por espaço se necessário e normalizar
+      const debtPayNorm = (debtPayData ?? []).filter((dp: any) => {
+        if (leaseIdFilter === null) return true
+        const leases = dp.debt?.tenant?.leases ?? []
+        return leases.some((l: any) => leaseIdFilter.includes(l.id))
+      }).map((dp: any) => {
+        const lease = (dp.debt?.tenant?.leases ?? [])[0]
+        return {
+          id: dp.id,
+          tipo: 'divida',
+          amount: dp.amount,
+          payment_date: dp.payment_date,
+          payment_method: dp.payment_method,
+          reference_month: dp.payment_date,
+          notes: dp.debt?.description ?? 'Dívida',
+          lease: { space: lease?.space, tenant: { name: dp.debt?.tenant?.name } },
+        }
+      })
+
+      const filtered = [...(paymentsData ?? []), ...elecNorm, ...debtPayNorm].sort((a: any, b: any) =>
         (b.reference_month ?? '').localeCompare(a.reference_month ?? '')
       )
 
