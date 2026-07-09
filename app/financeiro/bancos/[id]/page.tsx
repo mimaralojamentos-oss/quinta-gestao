@@ -362,7 +362,6 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
 
     const existingRenda = (existingPayments ?? []).filter((p: any) => p.tipo === 'renda' || !p.tipo)
     const alreadyPaidRenda = existingRenda.reduce((sum: number, p: any) => sum + (p.amount || 0), 0)
-    if (alreadyPaidRenda >= lease.monthly_rent) return 'skipped'
 
     const tenantId = tx.confirmed_tenant_id ?? lease.tenant?.id
 
