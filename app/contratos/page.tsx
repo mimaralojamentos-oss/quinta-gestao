@@ -27,9 +27,36 @@ interface ContractRow {
   notes: string | null
 }
 
-function daysUntilExpiry(endDate: string | null): number | null {
+// Calcula a próxima data de renovação do contrato.
+// Se o contrato ainda não expirou, a próxima renovação é a data de fim.
+// Se já expirou (e não foi cancelado), renova pelo mesmo período indefinidamente.
+function calcNextRenewal(startDate: string, endDate: string | null): Date | null {
   if (!endDate) return null
-  return Math.ceil((new Date(endDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+  const start = new Date(startDate)
+  const end = new Date(endDate)
+  const today = new Date()
+  if (end > today) return end // ainda não expirou
+
+  // Duração em anos (arredondada ao inteiro mais próximo)
+  const durationYears = Math.max(1, Math.round(
+    (end.getFullYear() - start.getFullYear()) +
+    (end.getMonth() - start.getMonth()) / 12
+  ))
+
+  // Avança pela duração até obter uma data futura
+  let renewal = new Date(end)
+  while (renewal <= today) {
+    renewal = new Date(renewal)
+    renewal.setFullYear(renewal.getFullYear() + durationYears)
+  }
+  return renewal
+}
+
+function daysUntilRenewal(startDate: string, endDate: string | null): number | null {
+  if (!endDate) return null
+  const renewal = calcNextRenewal(startDate, endDate)
+  if (!renewal) return null
+  return Math.ceil((renewal.getTime() - Date.now()) / (1000 * 60 * 60 * 24))
 }
 
 function expiryBadge(days: number | null) {
@@ -99,7 +126,7 @@ export default function ContratosPage() {
   }
 
   const filtered = rows.filter(r => {
-    const days = daysUntilExpiry(r.end_date)
+    const days = daysUntilRenewal(r.start_date, r.end_date)
     const matchSearch =
       !search ||
       r.tenant_name.toLowerCase().includes(search.toLowerCase()) ||
@@ -114,8 +141,8 @@ export default function ContratosPage() {
 
   // Resumo
   const total = rows.length
-  const expirando = rows.filter(r => { const d = daysUntilExpiry(r.end_date); return d !== null && d <= 180 }).length
-  const expirado = rows.filter(r => { const d = daysUntilExpiry(r.end_date); return d !== null && d < 0 }).length
+  const expirando = rows.filter(r => { const d = daysUntilRenewal(r.start_date, r.end_date); return d !== null && d <= 180 }).length
+  const expirado = rows.filter(r => { const d = daysUntilRenewal(r.start_date, r.end_date); return d !== null && d < 0 }).length
   const semPrazo = rows.filter(r => r.end_date === null).length
   const totalRenda = rows.reduce((s, r) => s + r.monthly_rent, 0)
 
@@ -213,13 +240,14 @@ export default function ContratosPage() {
                   <th className="table-header text-right">Caução</th>
                   <th className="table-header text-left">Início</th>
                   <th className="table-header text-left">Fim</th>
+                  <th className="table-header text-left">Próx. Renovação</th>
                   <th className="table-header text-left">Prazo</th>
                   <th className="table-header text-center">Contrato</th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.map(r => {
-                  const days = daysUntilExpiry(r.end_date)
+                  const days = daysUntilRenewal(r.start_date, r.end_date)
                   return (
                     <tr key={r.id}
                       className={`border-b border-gray-100 hover:brightness-95 transition-all ${rowBg(days)}`}>
@@ -244,6 +272,17 @@ export default function ContratosPage() {
                       </td>
                       <td className="table-cell text-gray-600 whitespace-nowrap">
                         {r.end_date ? formatDate(r.end_date) : <span className="text-gray-300">—</span>}
+                      </td>
+                      <td className="table-cell whitespace-nowrap">
+                        {r.end_date ? (() => {
+                          const renewal = calcNextRenewal(r.start_date, r.end_date)
+                          const isRenewed = renewal && new Date(r.end_date) < new Date()
+                          return renewal ? (
+                            <span className={isRenewed ? 'text-blue-600 font-medium text-xs' : 'text-gray-600 text-xs'}>
+                              {isRenewed && '🔄 '}{renewal.toLocaleDateString('pt-PT')}
+                            </span>
+                          ) : <span className="text-gray-300">—</span>
+                        })() : <span className="text-gray-300">—</span>}
                       </td>
                       <td className="table-cell">
                         {expiryBadge(days)}

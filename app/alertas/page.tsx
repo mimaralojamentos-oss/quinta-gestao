@@ -4,6 +4,25 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, formatDate, getMonthLabel, getCurrentMonth } from '@/lib/utils'
+
+function calcNextRenewal(startDate: string, endDate: string): Date {
+  const start = new Date(startDate)
+  const end = new Date(endDate)
+  const today = new Date()
+  if (end > today) return end
+
+  const durationYears = Math.max(1, Math.round(
+    (end.getFullYear() - start.getFullYear()) +
+    (end.getMonth() - start.getMonth()) / 12
+  ))
+
+  let renewal = new Date(end)
+  while (renewal <= today) {
+    renewal = new Date(renewal)
+    renewal.setFullYear(renewal.getFullYear() + durationYears)
+  }
+  return renewal
+}
 import { AlertTriangle, Clock, FileText, CheckCircle, Zap, X, Bell, NotebookPen } from 'lucide-react'
 import Link from 'next/link'
 
@@ -97,19 +116,20 @@ export default function AlertasPage() {
       }
     })
 
-    // Contratos a expirar
+    // Contratos a renovar (baseado na próxima data de renovação)
     const oneEightyDays = new Date()
     oneEightyDays.setDate(oneEightyDays.getDate() + 180)
-    ;(leases ?? []).filter(l => l.end_date).forEach(l => {
-      const endDate = new Date(l.end_date)
-      if (endDate <= oneEightyDays) {
-        const daysLeft = Math.ceil((endDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+    ;(leases ?? []).filter(l => l.end_date && l.start_date).forEach(l => {
+      const renewal = calcNextRenewal(l.start_date, l.end_date)
+      if (renewal <= oneEightyDays) {
+        const daysLeft = Math.ceil((renewal.getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+        const isRenewed = new Date(l.end_date) < new Date()
         newAlerts.push({
           id: `contract-${l.id}`,
           type: 'contrato_a_expirar',
           severity: daysLeft <= 30 ? 'high' : daysLeft <= 90 ? 'medium' : 'low',
-          title: 'Contrato a expirar',
-          description: `Contrato termina em ${formatDate(l.end_date)} (${daysLeft > 0 ? `em ${daysLeft} dias` : 'EXPIRADO'})`,
+          title: isRenewed ? 'Contrato a renovar' : 'Contrato a expirar',
+          description: `${isRenewed ? 'Próxima renovação' : 'Contrato termina'} em ${renewal.toLocaleDateString('pt-PT')} (em ${daysLeft} dias)`,
           spaceRef: l.space?.ref ?? '—',
           tenantName: l.tenant?.name ?? '—',
         })
