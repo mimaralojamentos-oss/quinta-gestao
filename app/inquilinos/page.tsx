@@ -5,7 +5,7 @@ import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Tenant, Lease } from '@/lib/types'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Plus, Search, FileText, Phone, Mail, X, AlertTriangle, ArrowUpDown, ArrowUp, ArrowDown, ChevronDown } from 'lucide-react'
+import { Plus, Search, FileText, Phone, Mail, X, AlertTriangle, ArrowUpDown, ArrowUp, ArrowDown, ChevronDown, Trash2 } from 'lucide-react'
 import TenantModal from './TenantModal'
 import LeaseModal from './LeaseModal'
 import { useAuth } from '@/lib/auth-context'
@@ -168,6 +168,18 @@ export default function InquilinosPage() {
     }
     setDebts(allDebts)
     setLoadingDebts(false)
+  }
+
+  async function handleDeleteTenant(tenant: TenantWithLease) {
+    const hasLease = tenant.leases && tenant.leases.length > 0
+    if (hasLease) {
+      alert('Não é possível apagar este inquilino porque tem um espaço/contrato associado.')
+      return
+    }
+    if (!confirm(`Tens a certeza que queres apagar o inquilino "${tenant.name}"?\n\nEsta ação é irreversível.`)) return
+    const { error } = await supabase.from('tenants').delete().eq('id', tenant.id)
+    if (error) { alert('Erro ao apagar inquilino: ' + error.message); return }
+    fetchTenants()
   }
 
   function openDebtModal(tenant: TenantWithLease) {
@@ -515,6 +527,10 @@ export default function InquilinosPage() {
                               className="text-xs text-purple-600 hover:underline font-medium" title="Enviar e-mail">
                               <Mail className="w-3.5 h-3.5 inline" />
                             </button>
+                            <button onClick={() => handleDeleteTenant(tenant)}
+                              className="text-xs text-gray-400 hover:text-red-500 font-medium" title="Apagar inquilino">
+                              <Trash2 className="w-3.5 h-3.5 inline" />
+                            </button>
                           </div>
                         </td>
                       )}
@@ -577,6 +593,10 @@ export default function InquilinosPage() {
                             className="text-xs text-blue-600 font-medium hover:underline">Contrato</button>
                           <button onClick={() => openDebtModal(tenant)}
                             className="text-xs text-red-500 font-medium hover:underline">Dívidas</button>
+                          <button onClick={() => handleDeleteTenant(tenant)}
+                            className="text-xs text-gray-400 hover:text-red-500 font-medium" title="Apagar">
+                            <Trash2 className="w-3.5 h-3.5 inline" />
+                          </button>
                         </div>
                       )}
                     </div>
