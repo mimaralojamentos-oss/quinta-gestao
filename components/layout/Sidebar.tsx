@@ -53,7 +53,7 @@ export default function Sidebar({ onClose }: { onClose?: () => void }) {
   const canSeeUtilizadores = isAdmin
 
   return (
-    <aside className="w-64 bg-white border-r border-gray-100 min-h-screen flex flex-col">
+    <aside className="w-64 bg-white border-r border-gray-100 h-screen flex flex-col">
       <div className="p-6 border-b border-gray-100">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 bg-blue-600 rounded-lg flex items-center justify-center">
