@@ -65,7 +65,8 @@
       "Bash(Remove-Item \"C:/Projetos/quinta-app/.git/index.lock\" -Force)",
       "Bash(git *)",
       "Bash(tasklist)",
-      "Bash(echo \"exit:$?\")"
+      "Bash(echo \"exit:$?\")",
+      "Bash(del .git\\\\HEAD.lock)"
     ]
   }
 }

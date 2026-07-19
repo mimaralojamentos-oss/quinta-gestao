@@ -410,17 +410,17 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
       remaining = parseFloat((remaining - paying).toFixed(2))
     }
 
-    // 2ª PRIORIDADE: Eletricidade (pagamento total por cobrança — não se paga eletricidade a meias)
+    // 2ª PRIORIDADE: Eletricidade (pagamento parcial permitido)
     if (includeElec && remaining > 0) {
       const elec = payments
         .filter(p => !p.payment_date && p.isElecCharge)
         .sort((a, b) => (a.reference_month ?? '').localeCompare(b.reference_month ?? ''))
       for (const item of elec) {
         if (remaining <= 0) break
-        if (remaining >= item.amount) {
-          result.push({ item, paying: item.amount })
-          remaining = parseFloat((remaining - item.amount).toFixed(2))
-        }
+        const owed = item.remainingAmount ?? item.amount
+        const paying = parseFloat(Math.min(remaining, owed).toFixed(2))
+        result.push({ item, paying })
+        remaining = parseFloat((remaining - paying).toFixed(2))
       }
     }
 
@@ -454,17 +454,28 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
 
     for (const { item, paying } of allocation) {
       if (item.isElecCharge && item.id) {
-        // Marcar cobrança de eletricidade como paga
-        await supabase.from('electricity_charges').update({
-          paid: true,
-          payment_date: recebimentoForm.date,
-          payment_method: recebimentoForm.method,
-        }).eq('id', item.id)
+        const owed = item.remainingAmount ?? item.amount
+        const isPaidFull = paying >= owed
+        if (isPaidFull) {
+          await supabase.from('electricity_charges').update({
+            paid: true,
+            payment_date: recebimentoForm.date,
+            payment_method: recebimentoForm.method,
+            amount_paid: item.amount,
+          }).eq('id', item.id)
+        } else {
+          // Pagamento parcial — acumula amount_paid sem marcar como pago
+          const alreadyPaid = (item.amount ?? 0) - owed
+          const newAmountPaid = parseFloat((alreadyPaid + paying).toFixed(2))
+          await supabase.from('electricity_charges').update({
+            amount_paid: newAmountPaid,
+          }).eq('id', item.id)
+        }
         // Fundo de Maneio
         if (isCash) {
           await supabase.from('cash_fund_movements').insert({
             movement_date: recebimentoForm.date,
-            description: `⚡ Eletricidade ${item.reference_month.slice(0, 7)} — ${spaceRef} (${tenantName})`,
+            description: `⚡ Eletricidade ${item.reference_month.slice(0, 7)}${!isPaidFull ? ' (parcial)' : ''} — ${spaceRef} (${tenantName})`,
             amount: paying,
             type: 'entrada',
             source: 'renda',
