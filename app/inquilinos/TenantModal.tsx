@@ -392,6 +392,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
     .filter(p => p.payment_date !== 'liquidada')
     .reduce((sum, p) => {
       if (p.isManualDebt) return sum + (p.remainingAmount ?? 0)
+      if (p.isElecCharge) return sum + (p.remainingAmount ?? p.amount ?? 0)
       return sum + (p.amount ?? 0)
     }, 0) - totalAdvance
 
