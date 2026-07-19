@@ -96,7 +96,7 @@ export default function InquilinosPage() {
     // Cobranças de eletricidade por pagar
     const { data: elecChargesData } = await supabase
       .from('electricity_charges')
-      .select('lease_id, amount')
+      .select('lease_id, amount, amount_paid')
       .eq('paid', false)
 
     const mayStart = new Date('2026-05-01')
@@ -145,7 +145,7 @@ export default function InquilinosPage() {
       // Cobranças de eletricidade por pagar
       const elecDebt = (elecChargesData ?? [])
         .filter(c => leaseIds.includes(c.lease_id))
-        .reduce((sum, c) => sum + (c.amount ?? 0), 0)
+        .reduce((sum, c) => sum + Math.max(0, (c.amount ?? 0) - (c.amount_paid ?? 0)), 0)
 
       // Adiantamentos disponíveis (crédito do inquilino)
       const totalAdvance = (paymentsData ?? [])

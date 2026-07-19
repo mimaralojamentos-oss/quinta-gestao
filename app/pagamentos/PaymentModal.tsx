@@ -130,12 +130,15 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
       .eq('lease_id', lease.id)
       .eq('paid', false)
     for (const c of elecCharges ?? []) {
+      const alreadyPaid = c.amount_paid ?? 0
+      const remaining = parseFloat((c.amount - alreadyPaid).toFixed(2))
+      if (remaining <= 0) continue
       items.push({
         id: `elec-${c.id}`,
         type: 'eletricidade',
         label: `Eletricidade ${c.charge_date?.slice(0, 7) ?? ''}`,
         originalAmount: c.amount,
-        remainingAmount: c.amount,
+        remainingAmount: remaining,
         chargeId: c.id,
       })
     }
@@ -181,10 +184,9 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
     }
     for (const item of elec) {
       if (remaining <= 0) break
-      if (remaining >= item.remainingAmount) {
-        result.push({ item, paying: item.remainingAmount })
-        remaining = parseFloat((remaining - item.remainingAmount).toFixed(2))
-      }
+      const paying = parseFloat(Math.min(remaining, item.remainingAmount).toFixed(2))
+      result.push({ item, paying })
+      remaining = parseFloat((remaining - paying).toFixed(2))
     }
     for (const item of manual) {
       if (remaining <= 0) break
@@ -243,16 +245,23 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
         if (isPaidFull) {
           await supabase.from('electricity_charges').update({
             paid: true, payment_date: singleDate, payment_method: singleMethod,
+            amount_paid: item.originalAmount,
+          }).eq('id', chargeId)
+        } else {
+          // Pagamento parcial — acumula amount_paid sem marcar como pago
+          const newAmountPaid = parseFloat(((item.originalAmount - item.remainingAmount) + paying).toFixed(2))
+          await supabase.from('electricity_charges').update({
+            amount_paid: newAmountPaid,
           }).eq('id', chargeId)
         }
         if (singleMethod === 'dinheiro') {
           await supabase.from('cash_fund_movements').insert({
             movement_date: singleDate,
-            description: `⚡ ${item.label} — ${lease.space?.ref} (${lease.tenant?.name})`,
+            description: `⚡ ${item.label}${!isPaidFull ? ' (parcial)' : ''} — ${lease.space?.ref} (${lease.tenant?.name})`,
             amount: paying, type: 'entrada', source: 'eletricidade', source_id: chargeId,
           })
         }
-        await logAccess({ action: 'criar', page: '/pagamentos', details: `Registou pagamento de ${item.label} (${formatCurrency(paying)}) de ${lease.tenant?.name} (${lease.space?.ref})` })
+        await logAccess({ action: 'criar', page: '/pagamentos', details: `Registou pagamento${!isPaidFull ? ' parcial' : ''} de ${item.label} (${formatCurrency(paying)}) de ${lease.tenant?.name} (${lease.space?.ref})` })
       }
     }
 

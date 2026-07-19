@@ -38,6 +38,7 @@ interface PaymentRow {
   isMissing?: boolean
   isManualDebt?: boolean
   isElecCharge?: boolean
+  isPartialElec?: boolean
   remainingAmount?: number
 }
 
@@ -207,25 +208,34 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
     if (leaseIds.length > 0) {
       const { data: elecData } = await supabase
         .from('electricity_charges')
-        .select('id, lease_id, amount, charge_date, reference_month, paid, payment_date, payment_method')
+        .select('id, lease_id, amount, amount_paid, charge_date, reference_month, paid, payment_date, payment_method')
         .in('lease_id', leaseIds)
 
       for (const ec of elecData ?? []) {
         const lease = (leasesData ?? []).find(l => l.id === ec.lease_id)
         const refDate = ec.charge_date ?? ec.reference_month ?? new Date().toISOString().slice(0, 10)
+        const amountPaid = ec.amount_paid ?? 0
+        const remaining = Math.max(0, ec.amount - amountPaid)
+        const isPartial = !ec.paid && amountPaid > 0
         elecChargeRows.push({
           id: ec.id,
           lease_id: ec.lease_id,
           reference_month: refDate,
           amount: ec.amount,
+          remainingAmount: ec.paid ? 0 : remaining,
           payment_date: ec.paid ? ec.payment_date : null,
           payment_method: ec.paid ? ec.payment_method : null,
           tipo: 'eletricidade',
-          notes: ec.paid ? 'Cobrança de eletricidade paga' : 'Cobrança de eletricidade por pagar',
+          notes: ec.paid
+            ? 'Cobrança de eletricidade paga'
+            : isPartial
+              ? `Cobrança de eletricidade — pago parcialmente (${formatCurrency(amountPaid)} de ${formatCurrency(ec.amount)})`
+              : 'Cobrança de eletricidade por pagar',
           lease,
           isMissing: false,
           isManualDebt: false,
           isElecCharge: true,
+          isPartialElec: isPartial,
         })
       }
     }
@@ -1217,6 +1227,8 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                           ) : p.isElecCharge ? (
                             p.payment_date ? (
                               <p className="text-xs text-gray-500">⚡ Pago em {formatDate(p.payment_date)} · {p.payment_method}</p>
+                            ) : (p as any).isPartialElec ? (
+                              <p className="text-xs text-orange-600 font-medium">⚡ Pagamento parcial — falta {formatCurrency((p as any).remainingAmount ?? 0)}</p>
                             ) : (
                               <p className="text-xs text-red-600 font-medium">⚡ Eletricidade por pagar</p>
                             )

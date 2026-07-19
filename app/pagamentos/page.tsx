@@ -105,7 +105,7 @@ export default function PagamentosPage() {
     const { data: allPayments } = await supabase.from('rent_payments').select('lease_id, amount, payment_date, reference_month, tipo')
     const { data: debtsData } = await supabase.from('debts').select('id, tenant_id, original_amount')
     const { data: debtPaymentsData } = await supabase.from('debt_payments').select('debt_id, amount')
-    const { data: elecCharges } = await supabase.from('electricity_charges').select('lease_id, amount').eq('paid', false)
+    const { data: elecCharges } = await supabase.from('electricity_charges').select('lease_id, amount, amount_paid').eq('paid', false)
 
     const refs = [...new Set((leasesData ?? []).map(l => l.space?.ref).filter(Boolean))].sort()
     setAllSpaceRefs(refs)
@@ -133,7 +133,7 @@ export default function PagamentosPage() {
         return sum + Math.max(0, d.original_amount - paid)
       }, 0)
 
-      const elecDebt = (elecCharges ?? []).filter(c => c.lease_id === l.id).reduce((s, c) => s + c.amount, 0)
+      const elecDebt = (elecCharges ?? []).filter(c => c.lease_id === l.id).reduce((s, c) => s + Math.max(0, c.amount - (c.amount_paid ?? 0)), 0)
 
       return {
         id: l.id, monthly_rent: l.monthly_rent, space: l.space, tenant: l.tenant,
