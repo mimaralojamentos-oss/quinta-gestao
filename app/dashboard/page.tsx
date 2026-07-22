@@ -71,7 +71,7 @@ export default function Dashboard() {
       })
 
       const paidLeaseIds = new Set(payments.filter(p => p.tipo === 'renda' || !p.tipo).map(p => p.lease_id))
-      const pendingLeases = leases.filter(l => !paidLeaseIds.has(l.id))
+      const pendingLeases = leases.filter(l => !paidLeaseIds.has(l.id) && l.monthly_rent > 0)
 
       setStats({
         totalSpaces: spaces.length,

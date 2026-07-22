@@ -102,7 +102,7 @@ export default function AlertasPage() {
 
     // Rendas em falta
     ;(leases ?? []).forEach(l => {
-      if (!paidLeaseIds.has(l.id)) {
+      if (!paidLeaseIds.has(l.id) && l.monthly_rent > 0) {
         newAlerts.push({
           id: `rent-${l.id}`,
           type: 'renda_em_falta',
