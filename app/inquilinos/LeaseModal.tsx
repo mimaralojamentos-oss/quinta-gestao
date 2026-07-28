@@ -6,6 +6,7 @@ import { Tenant, Lease, Space } from '@/lib/types'
 import { X, Upload, FileText, Loader2, Sparkles } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
 import { logAccess } from '@/lib/logAccess'
+import { useFileDrop } from '@/lib/useFileDrop'
 
 interface Props {
   tenant: Tenant
@@ -68,6 +69,12 @@ export default function LeaseModal({ tenant, onClose, onSaved }: Props) {
     }
     load()
   }, [tenant.id])
+
+  const contractDrop = useFileDrop({
+    accept: ['.pdf'],
+    onFiles: dropped => { if (dropped[0]) handleFileChange(dropped[0]) },
+    disabled: processingOCR,
+  })
 
   async function handleFileChange(file: File) {
     setContractFile(file)
@@ -232,7 +239,10 @@ export default function LeaseModal({ tenant, onClose, onSaved }: Props) {
                 Ver contrato atual
               </button>
             )}
-            <label className={`flex items-center gap-3 border-2 border-dashed rounded-lg p-4 cursor-pointer transition-colors ${
+            <label
+              {...contractDrop.dropProps}
+              className={`flex items-center gap-3 border-2 border-dashed rounded-lg p-4 cursor-pointer transition-colors ${
+              contractDrop.isDragging ? 'border-emerald-500 bg-emerald-50' :
               processingOCR ? 'border-blue-300 bg-blue-50' :
               ocrDone ? 'border-emerald-400 bg-emerald-50' :
               'border-gray-200 hover:border-emerald-400'
@@ -242,7 +252,7 @@ export default function LeaseModal({ tenant, onClose, onSaved }: Props) {
               ) : ocrDone ? (
                 <Sparkles className="w-5 h-5 text-emerald-500 flex-shrink-0" />
               ) : (
-                <Upload className="w-5 h-5 text-gray-400 flex-shrink-0" />
+                <Upload className={`w-5 h-5 flex-shrink-0 ${contractDrop.isDragging ? 'text-emerald-500' : 'text-gray-400'}`} />
               )}
               <div>
                 {processingOCR && (
@@ -253,7 +263,9 @@ export default function LeaseModal({ tenant, onClose, onSaved }: Props) {
                 )}
                 {!processingOCR && !ocrDone && (
                   <p className="text-sm text-gray-600">
-                    {contractFile ? contractFile.name : 'Clique para fazer upload do contrato'}
+                    {contractDrop.isDragging ? 'Larga aqui o contrato'
+                      : contractFile ? contractFile.name
+                      : 'Arrasta para aqui ou clica para fazer upload do contrato'}
                   </p>
                 )}
                 <p className="text-xs text-gray-400 mt-0.5">

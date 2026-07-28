@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { buildRentPaymentPlan, applyRentPaymentPlan } from '@/lib/rentPaymentPlan'
 import { ensureExpenseForTransaction, emptySummary, addToSummary, describeSummary } from '@/lib/bankExpense'
+import { useFileDrop } from '@/lib/useFileDrop'
 import {
   Upload, CheckCircle, Clock, XCircle, ArrowUpRight,
   ArrowDownRight, ChevronLeft, Loader2, X, ArrowRight, Link2, Edit2, Search, SlidersHorizontal, Sparkles, RefreshCw, FileText
@@ -135,6 +136,12 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
   const [filterDirection, setFilterDirection] = useState<'all' | 'entrada' | 'saida'>('all')
 
   const supabase = createClient()
+
+  const extratoDrop = useFileDrop({
+    accept: ['.xlsx', '.xls', '.csv'],
+    onFiles: dropped => { if (dropped[0]) handleFileSelect(dropped[0]) },
+    disabled: importing,
+  })
 
   useEffect(() => { params.then(p => setBankId(p.id)) }, [])
   useEffect(() => { if (bankId) fetchData() }, [bankId])
@@ -1275,10 +1282,16 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
                     <p className="text-sm text-gray-600">A analisar o ficheiro...</p>
                   </div>
                 ) : (
-                  <label className="flex flex-col items-center gap-3 border-2 border-dashed border-gray-200 rounded-xl p-8 cursor-pointer hover:border-emerald-400 transition-colors">
-                    <Upload className="w-10 h-10 text-gray-300" />
+                  <label
+                    {...extratoDrop.dropProps}
+                    className={`flex flex-col items-center gap-3 border-2 border-dashed rounded-xl p-8 cursor-pointer transition-colors ${
+                      extratoDrop.isDragging ? 'border-emerald-500 bg-emerald-50' : 'border-gray-200 hover:border-emerald-400'
+                    }`}>
+                    <Upload className={`w-10 h-10 ${extratoDrop.isDragging ? 'text-emerald-500' : 'text-gray-300'}`} />
                     <div className="text-center">
-                      <p className="font-medium text-gray-700">Clica para selecionar o ficheiro</p>
+                      <p className="font-medium text-gray-700">
+                        {extratoDrop.isDragging ? 'Larga aqui o ficheiro' : 'Arrasta para aqui ou clica para selecionar'}
+                      </p>
                       <p className="text-sm text-gray-400 mt-1">Excel (.xlsx) ou CSV (.csv)</p>
                     </div>
                     <input type="file" accept=".xlsx,.xls,.csv" className="hidden"

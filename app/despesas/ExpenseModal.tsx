@@ -6,6 +6,7 @@ import { Expense } from '@/lib/types'
 import { X, Upload, FileText, Loader2, Sparkles, Search, Link } from 'lucide-react'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { logAccess } from '@/lib/logAccess'
+import { useFileDrop } from '@/lib/useFileDrop'
 
 interface Props {
   expense: Expense | null
@@ -68,6 +69,12 @@ export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
     const loc = p.is_general ? 'Geral' : p.space?.ref ?? p.location_label ?? ''
     return `${emoji} ${p.name}${loc ? ` (${loc})` : ''}`
   }
+
+  const invoiceDrop = useFileDrop({
+    accept: ['.pdf', '.jpg', '.jpeg', '.png'],
+    onFiles: dropped => { if (dropped[0]) handleFileChange(dropped[0]) },
+    disabled: processingOcr,
+  })
 
   async function handleFileChange(file: File) {
     setInvoiceFile(file)
@@ -225,18 +232,22 @@ export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
             </div>
 
             {docMode === 'upload' ? (
-              <label className={`flex items-center gap-3 border-2 border-dashed rounded-lg p-4 cursor-pointer transition-colors ${
+              <label
+                {...invoiceDrop.dropProps}
+                className={`flex items-center gap-3 border-2 border-dashed rounded-lg p-4 cursor-pointer transition-colors ${
+                invoiceDrop.isDragging ? 'border-emerald-500 bg-emerald-50' :
                 ocrDone ? 'border-emerald-400 bg-emerald-50' :
                 processingOcr ? 'border-blue-300 bg-blue-50' :
                 'border-gray-200 hover:border-emerald-400'
               }`}>
                 {processingOcr ? <Loader2 className="w-5 h-5 text-blue-500 animate-spin flex-shrink-0" />
                   : ocrDone ? <Sparkles className="w-5 h-5 text-emerald-500 flex-shrink-0" />
-                  : <Upload className="w-5 h-5 text-gray-400 flex-shrink-0" />}
+                  : <Upload className={`w-5 h-5 flex-shrink-0 ${invoiceDrop.isDragging ? 'text-emerald-500' : 'text-gray-400'}`} />}
                 <div>
                   {processingOcr ? <p className="text-sm text-blue-600 font-medium">A ler fatura com IA...</p>
+                    : invoiceDrop.isDragging ? <p className="text-sm text-emerald-600 font-medium">Larga aqui a fatura</p>
                     : ocrDone ? <p className="text-sm text-emerald-600 font-medium">✓ Campos preenchidos automaticamente!</p>
-                    : <p className="text-sm text-gray-600">{invoiceFile ? invoiceFile.name : expense ? 'Substituir fatura' : 'Clique para fazer upload (PDF, JPG, PNG)'}</p>}
+                    : <p className="text-sm text-gray-600">{invoiceFile ? invoiceFile.name : expense ? 'Substituir fatura' : 'Arrasta para aqui ou clica para fazer upload (PDF, JPG, PNG)'}</p>}
                   {!processingOcr && !ocrDone && <p className="text-xs text-gray-400">{expense ? 'PDF, JPG, PNG — máximo 10MB' : 'PDF recomendado para melhor leitura automática'}</p>}
                   {ocrDone && invoiceFile && <p className="text-xs text-emerald-500">{invoiceFile.name}</p>}
                 </div>

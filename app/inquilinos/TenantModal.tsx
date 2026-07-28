@@ -6,6 +6,7 @@ import { X, User, Home, FileText, Plus, Trash2, Pencil, ChevronRight, ChevronLef
 import EmailModal from '@/components/EmailModal'
 import { formatCurrency, formatDate, getCurrentMonth } from '@/lib/utils'
 import { logAccess } from '@/lib/logAccess'
+import { useFileDrop } from '@/lib/useFileDrop'
 
 interface Props {
   tenant: Tenant | null
@@ -255,6 +256,12 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
     setPayments(allRows)
     setLoadingPayments(false)
   }
+
+  const tenantContractDrop = useFileDrop({
+    accept: ['.pdf'],
+    onFiles: dropped => { if (dropped[0]) handleOCR(dropped[0]) },
+    disabled: processingOCR,
+  })
 
   async function handleOCR(file: File) {
     setContractFile(file); setOcrDone(false); setOcrError(''); setProcessingOCR(true)
@@ -866,16 +873,22 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
 
           {isNew && createMode === 'ocr' && step === 1 && (
             <div className="space-y-4">
-              <label className={`flex items-center gap-3 border-2 border-dashed rounded-lg p-6 cursor-pointer transition-colors ${processingOCR ? 'border-blue-300 bg-blue-50' : ocrDone ? 'border-emerald-400 bg-emerald-50' : 'border-gray-200 hover:border-blue-400'}`}>
+              <label
+                {...tenantContractDrop.dropProps}
+                className={`flex items-center gap-3 border-2 border-dashed rounded-lg p-6 cursor-pointer transition-colors ${tenantContractDrop.isDragging ? 'border-emerald-500 bg-emerald-50' : processingOCR ? 'border-blue-300 bg-blue-50' : ocrDone ? 'border-emerald-400 bg-emerald-50' : 'border-gray-200 hover:border-blue-400'}`}>
                 {processingOCR ? <Loader2 className="w-6 h-6 text-blue-500 animate-spin flex-shrink-0" />
                   : ocrDone ? <Sparkles className="w-6 h-6 text-emerald-500 flex-shrink-0" />
-                  : <Upload className="w-6 h-6 text-gray-400 flex-shrink-0" />}
+                  : <Upload className={`w-6 h-6 flex-shrink-0 ${tenantContractDrop.isDragging ? 'text-emerald-500' : 'text-gray-400'}`} />}
                 <div>
                   {processingOCR && <p className="font-medium text-blue-600">A ler contrato com IA...</p>}
                   {ocrDone && <p className="font-medium text-emerald-600">✓ Dados extraídos! A avançar...</p>}
                   {!processingOCR && !ocrDone && (
                     <>
-                      <p className="font-medium text-gray-700">{contractFile ? contractFile.name : 'Clica para fazer upload do contrato PDF'}</p>
+                      <p className="font-medium text-gray-700">
+                        {tenantContractDrop.isDragging ? 'Larga aqui o contrato'
+                          : contractFile ? contractFile.name
+                          : 'Arrasta para aqui ou clica para fazer upload do contrato PDF'}
+                      </p>
                       <p className="text-xs text-gray-400 mt-0.5">A IA vai extrair nome, NIF, datas e valor da renda automaticamente</p>
                     </>
                   )}

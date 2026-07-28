@@ -5,6 +5,7 @@ import { useEffect, useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatCurrency } from '@/lib/utils'
 import { Plus, Building, CreditCard, ArrowUpRight, ArrowDownRight, Upload, Eye, X, Loader2, FileText, CheckCircle } from 'lucide-react'
+import { useFileDrop } from '@/lib/useFileDrop'
 import Link from 'next/link'
 
 interface Bank {
@@ -162,10 +163,18 @@ function BankModal({ bank, onClose, onSaved }: { bank: Bank | null; onClose: () 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const supabase = createClient()
 
-  async function handlePdfUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
+  const bankPdfDrop = useFileDrop({
+    accept: ['.pdf'],
+    onFiles: dropped => { if (dropped[0]) processPdf(dropped[0]) },
+    disabled: extracting,
+  })
 
+  function handlePdfUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (file) processPdf(file)
+  }
+
+  async function processPdf(file: File) {
     setExtracting(true)
     setExtractError('')
     setPdfFileName(file.name)
@@ -242,16 +251,23 @@ function BankModal({ bank, onClose, onSaved }: { bank: Bank | null; onClose: () 
           />
           <button
             type="button"
+            {...bankPdfDrop.dropProps}
             onClick={() => fileInputRef.current?.click()}
             disabled={extracting}
-            className="w-full flex items-center justify-center gap-2 border-2 border-dashed border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg py-3 px-4 text-sm font-medium transition-colors disabled:opacity-60"
+            className={`w-full flex items-center justify-center gap-2 border-2 border-dashed rounded-lg py-3 px-4 text-sm font-medium transition-colors disabled:opacity-60 ${
+              bankPdfDrop.isDragging
+                ? 'border-emerald-500 bg-emerald-100 text-emerald-800'
+                : 'border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-700'
+            }`}
           >
             {extracting ? (
               <><Loader2 className="w-4 h-4 animate-spin" /> A ler PDF...</>
+            ) : bankPdfDrop.isDragging ? (
+              <><FileText className="w-4 h-4" /> Larga aqui o PDF</>
             ) : pdfFileName ? (
               <><CheckCircle className="w-4 h-4 text-emerald-600" /> {pdfFileName} — carregar outro</>
             ) : (
-              <><FileText className="w-4 h-4" /> Carregar PDF do banco para preencher automaticamente</>
+              <><FileText className="w-4 h-4" /> Arrasta para aqui ou clica para carregar o PDF do banco</>
             )}
           </button>
           {extractError && <p className="text-xs text-red-600 mt-1">{extractError}</p>}

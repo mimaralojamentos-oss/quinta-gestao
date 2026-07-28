@@ -8,6 +8,7 @@ import { formatCurrency, formatDate } from '@/lib/utils'
 import { Search, FileText, Eye, FolderOpen, Trash2, X, Plus, Upload, Loader2, CheckCircle, AlertCircle, Edit2, Filter, ChevronDown, ChevronUp, ArrowUpDown, ArrowUp, ArrowDown, Zap } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import { logAccess } from '@/lib/logAccess'
+import { useFileDrop } from '@/lib/useFileDrop'
 import ManualDocumentModal from '@/components/ManualDocumentModal'
 
 interface Document {
@@ -137,6 +138,12 @@ export default function DocumentosPage() {
   const [creatingExpense, setCreatingExpense] = useState(false)
 
   const remainingFiles = useRef<{ file: File; index: number }[]>([])
+
+  const uploadDrop = useFileDrop({
+    accept: ['.pdf', '.jpg', '.jpeg', '.png'],
+    multiple: true,
+    onFiles: dropped => setFiles(prev => [...prev, ...dropped]),
+  })
 
   useEffect(() => { fetchAll() }, [])
 
@@ -783,11 +790,17 @@ async function handleSaveEdit() {
                     Ficheiros
                     <span className="text-xs text-emerald-600 font-normal ml-2">✨ OCR automático com IA</span>
                   </label>
-                  <label className="flex flex-col items-center gap-3 border-2 border-dashed border-gray-200 rounded-xl p-6 cursor-pointer hover:border-emerald-400 transition-colors">
-                    <Upload className="w-8 h-8 text-gray-300" />
+                  <label
+                    {...uploadDrop.dropProps}
+                    className={`flex flex-col items-center gap-3 border-2 border-dashed rounded-xl p-6 cursor-pointer transition-colors ${
+                      uploadDrop.isDragging ? 'border-emerald-500 bg-emerald-50' : 'border-gray-200 hover:border-emerald-400'
+                    }`}>
+                    <Upload className={`w-8 h-8 ${uploadDrop.isDragging ? 'text-emerald-500' : 'text-gray-300'}`} />
                     <div className="text-center">
                       <p className="font-medium text-gray-700 text-sm">
-                        {files.length > 0 ? `${files.length} ficheiro(s) selecionado(s)` : 'Clica para selecionar'}
+                        {uploadDrop.isDragging
+                          ? 'Larga aqui os ficheiros'
+                          : files.length > 0 ? `${files.length} ficheiro(s) selecionado(s)` : 'Arrasta para aqui ou clica para selecionar'}
                       </p>
                       <p className="text-xs text-gray-400 mt-1">PDF, JPG, PNG — duplicados são detetados automaticamente</p>
                     </div>

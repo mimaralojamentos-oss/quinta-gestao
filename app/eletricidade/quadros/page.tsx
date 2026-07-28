@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { Plus, Zap, Trash2, X, ChevronDown, ChevronRight, Upload, Loader2, RefreshCw, CheckCircle, AlertCircle, BarChart2, Eye, Search } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
+import { useFileDrop } from '@/lib/useFileDrop'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 
 interface Meter {
@@ -77,6 +78,12 @@ export default function QuadrosPage() {
 
   const [associateReading, setAssociateReading] = useState<MeterReading | null>(null)
   const [associateSearch, setAssociateSearch] = useState('')
+
+  const edpDrop = useFileDrop({
+    accept: ['.pdf'],
+    multiple: true,
+    onFiles: dropped => setUploadFiles(prev => [...prev, ...dropped]),
+  })
 
   const [filterType, setFilterType] = useState<FilterType>('all')
   const [filterYear, setFilterYear] = useState('2026')
@@ -622,11 +629,17 @@ export default function QuadrosPage() {
             {!importing && !importDone && (
               <div className="space-y-4">
                 <p className="text-sm text-gray-500">Carrega faturas EDP — os dados são extraídos automaticamente com IA e a leitura é associada ao quadro correto.</p>
-                <label className="flex flex-col items-center gap-3 border-2 border-dashed border-gray-200 rounded-xl p-6 cursor-pointer hover:border-emerald-400 transition-colors">
-                  <Upload className="w-8 h-8 text-gray-300" />
+                <label
+                  {...edpDrop.dropProps}
+                  className={`flex flex-col items-center gap-3 border-2 border-dashed rounded-xl p-6 cursor-pointer transition-colors ${
+                    edpDrop.isDragging ? 'border-emerald-500 bg-emerald-50' : 'border-gray-200 hover:border-emerald-400'
+                  }`}>
+                  <Upload className={`w-8 h-8 ${edpDrop.isDragging ? 'text-emerald-500' : 'text-gray-300'}`} />
                   <div className="text-center">
                     <p className="font-medium text-gray-700 text-sm">
-                      {uploadFiles.length > 0 ? `${uploadFiles.length} ficheiro(s) selecionado(s)` : 'Clica para selecionar faturas EDP (PDF)'}
+                      {edpDrop.isDragging
+                        ? 'Larga aqui as faturas'
+                        : uploadFiles.length > 0 ? `${uploadFiles.length} ficheiro(s) selecionado(s)` : 'Arrasta para aqui ou clica para selecionar faturas EDP (PDF)'}
                     </p>
                     <p className="text-xs text-gray-400 mt-1">✨ OCR automático — extrai leituras e valores</p>
                   </div>
