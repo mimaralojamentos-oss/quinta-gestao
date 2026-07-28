@@ -196,6 +196,7 @@ export default function DocumentosPage() {
   function openEditModal(doc: Document) {
     setEditDoc(doc)
     setEditForm({
+      original_name: doc.original_name ?? '',
       tipo: doc.tipo,
       tipo_custom: doc.tipo_custom ?? '',
       supplier_name: doc.supplier_name ?? '',
@@ -211,6 +212,7 @@ async function handleSaveEdit() {
   if (!editDoc) return
   setSaving(true)
   await supabase.from('documents').update({
+    original_name: editForm.original_name || null,
     tipo: editForm.tipo,
     tipo_custom: editForm.tipo_custom || null,
     supplier_name: editForm.supplier_name || null,
@@ -665,6 +667,11 @@ async function handleSaveEdit() {
               <button onClick={() => setEditDoc(null)}><X className="w-5 h-5 text-gray-400" /></button>
             </div>
             <div className="space-y-4">
+              <div>
+                <label className="label">Nome do ficheiro</label>
+                <input className="input" value={editForm.original_name}
+                  onChange={e => setEditForm((f: any) => ({ ...f, original_name: e.target.value }))} />
+              </div>
               <div>
                 <label className="label">Tipo de Documento</label>
                 <select className="input" value={editForm.tipo} onChange={e => setEditForm((f: any) => ({ ...f, tipo: e.target.value }))}>
