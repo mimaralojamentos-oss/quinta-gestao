@@ -83,6 +83,62 @@ export default function QuadrosPage() {
   // Nomes das faturas EDP já guardadas — usado para assinalar repetições na lista.
   const existingDocNames = documents.map(d => d.original_name ?? '').filter(Boolean)
 
+  // ── Criar quadro a partir de uma fatura EDP ──
+  const [extractingMeter, setExtractingMeter] = useState(false)
+  const [meterExtractDone, setMeterExtractDone] = useState(false)
+  const [meterExtractError, setMeterExtractError] = useState('')
+  const [meterExtractInfo, setMeterExtractInfo] = useState('')
+
+  function resetMeterExtraction() {
+    setExtractingMeter(false)
+    setMeterExtractDone(false)
+    setMeterExtractError('')
+    setMeterExtractInfo('')
+  }
+
+  async function extractMeterFromPdf(file: File) {
+    setExtractingMeter(true)
+    setMeterExtractError('')
+    setMeterExtractDone(false)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = await fetch('/api/extract-edp-meter', { method: 'POST', body: fd })
+      const json = await res.json()
+
+      if (!res.ok || json.error) {
+        setMeterExtractError(json.error ?? 'Não foi possível ler a fatura')
+        return
+      }
+
+      // Já existe um quadro com este contrato/CPE — avisa em vez de criar um duplicado
+      if (json.existingMeter) {
+        setMeterExtractError(`Esta fatura pertence ao quadro "${json.existingMeter.name}", que já está registado. Não é preciso criar outro.`)
+        return
+      }
+
+      const d = json.data
+      setMeterForm(f => ({
+        name: d.suggested_name || f.name,
+        contract_number: d.contract_number || f.contract_number,
+        cpe: d.cpe || f.cpe,
+        location: d.location || f.location,
+      }))
+      setMeterExtractInfo([d.holder_name, d.power_kva].filter(Boolean).join(' · '))
+      setMeterExtractDone(true)
+    } catch {
+      setMeterExtractError('Erro ao processar a fatura. Tenta novamente.')
+    } finally {
+      setExtractingMeter(false)
+    }
+  }
+
+  const meterPdfDrop = useFileDrop({
+    accept: ['.pdf'],
+    onFiles: dropped => { if (dropped[0]) extractMeterFromPdf(dropped[0]) },
+    disabled: extractingMeter,
+  })
+
   function addUploadFiles(incoming: File[]) {
     setUploadFiles(prev => {
       const { files, ignored } = mergeUniqueFiles(prev, incoming)
@@ -351,6 +407,7 @@ export default function QuadrosPage() {
   function openEdit(meter: Meter) {
     setEditMeter(meter)
     setMeterForm({ name: meter.name, contract_number: meter.contract_number, cpe: meter.cpe ?? '', location: meter.location ?? '' })
+    resetMeterExtraction()
     setShowModal(true)
   }
 
@@ -386,7 +443,7 @@ export default function QuadrosPage() {
                 <button className="btn-secondary" onClick={() => { setShowUploadModal(true); setImportResults([]); setImportDone(false) }}>
                   <Upload className="w-4 h-4" /> Upload fatura EDP
                 </button>
-                <button className="btn-primary" onClick={() => { setEditMeter(null); setMeterForm({ name: '', contract_number: '', cpe: '', location: '' }); setShowModal(true) }}>
+                <button className="btn-primary" onClick={() => { setEditMeter(null); setMeterForm({ name: '', contract_number: '', cpe: '', location: '' }); resetMeterExtraction(); setShowModal(true) }}>
                   <Plus className="w-4 h-4" /> Novo Quadro
                 </button>
               </>
@@ -759,6 +816,42 @@ export default function QuadrosPage() {
               <h2 className="font-semibold text-lg text-gray-900">{editMeter ? 'Editar Quadro' : 'Novo Quadro'}</h2>
               <button onClick={() => setShowModal(false)}><X className="w-5 h-5 text-gray-400" /></button>
             </div>
+            {!editMeter && (
+              <div className="mb-5">
+                <label
+                  {...meterPdfDrop.dropProps}
+                  className={`flex items-center gap-3 border-2 border-dashed rounded-lg p-4 cursor-pointer transition-colors ${
+                    meterPdfDrop.isDragging ? 'border-emerald-500 bg-emerald-100' :
+                    extractingMeter ? 'border-blue-300 bg-blue-50' :
+                    meterExtractDone ? 'border-emerald-400 bg-emerald-50' :
+                    'border-emerald-300 bg-emerald-50 hover:bg-emerald-100'
+                  }`}>
+                  {extractingMeter ? <Loader2 className="w-5 h-5 text-blue-500 animate-spin flex-shrink-0" />
+                    : meterExtractDone ? <CheckCircle className="w-5 h-5 text-emerald-600 flex-shrink-0" />
+                    : <Upload className="w-5 h-5 text-emerald-600 flex-shrink-0" />}
+                  <div className="min-w-0">
+                    {extractingMeter ? (
+                      <p className="text-sm font-medium text-blue-600">A ler fatura com IA...</p>
+                    ) : meterPdfDrop.isDragging ? (
+                      <p className="text-sm font-medium text-emerald-700">Larga aqui a fatura</p>
+                    ) : meterExtractDone ? (
+                      <>
+                        <p className="text-sm font-medium text-emerald-700">✓ Campos preenchidos — confirma antes de guardar</p>
+                        <p className="text-xs text-emerald-600 truncate">{meterExtractInfo}</p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-sm font-medium text-emerald-700">Criar a partir de uma fatura EDP</p>
+                        <p className="text-xs text-emerald-600">Arrasta para aqui ou clica — a IA preenche os campos abaixo</p>
+                      </>
+                    )}
+                  </div>
+                  <input type="file" accept=".pdf" className="hidden"
+                    onChange={e => { const f = e.target.files?.[0]; if (f) extractMeterFromPdf(f); e.target.value = '' }} />
+                </label>
+                {meterExtractError && <p className="text-xs text-red-600 mt-1">{meterExtractError}</p>}
+              </div>
+            )}
             <div className="space-y-4">
               <div>
                 <label className="label">Nome *</label>
