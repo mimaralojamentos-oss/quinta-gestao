@@ -5,11 +5,12 @@ import { useEffect, useState, useMemo } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { CashFundMovement } from '@/lib/types'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Plus, TrendingUp, TrendingDown, Wallet, Trash2, Search, X, Calendar, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react'
+import { Plus, TrendingUp, TrendingDown, Wallet, Trash2, Search, X, Calendar, ChevronUp, ChevronDown, ChevronsUpDown, ArrowRightLeft } from 'lucide-react'
 import CashModal from './CashModal'
+import TransferModal from './TransferModal'
 import { useAuth } from '@/lib/auth-context'
 
-type SourceFilter = 'all' | 'manual' | 'renda' | 'despesa' | 'documento'
+type SourceFilter = 'all' | 'manual' | 'renda' | 'despesa' | 'documento' | 'transferencia_banco'
 type SortField = 'movement_date' | 'description' | 'type' | 'source' | 'amount' | 'notes'
 type SortDir = 'asc' | 'desc'
 
@@ -19,6 +20,7 @@ export default function CaixaPage() {
   const [movements, setMovements] = useState<CashFundMovement[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
+  const [showTransfer, setShowTransfer] = useState(false)
 
   // Saldo numa data específica
   const [saldoData, setSaldoData] = useState('')
@@ -120,6 +122,9 @@ export default function CaixaPage() {
   // Saldo total real (sempre sobre todos os movimentos)
   const balance = movements.reduce((s, m) => s + m.amount, 0)
 
+  // Transferências já retiradas da caixa mas ainda não vistas no extrato
+  const pendingTransfers = movements.filter(m => (m as any).transfer_status === 'pendente')
+
   // Entradas/Saídas do período selecionado
   const periodMovements = selectedMonth === 'all'
     ? movements
@@ -131,6 +136,7 @@ export default function CaixaPage() {
     if (source === 'renda') return '🏠 Renda'
     if (source === 'despesa') return '💸 Despesa'
     if (source === 'documento') return '📄 Documento'
+    if (source === 'transferencia_banco') return '🏦 Transferência'
     return '✋ Manual'
   }
 
@@ -140,6 +146,7 @@ export default function CaixaPage() {
     { key: 'renda', label: '🏠 Renda' },
     { key: 'despesa', label: '💸 Despesa' },
     { key: 'documento', label: '📄 Documento' },
+    { key: 'transferencia_banco', label: '🏦 Transferência' },
   ]
 
   const thClass = 'px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide cursor-pointer select-none hover:text-gray-700 whitespace-nowrap'
@@ -157,11 +164,37 @@ export default function CaixaPage() {
             </p>
           </div>
           {(isAdmin || isCoAdmin) && (
-            <button className="btn-primary" onClick={() => setShowModal(true)}>
-              <Plus className="w-4 h-4" /> Novo Movimento
-            </button>
+            <div className="flex items-center gap-2">
+              <button className="btn-secondary" onClick={() => setShowTransfer(true)}>
+                <ArrowRightLeft className="w-4 h-4" /> Transferir para o banco
+              </button>
+              <button className="btn-primary" onClick={() => setShowModal(true)}>
+                <Plus className="w-4 h-4" /> Novo Movimento
+              </button>
+            </div>
           )}
         </div>
+
+        {/* Transferências à espera de aparecer no extrato bancário */}
+        {pendingTransfers.length > 0 && (
+          <div className="mb-4 border border-amber-200 bg-amber-50 rounded-lg px-4 py-3">
+            <p className="text-sm font-medium text-amber-800 flex items-center gap-2">
+              <ArrowRightLeft className="w-4 h-4" />
+              {pendingTransfers.length} transferência{pendingTransfers.length > 1 ? 's' : ''} a aguardar confirmação no banco
+              <span className="font-bold">({formatCurrency(Math.abs(pendingTransfers.reduce((s, m) => s + m.amount, 0)))})</span>
+            </p>
+            <div className="mt-2 space-y-1">
+              {pendingTransfers.map(m => (
+                <p key={m.id} className="text-xs text-amber-700">
+                  {formatDate(m.movement_date)} · {m.description} · {formatCurrency(Math.abs(m.amount))}
+                </p>
+              ))}
+            </div>
+            <p className="text-xs text-amber-600 mt-2">
+              Confirmam-se sozinhas quando importares o extrato bancário com a entrada correspondente.
+            </p>
+          </div>
+        )}
 
         {/* KPIs — compactos */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
@@ -334,6 +367,14 @@ export default function CaixaPage() {
         <CashModal
           onClose={() => setShowModal(false)}
           onSaved={() => { setShowModal(false); fetchData() }}
+        />
+      )}
+
+      {showTransfer && (isAdmin || isCoAdmin) && (
+        <TransferModal
+          currentBalance={balance}
+          onClose={() => setShowTransfer(false)}
+          onSaved={() => { setShowTransfer(false); fetchData() }}
         />
       )}
     </AppLayout>

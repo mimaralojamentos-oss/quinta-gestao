@@ -23,12 +23,12 @@ function calcNextRenewal(startDate: string, endDate: string): Date {
   }
   return renewal
 }
-import { AlertTriangle, Clock, FileText, CheckCircle, Zap, X, Bell, NotebookPen } from 'lucide-react'
+import { AlertTriangle, Clock, FileText, CheckCircle, Zap, X, Bell, NotebookPen, ArrowRightLeft } from 'lucide-react'
 import Link from 'next/link'
 
 interface AlertItem {
   id: string
-  type: 'renda_em_falta' | 'contrato_a_expirar' | 'luz_pendente'
+  type: 'renda_em_falta' | 'contrato_a_expirar' | 'luz_pendente' | 'transferencia_pendente'
   severity: 'high' | 'medium' | 'low'
   title: string
   description: string
@@ -90,6 +90,11 @@ export default function AlertasPage() {
       .select('*, lease:leases(*, space:spaces(*), tenant:tenants(*))')
       .eq('paid', false)
 
+    const { data: cashTransfers } = await supabase
+      .from('cash_fund_movements')
+      .select('id, movement_date, description, amount')
+      .eq('transfer_status', 'pendente')
+
     const { data: dismissedData } = await supabase
       .from('dismissed_alerts')
       .select('alert_key')
@@ -150,6 +155,26 @@ export default function AlertasPage() {
       })
     })
 
+    // Transferências do fundo de maneio que saíram da caixa mas ainda não
+    // apareceram no extrato bancário. Só alerta ao fim de 7 dias, para dar
+    // tempo à transferência de ser processada pelo banco.
+    const sevenDaysAgo = new Date()
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
+    ;(cashTransfers ?? []).forEach(t => {
+      if (new Date(t.movement_date) > sevenDaysAgo) return
+      const daysWaiting = Math.floor((Date.now() - new Date(t.movement_date).getTime()) / (1000 * 60 * 60 * 24))
+      newAlerts.push({
+        id: `transfer-${t.id}`,
+        type: 'transferencia_pendente',
+        severity: daysWaiting > 30 ? 'high' : 'medium',
+        title: 'Transferência por confirmar',
+        description: `Saiu do fundo de maneio há ${daysWaiting} dias e ainda não apareceu no extrato bancário`,
+        spaceRef: '—',
+        tenantName: t.description ?? 'Transferência para banco',
+        value: Math.abs(t.amount),
+      })
+    })
+
     newAlerts.sort((a, b) => {
       const order = { high: 0, medium: 1, low: 2 }
       return order[a.severity] - order[b.severity]
@@ -185,6 +210,7 @@ export default function AlertasPage() {
   const typeIcon = (type: string) => {
     if (type === 'renda_em_falta') return <Clock className="w-5 h-5" />
     if (type === 'contrato_a_expirar') return <FileText className="w-5 h-5" />
+    if (type === 'transferencia_pendente') return <ArrowRightLeft className="w-5 h-5" />
     return <Zap className="w-5 h-5" />
   }
 

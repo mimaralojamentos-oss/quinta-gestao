@@ -49,13 +49,14 @@ interface ColumnMapping {
 }
 
 interface AutoMatch {
-  type: 'renda' | 'despesa' | 'fatura' | 'regra'
+  type: 'renda' | 'despesa' | 'fatura' | 'regra' | 'transferencia_caixa'
   confidence: 'high' | 'medium' | 'low'
   reason: string
   tenant?: any
   lease?: any
   expense?: any
   document?: any
+  cashMovement?: any
   ruleType?: string
 }
 
@@ -114,6 +115,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
   const [syncing, setSyncing] = useState(false)
   const [syncingExpenses, setSyncingExpenses] = useState(false)
   const [documents, setDocuments] = useState<any[]>([])
+  const [pendingCashTransfers, setPendingCashTransfers] = useState<any[]>([])
   const [matchingRules, setMatchingRules] = useState<MatchingRule[]>([])
   const [showRules, setShowRules] = useState(false)
   const [newRuleKeyword, setNewRuleKeyword] = useState('')
@@ -188,11 +190,18 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
         .order('created_at', { ascending: false })
       setMatchingRules(rulesData ?? [])
 
+      // Transferências de caixa pendentes — para sugerir a entrada correspondente
+      const { data: cashData } = await supabase
+        .from('cash_fund_movements')
+        .select('id, movement_date, description, amount, bank_id, transfer_status')
+        .eq('transfer_status', 'pendente')
+      setPendingCashTransfers(cashData ?? [])
+
       if (txData && leasesData && expensesData && tenantsData) {
         const matches: Record<string, AutoMatch[]> = {}
         for (const tx of txData) {
           if (!tx.confirmed_type) {
-            const found = findAutoMatches(tx, leasesData, expensesData, tenantsData, rentData ?? [], docsData ?? [], rulesData ?? [])
+            const found = findAutoMatches(tx, leasesData, expensesData, tenantsData, rentData ?? [], docsData ?? [], rulesData ?? [], cashData ?? [])
             if (found.length > 0) matches[tx.id] = found
           }
         }
@@ -202,9 +211,28 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     finally { setLoading(false) }
   }
 
-  function findAutoMatches(tx: Transaction, leasesData: any[], expensesData: any[], tenantsData: any[], rentData: any[], docsData: any[], rulesData: MatchingRule[]): AutoMatch[] {
+  function findAutoMatches(tx: Transaction, leasesData: any[], expensesData: any[], tenantsData: any[], rentData: any[], docsData: any[], rulesData: MatchingRule[], cashTransfers: any[] = []): AutoMatch[] {
     const results: AutoMatch[] = []
     const txDate = new Date(tx.transaction_date)
+
+    // Transferências do fundo de maneio que ainda não foram vistas no banco.
+    // Máxima prioridade: se o valor bate certo e a data é próxima, é quase de
+    // certeza a entrada correspondente ao dinheiro que saiu da caixa.
+    if (tx.amount > 0) {
+      for (const mov of cashTransfers) {
+        const movAmount = Math.abs(mov.amount)
+        const movDate = new Date(mov.movement_date)
+        const daysApart = Math.abs((txDate.getTime() - movDate.getTime()) / (1000 * 60 * 60 * 24))
+        if (Math.abs(movAmount - tx.amount) <= 0.02 && daysApart <= 10) {
+          results.push({
+            type: 'transferencia_caixa',
+            confidence: 'high',
+            reason: `Transferência do fundo de maneio de ${formatDate(mov.movement_date)}`,
+            cashMovement: mov,
+          })
+        }
+      }
+    }
 
     // Regras personalizadas (máxima prioridade)
     for (const rule of rulesData) {
@@ -347,6 +375,9 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
       if (best.type === 'despesa') {
         return { label: `~ 💸 ${best.expense?.description ?? '—'}`, color: 'text-red-400', confirmed: false, confidence: best.confidence }
       }
+      if (best.type === 'transferencia_caixa') {
+        return { label: `~ 🏦 Transferência do fundo de maneio`, color: 'text-indigo-400', confirmed: false, confidence: best.confidence }
+      }
     }
     return null
   }
@@ -410,10 +441,36 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     }
   }
 
+  // Liga uma entrada bancária à transferência que saiu do fundo de maneio.
+  // A partir daqui o dinheiro deixa de estar "em trânsito": saiu da caixa e
+  // entrou no banco, com as duas pontas ligadas para não haver dupla contagem.
+  async function confirmCashTransfer(tx: Transaction, cashMovement: any) {
+    await supabase.from('bank_transactions').update({
+      confirmed_type: 'transferencia_interna',
+      status: 'validado',
+      notes: `Transferência do fundo de maneio de ${formatDate(cashMovement.movement_date)}`,
+    }).eq('id', tx.id)
+
+    const { error } = await supabase.from('cash_fund_movements').update({
+      transfer_status: 'confirmado',
+      bank_transaction_id: tx.id,
+      notes: `Confirmada no extrato bancário em ${formatDate(tx.transaction_date)}`,
+    }).eq('id', cashMovement.id)
+
+    if (error?.code === '23505') {
+      alert('⚠️ Esta transferência já tinha sido confirmada por outro movimento bancário.')
+    }
+  }
+
   async function confirmAutoMatch(tx: Transaction) {
     const autoMatches = txMatches[tx.id]
     if (!autoMatches || autoMatches.length === 0) return
     const best = autoMatches[0]
+    if (best.type === 'transferencia_caixa') {
+      await confirmCashTransfer(tx, best.cashMovement)
+      fetchData()
+      return
+    }
     if (best.type === 'renda') {
       const confirmedLeaseId = best.lease?.id ?? null
       await supabase.from('bank_transactions').update({
