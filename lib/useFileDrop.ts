@@ -23,6 +23,32 @@ interface UseFileDropOptions {
  * Nota: o contador de "enter/leave" existe porque o browser dispara dragleave
  * ao passar sobre elementos filhos — sem ele a moldura piscava.
  */
+/**
+ * Junta ficheiros novos aos já selecionados, ignorando repetidos.
+ * Dois ficheiros são considerados o mesmo se tiverem o mesmo nome e tamanho.
+ * Devolve também os nomes ignorados, para poder avisar o utilizador.
+ */
+export function mergeUniqueFiles(existing: File[], incoming: File[]): { files: File[]; ignored: string[] } {
+  const key = (f: File) => `${f.name}::${f.size}`
+  const seen = new Set(existing.map(key))
+  const files = [...existing]
+  const ignored: string[] = []
+
+  for (const f of incoming) {
+    if (seen.has(key(f))) { ignored.push(f.name); continue }
+    seen.add(key(f))
+    files.push(f)
+  }
+  return { files, ignored }
+}
+
+/** Tamanho legível, ex: "1,2 MB". */
+export function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1).replace('.', ',')} MB`
+}
+
 export function useFileDrop({ accept, multiple = false, onFiles, disabled = false }: UseFileDropOptions) {
   const [isDragging, setIsDragging] = useState(false)
   const depth = useRef(0)

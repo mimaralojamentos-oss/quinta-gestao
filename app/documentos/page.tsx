@@ -8,7 +8,8 @@ import { formatCurrency, formatDate } from '@/lib/utils'
 import { Search, FileText, Eye, FolderOpen, Trash2, X, Plus, Upload, Loader2, CheckCircle, AlertCircle, Edit2, Filter, ChevronDown, ChevronUp, ArrowUpDown, ArrowUp, ArrowDown, Zap } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import { logAccess } from '@/lib/logAccess'
-import { useFileDrop } from '@/lib/useFileDrop'
+import { useFileDrop, mergeUniqueFiles } from '@/lib/useFileDrop'
+import SelectedFilesList from '@/components/SelectedFilesList'
 import ManualDocumentModal from '@/components/ManualDocumentModal'
 
 interface Document {
@@ -139,10 +140,23 @@ export default function DocumentosPage() {
 
   const remainingFiles = useRef<{ file: File; index: number }[]>([])
 
+  // Nomes dos documentos já guardados — assinala repetições antes de carregar.
+  const existingDocNames = documents.map(d => d.original_name ?? '').filter(Boolean)
+
+  function addUploadFiles(incoming: File[]) {
+    setFiles(prev => {
+      const { files: merged, ignored } = mergeUniqueFiles(prev, incoming)
+      if (ignored.length > 0) {
+        alert(`Ficheiro(s) já selecionado(s), ignorado(s):\n\n${ignored.join('\n')}`)
+      }
+      return merged
+    })
+  }
+
   const uploadDrop = useFileDrop({
     accept: ['.pdf', '.jpg', '.jpeg', '.png'],
     multiple: true,
-    onFiles: dropped => setFiles(prev => [...prev, ...dropped]),
+    onFiles: addUploadFiles,
   })
 
   useEffect(() => { fetchAll() }, [])
@@ -805,17 +819,14 @@ async function handleSaveEdit() {
                       <p className="text-xs text-gray-400 mt-1">PDF, JPG, PNG — duplicados são detetados automaticamente</p>
                     </div>
                     <input type="file" accept=".pdf,.jpg,.jpeg,.png" multiple className="hidden"
-                      onChange={e => setFiles(Array.from(e.target.files ?? []))} />
+                      onChange={e => { addUploadFiles(Array.from(e.target.files ?? [])); e.target.value = '' }} />
                   </label>
-                  {files.length > 0 && (
-                    <div className="mt-2 space-y-1 max-h-32 overflow-y-auto">
-                      {files.map((f, i) => (
-                        <p key={i} className="text-xs text-gray-500 flex items-center gap-1">
-                          <FileText className="w-3 h-3 flex-shrink-0" /> {f.name}
-                        </p>
-                      ))}
-                    </div>
-                  )}
+                  <SelectedFilesList
+                    files={files}
+                    knownNames={existingDocNames}
+                    onRemove={i => setFiles(prev => prev.filter((_, idx) => idx !== i))}
+                    onClear={() => setFiles([])}
+                  />
                   {['fatura', 'fatura_luz', 'fatura_agua', 'automatico'].includes(uploadTipo) && (
                     <label className="flex items-center gap-2 mt-3 cursor-pointer select-none">
                       <input type="checkbox" checked={!skipExpense} onChange={e => setSkipExpense(!e.target.checked)} className="accent-emerald-600 w-4 h-4" />

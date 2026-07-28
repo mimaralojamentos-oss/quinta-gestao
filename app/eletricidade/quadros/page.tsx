@@ -6,7 +6,8 @@ import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { Plus, Zap, Trash2, X, ChevronDown, ChevronRight, Upload, Loader2, RefreshCw, CheckCircle, AlertCircle, BarChart2, Eye, Search } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
-import { useFileDrop } from '@/lib/useFileDrop'
+import { useFileDrop, mergeUniqueFiles } from '@/lib/useFileDrop'
+import SelectedFilesList from '@/components/SelectedFilesList'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 
 interface Meter {
@@ -79,10 +80,23 @@ export default function QuadrosPage() {
   const [associateReading, setAssociateReading] = useState<MeterReading | null>(null)
   const [associateSearch, setAssociateSearch] = useState('')
 
+  // Nomes das faturas EDP já guardadas — usado para assinalar repetições na lista.
+  const existingDocNames = documents.map(d => d.original_name ?? '').filter(Boolean)
+
+  function addUploadFiles(incoming: File[]) {
+    setUploadFiles(prev => {
+      const { files, ignored } = mergeUniqueFiles(prev, incoming)
+      if (ignored.length > 0) {
+        alert(`Ficheiro(s) já selecionado(s), ignorado(s):\n\n${ignored.join('\n')}`)
+      }
+      return files
+    })
+  }
+
   const edpDrop = useFileDrop({
     accept: ['.pdf'],
     multiple: true,
-    onFiles: dropped => setUploadFiles(prev => [...prev, ...dropped]),
+    onFiles: addUploadFiles,
   })
 
   const [filterType, setFilterType] = useState<FilterType>('all')
@@ -644,8 +658,14 @@ export default function QuadrosPage() {
                     <p className="text-xs text-gray-400 mt-1">✨ OCR automático — extrai leituras e valores</p>
                   </div>
                   <input type="file" accept=".pdf" multiple className="hidden"
-                    onChange={e => setUploadFiles(Array.from(e.target.files ?? []))} />
+                    onChange={e => { addUploadFiles(Array.from(e.target.files ?? [])); e.target.value = '' }} />
                 </label>
+                <SelectedFilesList
+                  files={uploadFiles}
+                  knownNames={existingDocNames}
+                  onRemove={i => setUploadFiles(prev => prev.filter((_, idx) => idx !== i))}
+                  onClear={() => setUploadFiles([])}
+                />
               </div>
             )}
             {(importing || importDone) && (
