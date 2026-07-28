@@ -86,23 +86,30 @@ Atenção especial ao tipo "transferencia_interna": usa este tipo quando o docum
   "edp_kwh_consumed": número de kWh consumidos se for fatura de luz (null caso contrário)
 }`
 
-        const promptEdp = jsonOnlyInstruction + `Extrai os seguintes dados desta fatura EDP em JSON (sem markdown, só JSON puro):
+        const promptEdp = jsonOnlyInstruction + `Extrai os seguintes dados desta fatura EDP em JSON (sem markdown, só JSON puro).
+
+IMPORTANTE sobre o valor ("amount"):
+- Muitas faturas EDP são do plano "Conta Certa" (prestações mensais fixas). Nessas, o destaque "Quanto tenho a pagar?" mostra 0 € porque o débito direto já foi cobrado, e existe uma linha "Valor já pago" negativa. NÃO uses esses valores.
+- Nesse caso, o valor correto é o total da fatura, que aparece na secção "Prestações" como "Valor: X €" e corresponde à mensalidade com IVA incluído (ex: mensalidade 530,90 € + IVA 122,10 € = 653,00 €).
+- Regra geral: "amount" é sempre o valor total da fatura com IVA, positivo, mesmo que já tenha sido pago.
+
 {
   "doc_number": "número da fatura",
   "supplier_name": "nome do fornecedor",
   "supplier_nif": "NIF do fornecedor (só números)",
   "buyer_name": "nome do comprador",
   "buyer_nif": "NIF do comprador (só números)",
-  "amount": valor total a pagar (número sem símbolo),
+  "amount": valor total da fatura com IVA (número positivo sem símbolo),
   "doc_date": "data de emissão no formato YYYY-MM-DD",
   "items_summary": "resumo em português, máximo 200 caracteres",
   "category": "edp",
-  "edp_contract_number": "código de contrato EDP (ex: 160807307528)",
-  "edp_cpe": "CPE (ex: PT0002000003480097WQ)",
+  "edp_contract_number": "código de contrato EDP (ex: 160807307528), null se não existir",
+  "edp_cpe": "CPE tal como aparece no documento, ex: PT0002000003480097WQ (pode vir com espaços)",
   "edp_meter_number": "número do contador",
-  "edp_reading_value": valor numérico da leitura actual do contador,
-  "edp_reading_date": "data da leitura no formato YYYY-MM-DD",
-  "edp_kwh_consumed": número total de kWh consumidos faturados
+  "edp_reading_value": valor numérico da leitura actual do contador (null se a fatura não tiver leitura, como nas de prestação),
+  "edp_reading_date": "data da leitura no formato YYYY-MM-DD (null se não existir)",
+  "edp_kwh_consumed": número total de kWh consumidos faturados (null se não existir),
+  "edp_is_prestacao": true se for fatura de prestação/mensalidade do plano Conta Certa, false caso contrário
 }`
 
         const promptNormal = jsonOnlyInstruction + `Extrai os seguintes dados deste documento em JSON (sem markdown, só JSON puro):
@@ -204,46 +211,92 @@ Atenção especial ao tipo "transferencia_interna": usa este tipo quando o docum
 
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })
 
-    // ── FATURA LUZ: criar leitura no quadro correspondente ──
+    // ── FATURA LUZ: ligar ao quadro elétrico correspondente ──
+    //
+    // Notas sobre o matching (aprendido com as faturas reais):
+    //  - O CPE vem frequentemente com espaços no PDF ("PT 0002 000 067 478 355 HS")
+    //    mas está gravado sem espaços na tabela meters. Por isso comparamos
+    //    sempre as versões normalizadas (sem espaços, maiúsculas).
+    //  - As faturas de prestação (Conta Certa) NÃO trazem leitura de contador.
+    //    Nesses casos usamos a data do documento e deixamos a leitura vazia,
+    //    para que a fatura fique na mesma associada ao quadro.
+    const normalizeCode = (v: any) => String(v ?? '').replace(/[\s.\-]/g, '').toUpperCase()
+
     let meterReadingCreated = false
+    let meterMatchReason: string | null = null
+
     if (tipo === 'fatura_luz') {
-      let meter = null
+      let meter: any = null
+      const { data: allMeters } = await supabase.from('meters').select('id, name, contract_number, cpe')
+      const meters = allMeters ?? []
 
-      if (!meter && extracted.edp_contract_number) {
-        const { data } = await supabase.from('meters').select('id, name').eq('contract_number', extracted.edp_contract_number).single()
-        if (data) meter = data
+      // 1. Nº de contrato EDP (comparação normalizada)
+      if (extracted.edp_contract_number) {
+        const target = normalizeCode(extracted.edp_contract_number)
+        meter = meters.find((m: any) => m.contract_number && normalizeCode(m.contract_number) === target) ?? null
+        if (meter) meterMatchReason = 'contrato'
       }
 
+      // 2. CPE (comparação normalizada — resolve o caso dos espaços)
       if (!meter && extracted.edp_cpe) {
-        const { data } = await supabase.from('meters').select('id, name').eq('cpe', extracted.edp_cpe).single()
-        if (data) meter = data
+        const target = normalizeCode(extracted.edp_cpe)
+        meter = meters.find((m: any) => m.cpe && normalizeCode(m.cpe) === target) ?? null
+        if (meter) meterMatchReason = 'CPE'
       }
 
+      // 3. Nome do quadro no nome do ficheiro (ex: "EDP 9005" → "Quadro 9005 - painéis")
       if (!meter) {
-        const { data: allMeters } = await supabase.from('meters').select('id, name')
-        const normalizedFileName = file.name.toLowerCase().replace(/\s+/g, '')
-        if (allMeters) {
-          for (const m of allMeters) {
-            const normalizedMeterName = m.name.toLowerCase().replace(/\s+/g, '')
-            if (normalizedFileName.includes(normalizedMeterName)) {
-              meter = m; break
-            }
-          }
+        const fileNorm = file.name.toLowerCase().replace(/\s+/g, '')
+        for (const m of meters) {
+          const nameNorm = m.name.toLowerCase().replace(/^quadro/, '').replace(/\s+/g, '')
+          if (nameNorm && fileNorm.includes(nameNorm)) { meter = m; meterMatchReason = 'nome do ficheiro'; break }
         }
       }
 
-      if (meter && extracted.edp_reading_date) {
-        const { data: existingReading } = await supabase.from('meter_readings').select('id').eq('meter_id', meter.id).eq('reading_date', extracted.edp_reading_date).single()
-        if (!existingReading) {
-          await supabase.from('meter_readings').insert({
-            meter_id: meter.id,
-            reading_date: extracted.edp_reading_date,
-            reading_value: extracted.edp_reading_value ?? null,
-            invoice_amount: extracted.amount ?? null,
-            invoice_number: extracted.doc_number ?? null,
-            notes: `Importado automaticamente do documento ${file.name}`,
-          })
-          meterReadingCreated = true
+      // 4. Só o número do quadro no nome do ficheiro (ex: "9005")
+      if (!meter) {
+        const fileNorm = file.name.toLowerCase().replace(/\s+/g, '')
+        for (const m of meters) {
+          const num = m.name.match(/\d{3,}/)?.[0]
+          if (num && new RegExp(`edp.{0,3}${num}`).test(fileNorm)) { meter = m; meterMatchReason = 'número do quadro'; break }
+        }
+      }
+
+      if (meter) {
+        // Faturas de prestação não têm leitura: usamos a data do documento.
+        const readingDate = extracted.edp_reading_date ?? extracted.doc_date ?? null
+
+        if (readingDate) {
+          const { data: existingReading } = await supabase
+            .from('meter_readings').select('id')
+            .eq('meter_id', meter.id)
+            .eq('reading_date', readingDate)
+            .maybeSingle()
+
+          // Também evita duplicar pelo nº da fatura, caso a data mude
+          let duplicateByInvoice = null
+          if (!existingReading && extracted.doc_number) {
+            const { data } = await supabase
+              .from('meter_readings').select('id')
+              .eq('meter_id', meter.id)
+              .eq('invoice_number', extracted.doc_number)
+              .maybeSingle()
+            duplicateByInvoice = data
+          }
+
+          if (!existingReading && !duplicateByInvoice) {
+            await supabase.from('meter_readings').insert({
+              meter_id: meter.id,
+              reading_date: readingDate,
+              reading_value: extracted.edp_reading_value ?? null,
+              invoice_amount: extracted.amount ?? null,
+              invoice_number: extracted.doc_number ?? null,
+              notes: extracted.edp_reading_date
+                ? `Importado automaticamente do documento ${file.name}`
+                : `Fatura de prestação (sem leitura) — ${file.name}`,
+            })
+            meterReadingCreated = true
+          }
         }
       }
     }
@@ -330,7 +383,7 @@ Atenção especial ao tipo "transferencia_interna": usa este tipo quando o docum
       if (newIncome) autoIncome = true
     }
 
-    return NextResponse.json({ success: true, document: doc, autoExpense, autoIncome, duplicate: false, expenseId, meterReadingCreated, cashMovementCreated, detectedTipo: tipo })
+    return NextResponse.json({ success: true, document: doc, autoExpense, autoIncome, duplicate: false, expenseId, meterReadingCreated, meterMatchReason, cashMovementCreated, detectedTipo: tipo })
 
   } catch (e: any) {
     console.error(e)
