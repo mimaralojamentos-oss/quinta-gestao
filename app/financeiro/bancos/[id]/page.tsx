@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { buildRentPaymentPlan, applyRentPaymentPlan } from '@/lib/rentPaymentPlan'
+import { ensureExpenseForTransaction, emptySummary, addToSummary, describeSummary } from '@/lib/bankExpense'
 import {
   Upload, CheckCircle, Clock, XCircle, ArrowUpRight,
   ArrowDownRight, ChevronLeft, Loader2, X, ArrowRight, Link2, Edit2, Search, SlidersHorizontal, Sparkles, RefreshCw, FileText
@@ -110,6 +111,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
   const [txMatches, setTxMatches] = useState<Record<string, AutoMatch[]>>({})
   const [showFilters, setShowFilters] = useState(false)
   const [syncing, setSyncing] = useState(false)
+  const [syncingExpenses, setSyncingExpenses] = useState(false)
   const [documents, setDocuments] = useState<any[]>([])
   const [matchingRules, setMatchingRules] = useState<MatchingRule[]>([])
   const [showRules, setShowRules] = useState(false)
@@ -387,6 +389,12 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     return 'created'
   }
 
+  // Cria (ou reutiliza) a despesa correspondente a um débito validado como "despesa".
+  // Toda a proteção anti-duplicação está em lib/bankExpense.ts + UNIQUE na BD.
+  async function ensureExpense(tx: Transaction, documentId?: string | null) {
+    return ensureExpenseForTransaction(supabase, tx as any, { documentId })
+  }
+
   function warnIfSkipped(result: 'created' | 'skipped' | 'no_lease' | 'cancelled') {
     if (result === 'skipped') {
       alert('⚠️ Já existe um pagamento de renda registado para este mês. A transação foi validada, mas não foi criado um novo registo de pagamento.')
@@ -411,6 +419,9 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
       await supabase.from('bank_transactions').update({
         confirmed_type: 'despesa', confirmed_expense_id: best.expense?.id ?? null, status: 'validado',
       }).eq('id', tx.id)
+      // Se a sugestão trouxe uma despesa existente, apenas garantimos a ligação;
+      // caso contrário a despesa é criada agora.
+      await ensureExpense({ ...tx, confirmed_type: 'despesa', confirmed_expense_id: best.expense?.id ?? null })
     } else if (best.type === 'fatura') {
       const updateData: any = {
         confirmed_type: 'despesa',
@@ -421,6 +432,10 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
         updateData.confirmed_expense_id = best.document.expense_id
       }
       await supabase.from('bank_transactions').update(updateData).eq('id', tx.id)
+      await ensureExpense(
+        { ...tx, confirmed_type: 'despesa', confirmed_document_id: best.document.id, confirmed_expense_id: best.document.expense_id ?? null },
+        best.document.id,
+      )
       fetchData()
     } else if (best.type === 'regra') {
       const updateData: any = {
@@ -435,6 +450,8 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
       if (best.ruleType === 'renda' && best.lease) {
         const tx2 = { ...tx, confirmed_type: 'renda', confirmed_tenant_id: best.tenant?.id ?? null, confirmed_lease_id: best.lease?.id ?? null }
         warnIfSkipped(await processRendaTransaction(tx2 as Transaction))
+      } else if (best.ruleType === 'despesa') {
+        await ensureExpense({ ...tx, confirmed_type: 'despesa' })
       }
       fetchData()
     }
@@ -455,6 +472,20 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     if (type === 'renda' && confirmedLeaseId) {
       const result = await processRendaTransaction({ ...tx, confirmed_type: 'renda', confirmed_tenant_id: tenantId || null, confirmed_lease_id: confirmedLeaseId }, referenceMonth)
       warnIfSkipped(result)
+    } else if (type === 'despesa') {
+      const result = await ensureExpense({
+        ...tx,
+        confirmed_type: 'despesa',
+        confirmed_expense_id: expenseId || null,
+        confirmed_document_id: documentId || null,
+      }, documentId || null)
+      if (result.outcome === 'created') {
+        alert('✅ Despesa criada automaticamente a partir deste movimento.')
+      } else if (result.outcome === 'linked_existing') {
+        alert(`ℹ️ ${result.message} — não foi criada uma despesa nova.`)
+      } else if (result.outcome === 'error') {
+        alert(`⚠️ Não foi possível criar a despesa: ${result.message}`)
+      }
     }
     fetchData()
   }
@@ -466,16 +497,25 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     await supabase.from('bank_transactions').update({ status: 'validado' }).eq('bank_id', bankId).eq('status', 'por_validar')
 
     let created = 0, skipped = 0, cancelled = 0
+    const expenseSummary = emptySummary()
     for (const tx of pending) {
       if (tx.confirmed_type === 'renda' && tx.confirmed_lease_id) {
         const result = await processRendaTransaction(tx)
         if (result === 'created') created++
         else if (result === 'skipped') skipped++
         else if (result === 'cancelled') cancelled++
+      } else if (tx.confirmed_type === 'despesa') {
+        addToSummary(expenseSummary, await ensureExpense(tx))
       }
     }
-    if (created > 0 || skipped > 0 || cancelled > 0) {
-      alert(`✅ ${created} pagamento(s) de renda criado(s) automaticamente.${skipped > 0 ? `\n⚠️ ${skipped} transação(ões) já tinham pagamento de renda registado para o mês correspondente.` : ''}${cancelled > 0 ? `\nℹ️ ${cancelled} transação(ões) ficaram sem registo de pagamento (processamento cancelado).` : ''}`)
+    const expenseMsg = describeSummary(expenseSummary)
+    if (created > 0 || skipped > 0 || cancelled > 0 || expenseMsg) {
+      alert([
+        created > 0 ? `✅ ${created} pagamento(s) de renda criado(s) automaticamente.` : null,
+        skipped > 0 ? `⚠️ ${skipped} transação(ões) já tinham pagamento de renda registado para o mês correspondente.` : null,
+        cancelled > 0 ? `ℹ️ ${cancelled} transação(ões) ficaram sem registo de pagamento (processamento cancelado).` : null,
+        expenseMsg ? `\n💸 Despesas:\n${expenseMsg}` : null,
+      ].filter(Boolean).join('\n'))
     }
 
     await fetchData()
@@ -512,6 +552,26 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     setValidatingAllHigh(false)
   }
 
+  // Recuperação retroativa: percorre os débitos já validados como "despesa"
+  // e garante que cada um tem a sua despesa. Nunca cria duplicados — se já
+  // existir despesa ligada (ou uma compatível), apenas liga.
+  async function syncExpenses() {
+    const candidates = transactions.filter(t =>
+      t.status === 'validado' && t.confirmed_type === 'despesa' && t.amount < 0
+    )
+    if (candidates.length === 0) { alert('Não há débitos validados como despesa para sincronizar.'); return }
+    if (!window.confirm(`Verificar ${candidates.length} movimento(s) e criar as despesas em falta?\n\nMovimentos que já tenham despesa associada não serão duplicados.`)) return
+
+    setSyncingExpenses(true)
+    const summary = emptySummary()
+    for (const tx of candidates) {
+      addToSummary(summary, await ensureExpense(tx))
+    }
+    await fetchData()
+    setSyncingExpenses(false)
+    alert(`🔄 Sincronização de despesas concluída!\n\n${describeSummary(summary) ?? 'Nada a fazer — estava tudo em dia.'}`)
+  }
+
   async function syncRentPayments() {
     const candidates = transactions.filter(t =>
       t.status === 'validado' && t.confirmed_type === 'renda' && t.confirmed_lease_id && t.amount > 0
@@ -533,7 +593,10 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     await supabase.from('bank_transactions').update({ status }).eq('id', id)
     if (status === 'validado') {
       const tx = transactions.find(t => t.id === id)
-      if (tx) warnIfSkipped(await processRendaTransaction(tx))
+      if (tx) {
+        warnIfSkipped(await processRendaTransaction(tx))
+        if (tx.confirmed_type === 'despesa') await ensureExpense(tx)
+      }
     }
     fetchData()
   }
@@ -748,6 +811,9 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
             </button>
             <button onClick={syncRentPayments} disabled={syncing} className="btn-secondary">
               {syncing ? <><Loader2 className="w-4 h-4 animate-spin" /> A sincronizar...</> : <><RefreshCw className="w-4 h-4" /> Sincronizar pagamentos</>}
+            </button>
+            <button onClick={syncExpenses} disabled={syncingExpenses} className="btn-secondary">
+              {syncingExpenses ? <><Loader2 className="w-4 h-4 animate-spin" /> A sincronizar...</> : <><RefreshCw className="w-4 h-4" /> Sincronizar despesas</>}
             </button>
             <button className="btn-primary" onClick={() => { setShowImport(true); setImportStep('upload') }}>
               <Upload className="w-4 h-4" /> Importar Extrato
