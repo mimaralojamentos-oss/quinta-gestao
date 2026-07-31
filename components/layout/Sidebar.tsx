@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, Building2, Users, CreditCard,
   Receipt, Wallet, Bell, Zap, LogOut, ShieldCheck,
-  TrendingUp, Landmark, ChevronDown, ChevronRight, FolderOpen, HardHat, NotebookPen, BarChart3, UserCircle, DoorOpen, ScrollText,
+  TrendingUp, Landmark, ChevronDown, ChevronRight, FolderOpen, HardHat, NotebookPen, BarChart3, UserCircle, DoorOpen, ScrollText, Mail,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/lib/auth-context'
@@ -143,6 +143,11 @@ export default function Sidebar({ onClose }: { onClose?: () => void }) {
               className={cn('sidebar-link', pathname.startsWith('/utilizadores') ? 'active' : '')}>
               <ShieldCheck className="w-4 h-4 flex-shrink-0" />
               Utilizadores
+            </Link>
+            <Link href="/definicoes/email" prefetch={false} onClick={onClose}
+              className={cn('sidebar-link', pathname.startsWith('/definicoes/email') ? 'active' : '')}>
+              <Mail className="w-4 h-4 flex-shrink-0" />
+              Definições de E-mail
             </Link>
           </>
         )}

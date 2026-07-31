@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import nodemailer from 'nodemailer'
 import { requireRole } from '@/lib/require-role'
 import { getAdminEmails } from '@/lib/adminEmails'
-import { applySubjectPrefix, DEFAULT_SUBJECT_PREFIX } from '@/lib/emailConfig'
+import { applySubjectPrefix } from '@/lib/emailConfig'
+import { getEmailSettings } from '@/lib/emailSettings'
 
 export async function POST(request: NextRequest) {
   // Só quem tem sessão e permissão pode enviar e-mails em nome da empresa.
@@ -19,17 +20,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Campos obrigatórios: to, subject, body' }, { status: 400 })
     }
 
-    const gmailUser = process.env.GMAIL_USER
-    const gmailPass = process.env.GMAIL_APP_PASSWORD
+    const settings = await getEmailSettings()
 
-    if (!gmailUser || !gmailPass) {
-      return NextResponse.json({ error: 'Credenciais Gmail não configuradas no servidor' }, { status: 500 })
+    if (!settings.smtpUser || !settings.smtpPassword) {
+      return NextResponse.json({
+        error: 'O envio de e-mail ainda não está configurado. Vai a Administração → Definições de E-mail.',
+      }, { status: 500 })
     }
 
     // Prefixo obrigatório do assunto, aplicado no servidor para que nenhum
     // e-mail saia sem ele, independentemente de onde foi pedido.
-    const prefix = process.env.NEXT_PUBLIC_EMAIL_SUBJECT_PREFIX ?? DEFAULT_SUBJECT_PREFIX
-    const finalSubject = applySubjectPrefix(subject, prefix)
+    const finalSubject = applySubjectPrefix(subject, settings.subjectPrefix)
 
     // Todos os administradores vão em CC.
     let cc: string[] = []
@@ -40,14 +41,15 @@ export async function POST(request: NextRequest) {
     }
 
     const transporter = nodemailer.createTransport({
-      service: 'gmail',
-      auth: { user: gmailUser, pass: gmailPass },
+      host: settings.smtpHost,
+      port: settings.smtpPort,
+      secure: settings.smtpPort === 465,
+      auth: { user: settings.smtpUser, pass: settings.smtpPassword },
     })
 
-    const appName = process.env.NEXT_PUBLIC_APP_NAME ?? 'Gestão de Alojamentos'
     const appLocation = process.env.NEXT_PUBLIC_APP_LOCATION ?? 'Évora'
-    const displayName = senderName ?? appName
-    const footer = footerNote ? `${footerNote} · ${appLocation}` : `${appName} · ${appLocation}`
+    const displayName = senderName ?? settings.fromName
+    const footer = footerNote ? `${footerNote} · ${appLocation}` : `${settings.fromName} · ${appLocation}`
 
     const htmlBody = `
 <!DOCTYPE html>
@@ -70,13 +72,13 @@ export async function POST(request: NextRequest) {
 </html>`
 
     await transporter.sendMail({
-      from: `"${displayName}" <${gmailUser}>`,
+      from: `"${displayName}" <${settings.fromEmail}>`,
       to,
       cc: cc.length > 0 ? cc.join(', ') : undefined,
       subject: finalSubject,
       html: htmlBody,
       text: body,
-      replyTo: replyTo ?? gmailUser,
+      replyTo: replyTo ?? settings.replyTo ?? settings.fromEmail,
     })
 
     return NextResponse.json({ success: true, subject: finalSubject, cc })
@@ -86,17 +88,19 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// Devolve os destinatários em CC, para o utilizador os ver antes de enviar.
+// Devolve os destinatários em CC e o estado da configuração,
+// para o utilizador os ver antes de enviar.
 // O Super Leitor também pode ver esta informação.
 export async function GET() {
   const auth = await requireRole(['admin', 'coadmin', 'super_reader'])
   if (auth.error) return auth.error
 
-  const admins = await getAdminEmails()
+  const [admins, settings] = await Promise.all([getAdminEmails(), getEmailSettings()])
+
   return NextResponse.json({
     adminEmails: admins,
-    subjectPrefix: process.env.NEXT_PUBLIC_EMAIL_SUBJECT_PREFIX ?? DEFAULT_SUBJECT_PREFIX,
-    configured: Boolean(process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD),
+    subjectPrefix: settings.subjectPrefix,
+    configured: Boolean(settings.smtpUser && settings.smtpPassword),
     canSend: auth.profile?.role === 'admin' || auth.profile?.role === 'coadmin',
   })
 }
