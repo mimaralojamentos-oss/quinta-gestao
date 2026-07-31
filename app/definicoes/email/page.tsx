@@ -208,8 +208,13 @@ export default function DefinicoesEmailPage() {
 
           <div>
             <label className="label">Utilizador *</label>
-            <input className="input" placeholder="conta@dominio.pt" value={form.smtpUser}
+            <input className="input" placeholder="resend, postmaster@dominio.pt ou conta@dominio.pt"
+              value={form.smtpUser}
               onChange={e => setForm(f => ({ ...f, smtpUser: e.target.value }))} />
+            <p className="text-xs text-gray-400 mt-1">
+              Nem todos os fornecedores usam um e-mail aqui. O Resend usa <span className="font-mono">resend</span>,
+              o Mailgun usa <span className="font-mono">postmaster@dominio</span>, o Gmail usa o endereço da conta.
+            </p>
           </div>
 
           <div>

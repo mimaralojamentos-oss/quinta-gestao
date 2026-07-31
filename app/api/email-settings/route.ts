@@ -7,6 +7,10 @@ import { applySubjectPrefix } from '@/lib/emailConfig'
 // Gestão das definições de envio de e-mail. Só administradores.
 // A palavra-passe nunca sai daqui para o navegador.
 
+function isEmail(value: unknown): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value ?? '').trim())
+}
+
 export async function GET() {
   const auth = await requireAdmin()
   if (auth.error) return auth.error
@@ -21,11 +25,21 @@ export async function POST(request: Request) {
   try {
     const values = await request.json()
 
-    if (values.smtpUser && !String(values.smtpUser).includes('@')) {
-      return NextResponse.json({ error: 'O utilizador SMTP deve ser um endereço de e-mail' }, { status: 400 })
+    // O utilizador SMTP NÃO é necessariamente um endereço de e-mail:
+    //   Resend  → "resend"
+    //   Mailgun → "postmaster@dominio.pt"
+    //   Gmail   → "conta@gmail.com"
+    // Por isso só se exige que não venha vazio.
+    if (values.smtpUser !== undefined && !String(values.smtpUser).trim()) {
+      return NextResponse.json({ error: 'O utilizador SMTP não pode ficar vazio' }, { status: 400 })
     }
-    if (values.fromEmail && !String(values.fromEmail).includes('@')) {
+
+    // Estes dois são endereços de e-mail a sério e valem a validação.
+    if (values.fromEmail && !isEmail(values.fromEmail)) {
       return NextResponse.json({ error: 'O endereço de remetente é inválido' }, { status: 400 })
+    }
+    if (values.replyTo && !isEmail(values.replyTo)) {
+      return NextResponse.json({ error: 'O endereço de resposta é inválido' }, { status: 400 })
     }
 
     const error = await saveEmailSettings(values, auth.user?.id)
