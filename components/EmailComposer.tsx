@@ -17,6 +17,13 @@ interface Correction {
   reason: string
 }
 
+export interface EmailContact {
+  email: string
+  name: string
+  /** Origem do contacto, para agrupar na lista de sugestões. */
+  group: string
+}
+
 export interface EmailComposerProps {
   /** Área da app que pediu o e-mail — determina o texto que a IA vai escrever. */
   context: EmailContext
@@ -28,6 +35,14 @@ export interface EmailComposerProps {
   date?: string | null
   /** Nome que aparece como remetente e na assinatura. */
   senderName?: string
+  /**
+   * Modo livre: o destinatário é escolhido pelo utilizador em vez de vir
+   * agarrado a um inquilino, e o texto começa em branco (a IA só escreve
+   * se lhe for pedido).
+   */
+  freeMode?: boolean
+  /** Contactos sugeridos no modo livre (inquilinos, administradores, etc.). */
+  contacts?: EmailContact[]
   onClose: () => void
   onSent?: () => void
 }
@@ -49,13 +64,33 @@ type Step = 'compose' | 'review' | 'preview' | 'sent'
  */
 export default function EmailComposer({
   context, tenantName, tenantEmail, spaceRef, amount, periods, date,
-  senderName = 'Miguel Severino', onClose, onSent,
+  senderName = 'Miguel Severino', freeMode = false, contacts = [], onClose, onSent,
 }: EmailComposerProps) {
   const [step, setStep] = useState<Step>('compose')
 
   const [subject, setSubject] = useState('')
   const [body, setBody] = useState('')
   const [extraNotes, setExtraNotes] = useState('')
+
+  // Modo livre: destinatário escrito ou escolhido pelo utilizador
+  const [freeTo, setFreeTo] = useState('')
+  const [showSuggestions, setShowSuggestions] = useState(false)
+
+  // Destinatário efetivo: no modo livre é o que o utilizador escreveu.
+  const recipientEmail = freeMode ? freeTo.trim() : (tenantEmail ?? '')
+  const recipientName = freeMode
+    ? (contacts.find(c => c.email.toLowerCase() === freeTo.trim().toLowerCase())?.name ?? '')
+    : tenantName
+
+  const emailValido = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipientEmail)
+
+  const sugestoes = contacts
+    .filter(c => {
+      const q = freeTo.trim().toLowerCase()
+      if (!q) return true
+      return c.email.toLowerCase().includes(q) || c.name.toLowerCase().includes(q)
+    })
+    .slice(0, 8)
 
   const [generating, setGenerating] = useState(false)
   const [reviewing, setReviewing] = useState(false)
@@ -89,15 +124,19 @@ export default function EmailComposer({
     loadRecipients()
   }, [])
 
-  // Gera o e-mail assim que o modal abre
-  useEffect(() => { generate() }, [])
+  // No modo com inquilino, a IA escreve logo ao abrir.
+  // No modo livre, começa em branco — o utilizador escreve, e só pede
+  // ajuda à IA se quiser.
+  useEffect(() => { if (!freeMode) generate() }, [])
 
   async function generate(notes?: string) {
     setGenerating(true); setError('')
     setReviewed(false); setCorrections([]); setNoErrorsFound(false)
     try {
       const payload: EmailContextData & { senderName: string } = {
-        context, tenantName, spaceRef, amount, periods, date,
+        context,
+        tenantName: freeMode ? (recipientName || 'destinatário') : tenantName,
+        spaceRef, amount, periods, date,
         extraNotes: notes ?? null,
         senderName,
       }
@@ -177,7 +216,11 @@ export default function EmailComposer({
 
   async function handleSend() {
     if (!serverAllowsSend) { setError('O teu nível de acesso permite redigir e rever e-mails, mas não enviá-los.'); return }
-    if (!tenantEmail) { setError('Este inquilino não tem e-mail registado.'); return }
+    if (!recipientEmail) {
+      setError(freeMode ? 'Indica o endereço de destino.' : 'Este inquilino não tem e-mail registado.')
+      return
+    }
+    if (freeMode && !emailValido) { setError('O endereço de destino não é válido.'); return }
     if (!reviewed) { setError('É preciso rever a ortografia antes de enviar.'); return }
     setSending(true); setError('')
     try {
@@ -185,7 +228,7 @@ export default function EmailComposer({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          to: tenantEmail,
+          to: recipientEmail,
           subject,               // o prefixo é aplicado no servidor
           body: `${body}\n\nCom os melhores cumprimentos,\n${senderName}`,
           senderName,
@@ -197,7 +240,7 @@ export default function EmailComposer({
       await logAccess({
         action: 'email',
         page: '/email',
-        details: `E-mail "${data.subject}" enviado a ${tenantName} <${tenantEmail}>`,
+        details: `E-mail "${data.subject}" enviado a ${recipientName || 'destinatário'} <${recipientEmail}>`,
       })
 
       setStep('sent')
@@ -210,7 +253,8 @@ export default function EmailComposer({
   }
 
   const finalSubject = applySubjectPrefix(subject, subjectPrefix)
-  const canSend = serverAllowsSend && reviewed && !!tenantEmail && !!body.trim() && !!subject.trim()
+  const canSend = serverAllowsSend && reviewed && !!body.trim() && !!subject.trim()
+    && (freeMode ? emailValido : !!tenantEmail)
 
   // ── Ecrã: enviado ──
   if (step === 'sent') {
@@ -219,7 +263,9 @@ export default function EmailComposer({
         <div className="text-center py-8">
           <CheckCircle className="w-14 h-14 text-emerald-500 mx-auto mb-3" />
           <p className="font-medium text-gray-900">E-mail enviado com sucesso</p>
-          <p className="text-sm text-gray-500 mt-1">Para {tenantName} &lt;{tenantEmail}&gt;</p>
+          <p className="text-sm text-gray-500 mt-1">
+            Para {recipientName ? `${recipientName} ` : ''}&lt;{recipientEmail}&gt;
+          </p>
           {adminEmails.length > 0 && (
             <p className="text-xs text-gray-400 mt-1">Com cópia para {adminEmails.length} administrador(es)</p>
           )}
@@ -308,12 +354,51 @@ export default function EmailComposer({
 
       {/* Destinatários */}
       <div className="mb-4 space-y-1.5 text-sm">
-        <div className="flex gap-2">
-          <span className="text-gray-400 w-10 flex-shrink-0">Para</span>
-          <span className={tenantEmail ? 'text-gray-900' : 'text-red-600'}>
-            {tenantEmail ? `${tenantName} <${tenantEmail}>` : `${tenantName} — sem e-mail registado`}
-          </span>
-        </div>
+        {freeMode ? (
+          <div className="relative">
+            <label className="label">Para *</label>
+            <input
+              className="input"
+              placeholder="Escreve um endereço ou escolhe da lista"
+              value={freeTo}
+              onChange={e => { setFreeTo(e.target.value); setShowSuggestions(true) }}
+              onFocus={() => setShowSuggestions(true)}
+              onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+            />
+            {freeTo.trim() && !emailValido && (
+              <p className="text-xs text-amber-600 mt-1">Endereço ainda incompleto.</p>
+            )}
+            {recipientName && emailValido && (
+              <p className="text-xs text-emerald-600 mt-1">{recipientName} — contacto registado na aplicação</p>
+            )}
+
+            {showSuggestions && sugestoes.length > 0 && (
+              <div className="absolute z-10 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-56 overflow-y-auto">
+                {sugestoes.map(c => (
+                  <button
+                    key={`${c.group}-${c.email}`}
+                    type="button"
+                    onMouseDown={() => { setFreeTo(c.email); setShowSuggestions(false) }}
+                    className="w-full text-left px-3 py-2 hover:bg-emerald-50 border-b border-gray-50 last:border-0"
+                  >
+                    <p className="text-sm text-gray-900">{c.name}</p>
+                    <p className="text-xs text-gray-500 flex items-center gap-2">
+                      {c.email}
+                      <span className="text-[10px] uppercase tracking-wide bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">{c.group}</span>
+                    </p>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="flex gap-2">
+            <span className="text-gray-400 w-10 flex-shrink-0">Para</span>
+            <span className={tenantEmail ? 'text-gray-900' : 'text-red-600'}>
+              {tenantEmail ? `${tenantName} <${tenantEmail}>` : `${tenantName} — sem e-mail registado`}
+            </span>
+          </div>
+        )}
         <div className="flex gap-2">
           <span className="text-gray-400 w-10 flex-shrink-0">Cc</span>
           <span className="text-gray-600 flex items-center gap-1 flex-wrap">
@@ -353,18 +438,20 @@ export default function EmailComposer({
             onClick={() => generate(extraNotes)}
             disabled={generating}
           >
-            <Sparkles className="w-3 h-3" /> {generating ? 'A gerar...' : 'Gerar de novo'}
+            <Sparkles className="w-3 h-3" />
+            {generating ? 'A gerar...' : freeMode && !body.trim() ? 'Escrever com IA' : 'Gerar de novo'}
           </button>
         </div>
         {generating ? (
           <div className="border border-gray-200 rounded-lg p-8 flex flex-col items-center gap-2 text-sm text-gray-500">
             <Loader2 className="w-5 h-5 animate-spin text-emerald-500" />
-            A escrever o e-mail com base nos dados do inquilino...
+            {freeMode ? 'A escrever o e-mail...' : 'A escrever o e-mail com base nos dados do inquilino...'}
           </div>
         ) : (
           <textarea
             className="input font-normal"
             rows={10}
+            placeholder={freeMode ? 'Escreve aqui a tua mensagem, ou usa as instruções abaixo para a IA escrever por ti.' : undefined}
             value={body}
             onChange={e => handleBodyChange(e.target.value)}
           />

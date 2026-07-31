@@ -24,6 +24,9 @@ const navItems = [
   { href: '/portao', label: 'Portão', icon: DoorOpen },
 ]
 
+// Páginas com acesso restrito — só aparecem a quem as pode usar.
+const emailNavItem = { href: '/email', label: 'Enviar E-mail', icon: Mail }
+
 const eletricidadeItems = [
   { href: '/eletricidade/quadros', label: 'Quadros Elétricos', icon: Zap },
   { href: '/eletricidade/espacos', label: 'Quadros dos Espaços', icon: Building2 },
@@ -51,6 +54,9 @@ export default function Sidebar({ onClose }: { onClose?: () => void }) {
   )
 
   const canSeeUtilizadores = isAdmin
+  // O Super Leitor entra para consultar e rever, mas o botão de enviar
+  // fica-lhe desativado dentro do próprio módulo.
+  const canSeeEmail = ['admin', 'coadmin', 'super_reader'].includes(profile?.role ?? '')
 
   return (
     <aside className="w-64 bg-white border-r border-gray-100 h-screen flex flex-col">
@@ -67,7 +73,7 @@ export default function Sidebar({ onClose }: { onClose?: () => void }) {
       </div>
 
       <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
-        {navItems.map((item) => {
+        {(canSeeEmail ? [...navItems, emailNavItem] : navItems).map((item) => {
           const Icon = item.icon
           const isActive = pathname === item.href || pathname.startsWith(item.href + '/')
           return (
