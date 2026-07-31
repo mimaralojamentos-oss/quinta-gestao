@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Tenant } from '@/lib/types'
 import { X, User, Home, FileText, Plus, Trash2, Pencil, ChevronRight, ChevronLeft, Upload, Loader2, Sparkles, Printer, ReceiptText, Banknote, Mail } from 'lucide-react'
-import EmailModal from '@/components/EmailModal'
+import EmailComposer from '@/components/EmailComposer'
 import { formatCurrency, formatDate, getCurrentMonth } from '@/lib/utils'
 import { logAccess } from '@/lib/logAccess'
 import { useFileDrop } from '@/lib/useFileDrop'
@@ -1343,10 +1343,13 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
     </div>
 
     {showEmailModal && tenant && (
-      <EmailModal
+      <EmailComposer
+        // O contexto vem da conta corrente: se há dívida, o e-mail é de cobrança
+        context={totalDebt > 0 ? 'divida' : 'geral'}
         tenantName={tenant.name}
         tenantEmail={tenant.email}
         spaceRef={leases.find((l: any) => l.status === 'ativo')?.space?.ref ?? leases[0]?.space?.ref}
+        amount={totalDebt > 0 ? totalDebt : null}
         onClose={() => setShowEmailModal(false)}
       />
     )}

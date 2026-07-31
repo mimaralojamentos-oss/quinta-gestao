@@ -5,7 +5,7 @@ import { useEffect, useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatDate } from '@/lib/utils'
 import { BarChart3, TrendingUp, Home, FileText, Calendar, ChevronDown, ChevronUp, Edit2, X, Save, ClipboardList, Download, Loader2, Receipt, Mail } from 'lucide-react'
-import EmailModal from '@/components/EmailModal'
+import EmailComposer from '@/components/EmailComposer'
 
 interface MonthOption { label: string; value: string }
 
@@ -56,7 +56,7 @@ export default function RelatoriosPage() {
 
   const [cobrancasSort, setCobrancasSort] = useState<'espaco' | 'nome' | 'renda'>('espaco')
   const [cobrancasSortDir, setCobrancasSortDir] = useState<'asc' | 'desc'>('asc')
-  const [emailTarget, setEmailTarget] = useState<{ name: string; email: string | null; spaceRef?: string } | null>(null)
+  const [emailTarget, setEmailTarget] = useState<{ name: string; email: string | null; spaceRef?: string; amount?: number | null; period?: string } | null>(null)
 
   const [exportingPDF, setExportingPDF] = useState(false)
 
@@ -1068,7 +1068,7 @@ export default function RelatoriosPage() {
                                 <div className="w-5 h-5 mx-auto border-2 border-gray-400 print:border-black rounded-sm" />
                               </td>
                               <td className="py-2 px-2 text-center print:hidden">
-                                <button onClick={() => setEmailTarget({ name: l.tenant?.name ?? '', email: l.tenant?.email ?? null, spaceRef: l.space?.ref })}
+                                <button onClick={() => setEmailTarget({ name: l.tenant?.name ?? '', email: l.tenant?.email ?? null, spaceRef: l.space?.ref, amount: l.monthly_rent ?? null })}
                                   className="text-gray-400 hover:text-purple-600 transition-colors" title="Enviar e-mail">
                                   <Mail className="w-4 h-4" />
                                 </button>
@@ -1405,10 +1405,14 @@ export default function RelatoriosPage() {
     </AppLayout>
 
     {emailTarget && (
-      <EmailModal
+      <EmailComposer
+        // Vem da tabela "rendas em falta" — o e-mail é de aviso de renda em atraso
+        context="renda_atraso"
         tenantName={emailTarget.name}
         tenantEmail={emailTarget.email}
         spaceRef={emailTarget.spaceRef}
+        amount={emailTarget.amount ?? null}
+        periods={emailTarget.period ? [emailTarget.period] : undefined}
         onClose={() => setEmailTarget(null)}
       />
     )}

@@ -1,9 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import nodemailer from 'nodemailer'
+import { requireRole } from '@/lib/require-role'
+import { getAdminEmails } from '@/lib/adminEmails'
+import { applySubjectPrefix, DEFAULT_SUBJECT_PREFIX } from '@/lib/emailConfig'
 
 export async function POST(request: NextRequest) {
+  // Só quem tem sessão e permissão pode enviar e-mails em nome da empresa.
+  const auth = await requireRole(['admin', 'coadmin'])
+  if (auth.error) return auth.error
+
   try {
-    const { to, subject, body, replyTo, senderName, footerNote } = await request.json()
+    const { to, subject, body, replyTo, senderName, footerNote, skipAdminCc } = await request.json()
 
     if (!to || !subject || !body) {
       return NextResponse.json({ error: 'Campos obrigatórios: to, subject, body' }, { status: 400 })
@@ -14,6 +21,19 @@ export async function POST(request: NextRequest) {
 
     if (!gmailUser || !gmailPass) {
       return NextResponse.json({ error: 'Credenciais Gmail não configuradas no servidor' }, { status: 500 })
+    }
+
+    // Prefixo obrigatório do assunto, aplicado no servidor para que nenhum
+    // e-mail saia sem ele, independentemente de onde foi pedido.
+    const prefix = process.env.NEXT_PUBLIC_EMAIL_SUBJECT_PREFIX ?? DEFAULT_SUBJECT_PREFIX
+    const finalSubject = applySubjectPrefix(subject, prefix)
+
+    // Todos os administradores vão em CC.
+    let cc: string[] = []
+    if (!skipAdminCc) {
+      const admins = await getAdminEmails()
+      const toList = String(to).split(/[,;]/).map(s => s.trim().toLowerCase())
+      cc = admins.filter(e => !toList.includes(e.toLowerCase()))
     }
 
     const transporter = nodemailer.createTransport({
@@ -49,15 +69,29 @@ export async function POST(request: NextRequest) {
     await transporter.sendMail({
       from: `"${displayName}" <${gmailUser}>`,
       to,
-      subject,
+      cc: cc.length > 0 ? cc.join(', ') : undefined,
+      subject: finalSubject,
       html: htmlBody,
       text: body,
       replyTo: replyTo ?? gmailUser,
     })
 
-    return NextResponse.json({ success: true })
+    return NextResponse.json({ success: true, subject: finalSubject, cc })
   } catch (e: any) {
     console.error('[send-email]', e)
     return NextResponse.json({ error: e.message ?? 'Erro ao enviar e-mail' }, { status: 500 })
   }
+}
+
+// Devolve os destinatários em CC, para o utilizador os ver antes de enviar.
+export async function GET() {
+  const auth = await requireRole(['admin', 'coadmin'])
+  if (auth.error) return auth.error
+
+  const admins = await getAdminEmails()
+  return NextResponse.json({
+    adminEmails: admins,
+    subjectPrefix: process.env.NEXT_PUBLIC_EMAIL_SUBJECT_PREFIX ?? DEFAULT_SUBJECT_PREFIX,
+    configured: Boolean(process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD),
+  })
 }

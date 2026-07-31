@@ -9,7 +9,7 @@ import { Plus, Search, FileText, Phone, Mail, X, AlertTriangle, ArrowUpDown, Arr
 import TenantModal from './TenantModal'
 import LeaseModal from './LeaseModal'
 import { useAuth } from '@/lib/auth-context'
-import EmailModal from '@/components/EmailModal'
+import EmailComposer from '@/components/EmailComposer'
 import { logAccess } from '@/lib/logAccess'
 import Link from 'next/link'
 
@@ -770,7 +770,8 @@ export default function InquilinosPage() {
       )}
 
       {emailTenant && (
-        <EmailModal
+        <EmailComposer
+          context="geral"
           tenantName={emailTenant.name}
           tenantEmail={emailTenant.email}
           spaceRef={emailTenant.spaces?.[0]?.ref ?? emailTenant.leases?.find((l: any) => l.status === 'ativo')?.space?.ref}
