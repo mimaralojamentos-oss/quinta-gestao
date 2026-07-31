@@ -4,10 +4,12 @@ import { createClient } from '@/lib/supabase-client'
 import { logAccess } from '@/lib/logAccess'
 import type { User } from '@supabase/supabase-js'
 
+export type UserRole = 'admin' | 'coadmin' | 'viewer' | 'electrician' | 'super_reader'
+
 interface Profile {
   id: string
   name: string
-  role: 'admin' | 'coadmin' | 'viewer' | 'electrician'
+  role: UserRole
 }
 
 interface AuthContextType {
@@ -16,12 +18,19 @@ interface AuthContextType {
   isAdmin: boolean
   isCoAdmin: boolean
   isElectrician: boolean
+  /** Super Leitor: vê tudo (incluindo e-mails e registos), mas não altera nada. */
+  isSuperReader: boolean
+  /** true para quem pode criar/editar/apagar dados de gestão. */
+  canWrite: boolean
+  /** true para quem pode enviar e-mails e SMS em nome da empresa. */
+  canSend: boolean
   loading: boolean
   signOut: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextType>({
-  user: null, profile: null, isAdmin: false, isCoAdmin: false, isElectrician: false, loading: true, signOut: async () => {},
+  user: null, profile: null, isAdmin: false, isCoAdmin: false, isElectrician: false,
+  isSuperReader: false, canWrite: false, canSend: false, loading: true, signOut: async () => {},
 })
 
 const supabaseClient = createClient()
@@ -113,6 +122,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isAdmin: profile?.role === 'admin',
       isCoAdmin: profile?.role === 'coadmin',
       isElectrician: profile?.role === 'electrician',
+      isSuperReader: profile?.role === 'super_reader',
+      // Escrita de dados de gestão. O eletricista escreve apenas em
+      // eletricidade, por isso é tratado nas próprias páginas.
+      canWrite: profile?.role === 'admin' || profile?.role === 'coadmin',
+      // Envio de comunicações em nome da empresa (e-mail, SMS).
+      // O Super Leitor pode redigir e rever, mas nunca enviar.
+      canSend: profile?.role === 'admin' || profile?.role === 'coadmin',
       loading,
       signOut
     }}>

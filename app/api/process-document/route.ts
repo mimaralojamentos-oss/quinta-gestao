@@ -10,14 +10,22 @@ export async function POST(request: Request) {
   const auth = await requireRole(['admin', 'coadmin', 'electrician'])
   if (auth.error) return auth.error
 
+  // Esta rota usa a service role, que ignora as regras de segurança da base de
+  // dados (RLS). Por isso as permissões têm de ser aplicadas AQUI à mão.
+  // O eletricista pode carregar faturas de luz, mas não pode criar despesas,
+  // receitas nem mexer no fundo de maneio — isso é exclusivo de admin/coadmin.
+  const role = auth.profile?.role
+  const canWriteFinance = role === 'admin' || role === 'coadmin'
+
   try {
     const formData = await request.formData()
     const file = formData.get('file') as File
     let tipo = formData.get('tipo') as string ?? 'fatura'
     const tipoCustom = formData.get('tipo_custom') as string ?? null
     const force = formData.get('force') === 'true'
-    const skipExpense = formData.get('skip_expense') === 'true'
-    const createIncome = formData.get('create_income') === 'true'
+    // Um eletricista nunca gera despesas/receitas, independentemente do que peça.
+    const skipExpense = formData.get('skip_expense') === 'true' || !canWriteFinance
+    const createIncome = formData.get('create_income') === 'true' && canWriteFinance
 
     if (!file) return NextResponse.json({ error: 'Ficheiro não encontrado' }, { status: 400 })
 
@@ -302,8 +310,9 @@ IMPORTANTE sobre o valor ("amount"):
     }
 
     // ── TRANSFERÊNCIA INTERNA: criar movimento de saída no Fundo de Maneio ──
+    // Só admin/coadmin mexem no fundo de maneio.
     let cashMovementCreated = false
-    if (tipo === 'transferencia_interna' && doc && extracted.amount && extracted.doc_date) {
+    if (canWriteFinance && tipo === 'transferencia_interna' && doc && extracted.amount && extracted.doc_date) {
       await supabase.from('cash_fund_movements').insert({
         movement_date: extracted.doc_date,
         description: `Transferência para banco - ${extracted.doc_date}`,

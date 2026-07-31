@@ -2,10 +2,15 @@
 
 import Sidebar from '@/components/layout/Sidebar'
 import { useState } from 'react'
-import { Menu } from 'lucide-react'
+import { Menu, Eye } from 'lucide-react'
+import { useAuth } from '@/lib/auth-context'
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const { isSuperReader, profile } = useAuth()
+  // Perfis sem qualquer permissão de escrita — mostra aviso permanente para
+  // não haver dúvidas sobre porque é que uma ação falha.
+  const readOnly = isSuperReader || profile?.role === 'viewer'
 
   return (
     <div className="flex h-screen bg-gray-50 overflow-hidden">
@@ -36,6 +41,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <p className="font-bold text-gray-900 text-sm">{process.env.NEXT_PUBLIC_APP_NAME || 'Gestão da Quinta'}</p>
           </div>
         </div>
+        {readOnly && (
+          <div className="sticky top-0 z-20 flex items-center gap-2 px-4 py-2 bg-blue-50 border-b border-blue-100 text-xs text-blue-800">
+            <Eye className="w-3.5 h-3.5 flex-shrink-0" />
+            <span>
+              <strong>{isSuperReader ? 'Super Leitor' : 'Visualizador'}</strong> — modo leitura.
+              Podes consultar toda a informação, mas não alterar dados nem enviar comunicações.
+            </span>
+          </div>
+        )}
         {children}
       </main>
     </div>

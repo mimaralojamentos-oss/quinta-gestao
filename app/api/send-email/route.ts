@@ -6,6 +6,9 @@ import { applySubjectPrefix, DEFAULT_SUBJECT_PREFIX } from '@/lib/emailConfig'
 
 export async function POST(request: NextRequest) {
   // Só quem tem sessão e permissão pode enviar e-mails em nome da empresa.
+  // O Super Leitor está deliberadamente FORA desta lista: pode redigir e rever,
+  // mas nunca enviar. Esta é a verificação que conta — o botão desativado no
+  // ecrã é apenas conveniência.
   const auth = await requireRole(['admin', 'coadmin'])
   if (auth.error) return auth.error
 
@@ -84,8 +87,9 @@ export async function POST(request: NextRequest) {
 }
 
 // Devolve os destinatários em CC, para o utilizador os ver antes de enviar.
+// O Super Leitor também pode ver esta informação.
 export async function GET() {
-  const auth = await requireRole(['admin', 'coadmin'])
+  const auth = await requireRole(['admin', 'coadmin', 'super_reader'])
   if (auth.error) return auth.error
 
   const admins = await getAdminEmails()
@@ -93,5 +97,6 @@ export async function GET() {
     adminEmails: admins,
     subjectPrefix: process.env.NEXT_PUBLIC_EMAIL_SUBJECT_PREFIX ?? DEFAULT_SUBJECT_PREFIX,
     configured: Boolean(process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD),
+    canSend: auth.profile?.role === 'admin' || auth.profile?.role === 'coadmin',
   })
 }

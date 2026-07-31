@@ -70,6 +70,8 @@ export default function EmailComposer({
   const [adminEmails, setAdminEmails] = useState<string[]>([])
   const [subjectPrefix, setSubjectPrefix] = useState(DEFAULT_SUBJECT_PREFIX)
   const [gmailConfigured, setGmailConfigured] = useState(true)
+  // Confirmado pelo servidor. O Super Leitor pode redigir e rever, mas não enviar.
+  const [serverAllowsSend, setServerAllowsSend] = useState(true)
 
   // Carrega quem vai em CC e o prefixo da propriedade
   useEffect(() => {
@@ -81,6 +83,7 @@ export default function EmailComposer({
         setAdminEmails(data.adminEmails ?? [])
         if (data.subjectPrefix) setSubjectPrefix(data.subjectPrefix)
         setGmailConfigured(Boolean(data.configured))
+        setServerAllowsSend(data.canSend !== false)
       } catch { /* silencioso — não impede escrever o e-mail */ }
     }
     loadRecipients()
@@ -173,6 +176,7 @@ export default function EmailComposer({
   }
 
   async function handleSend() {
+    if (!serverAllowsSend) { setError('O teu nível de acesso permite redigir e rever e-mails, mas não enviá-los.'); return }
     if (!tenantEmail) { setError('Este inquilino não tem e-mail registado.'); return }
     if (!reviewed) { setError('É preciso rever a ortografia antes de enviar.'); return }
     setSending(true); setError('')
@@ -206,7 +210,7 @@ export default function EmailComposer({
   }
 
   const finalSubject = applySubjectPrefix(subject, subjectPrefix)
-  const canSend = reviewed && !!tenantEmail && !!body.trim() && !!subject.trim()
+  const canSend = serverAllowsSend && reviewed && !!tenantEmail && !!body.trim() && !!subject.trim()
 
   // ── Ecrã: enviado ──
   if (step === 'sent') {
@@ -270,7 +274,12 @@ export default function EmailComposer({
           <button className="btn-secondary" onClick={() => setStep('compose')}>
             <ArrowLeft className="w-4 h-4" /> Voltar
           </button>
-          <button className="btn-primary" onClick={handleSend} disabled={!canSend || sending}>
+          <button
+            className="btn-primary"
+            onClick={handleSend}
+            disabled={!canSend || sending}
+            title={!serverAllowsSend ? 'O teu nível de acesso não permite enviar e-mails' : undefined}
+          >
             {sending ? <><Loader2 className="w-4 h-4 animate-spin" /> A enviar...</> : <><Send className="w-4 h-4" /> Enviar</>}
           </button>
         </div>
@@ -281,7 +290,16 @@ export default function EmailComposer({
   // ── Ecrã principal: redação ──
   return (
     <Shell onClose={onClose} title="Enviar e-mail">
-      {!gmailConfigured && (
+      {!serverAllowsSend && (
+        <div className="mb-4 flex items-start gap-2 text-xs text-blue-800 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
+          <Eye className="w-4 h-4 flex-shrink-0 mt-0.5" />
+          <span>
+            <strong>Modo leitura.</strong> Podes redigir, editar e rever este e-mail, mas o teu nível de acesso não permite enviá-lo.
+          </span>
+        </div>
+      )}
+
+      {serverAllowsSend && !gmailConfigured && (
         <div className="mb-4 flex items-start gap-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
           <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
           <span>O envio de e-mail ainda não está configurado no servidor (falta a conta Gmail). Podes escrever e rever, mas o envio vai falhar.</span>
@@ -400,7 +418,12 @@ export default function EmailComposer({
           <button className="btn-secondary" onClick={() => setStep('preview')} disabled={!body.trim()}>
             <Eye className="w-4 h-4" /> Pré-visualizar
           </button>
-          <button className="btn-primary" onClick={handleSend} disabled={!canSend || sending}>
+          <button
+            className="btn-primary"
+            onClick={handleSend}
+            disabled={!canSend || sending}
+            title={!serverAllowsSend ? 'O teu nível de acesso não permite enviar e-mails' : undefined}
+          >
             {sending ? <><Loader2 className="w-4 h-4 animate-spin" /> A enviar...</> : <><Send className="w-4 h-4" /> Enviar</>}
           </button>
         </div>

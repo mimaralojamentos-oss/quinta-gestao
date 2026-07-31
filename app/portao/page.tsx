@@ -4,6 +4,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Plus, Trash2, Send, MessageSquare, Check, X, Search, ChevronDown, Filter } from 'lucide-react'
+import { useAuth } from '@/lib/auth-context'
 
 interface GatePhone {
   id: string
@@ -41,6 +42,7 @@ const CellInput = ({ value, onChange, type = 'text', placeholder = '' }: {
 )
 
 export default function PortaoPage() {
+  const { canSend, canWrite } = useAuth()
   const [phones, setPhones] = useState<GatePhone[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -199,11 +201,13 @@ export default function PortaoPage() {
             <h1 className="text-2xl font-bold text-gray-900">Portão</h1>
             <p className="text-sm text-gray-500 mt-1">{phones.filter(p => p.active).length} números ativos · {phones.length} total</p>
           </div>
-          <button
-            onClick={() => setShowNewRow(true)}
-            className="flex items-center gap-2 bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-emerald-700">
-            <Plus className="w-4 h-4" /> Novo Número
-          </button>
+          {canWrite && (
+            <button
+              onClick={() => setShowNewRow(true)}
+              className="flex items-center gap-2 bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-emerald-700">
+              <Plus className="w-4 h-4" /> Novo Número
+            </button>
+          )}
         </div>
 
         {/* Tabs */}
@@ -603,9 +607,15 @@ export default function PortaoPage() {
               </div>
             )}
 
+            {!canSend && (
+              <p className="text-xs text-blue-800 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 mb-3">
+                O teu nível de acesso permite consultar e preparar a mensagem, mas não enviá-la.
+              </p>
+            )}
             <button
               onClick={sendSms}
-              disabled={sending || !smsMessage.trim() || selectedPhones.length === 0}
+              disabled={!canSend || sending || !smsMessage.trim() || selectedPhones.length === 0}
+              title={!canSend ? 'O teu nível de acesso não permite enviar SMS' : undefined}
               className="w-full flex items-center justify-center gap-2 bg-emerald-600 text-white py-3 rounded-lg font-medium hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed">
               {sending ? (
                 <><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" /> A enviar...</>

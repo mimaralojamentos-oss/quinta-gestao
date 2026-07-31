@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { Plus, Trash2, X, Search, FileText, TrendingUp } from 'lucide-react'
+import { useAuth } from '@/lib/auth-context'
 
 interface IncomeRecord {
   id: string
@@ -32,6 +33,7 @@ function categoryLabel(cat: string) {
 
 export default function ReceitasPage() {
   const supabase = createClient()
+  const { canWrite } = useAuth()
   const [records, setRecords] = useState<IncomeRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -126,9 +128,11 @@ export default function ReceitasPage() {
               <p className="text-sm text-gray-500">Receitas que não são rendas (energia solar, subsídios, etc.)</p>
             </div>
           </div>
-          <button onClick={openNew} className="btn-primary flex items-center gap-2">
-            <Plus className="w-4 h-4" /> Nova Receita
-          </button>
+          {canWrite && (
+            <button onClick={openNew} className="btn-primary flex items-center gap-2">
+              <Plus className="w-4 h-4" /> Nova Receita
+            </button>
+          )}
         </div>
 
         {/* Sumário */}

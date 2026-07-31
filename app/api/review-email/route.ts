@@ -6,7 +6,8 @@ import { requireRole } from '@/lib/require-role'
 // Devolve o texto corrigido e a lista de alterações, para o utilizador
 // ver exatamente o que mudou antes de o botão Enviar ficar disponível.
 export async function POST(request: Request) {
-  const auth = await requireRole(['admin', 'coadmin'])
+  // O Super Leitor pode corrigir o texto, mas não o envia (ver /api/send-email).
+  const auth = await requireRole(['admin', 'coadmin', 'super_reader'])
   if (auth.error) return auth.error
 
   try {

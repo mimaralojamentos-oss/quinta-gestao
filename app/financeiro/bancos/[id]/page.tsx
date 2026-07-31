@@ -7,6 +7,7 @@ import { formatCurrency, formatDate } from '@/lib/utils'
 import { buildRentPaymentPlan, applyRentPaymentPlan } from '@/lib/rentPaymentPlan'
 import { ensureExpenseForTransaction, emptySummary, addToSummary, describeSummary } from '@/lib/bankExpense'
 import { useFileDrop } from '@/lib/useFileDrop'
+import { useAuth } from '@/lib/auth-context'
 import {
   Upload, CheckCircle, Clock, XCircle, ArrowUpRight,
   ArrowDownRight, ChevronLeft, Loader2, X, ArrowRight, Link2, Edit2, Search, SlidersHorizontal, Sparkles, RefreshCw, FileText
@@ -138,6 +139,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
   const [filterDirection, setFilterDirection] = useState<'all' | 'entrada' | 'saida'>('all')
 
   const supabase = createClient()
+  const { canWrite } = useAuth()
 
   const extratoDrop = useFileDrop({
     accept: ['.xlsx', '.xls', '.csv'],
@@ -865,23 +867,27 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
             {bank?.iban && <p className="text-sm text-gray-500 font-mono mt-0.5">{bank.iban}</p>}
           </div>
           <div className="flex gap-3">
-            {pending > 0 && (
-              <button onClick={validateAll} disabled={validatingAll} className="btn-secondary">
-                {validatingAll ? <><Loader2 className="w-4 h-4 animate-spin" /> A validar...</> : <><CheckCircle className="w-4 h-4" /> Validar Todas ({pending})</>}
-              </button>
-            )}
             <button onClick={() => setShowRules(v => !v)} className={`btn-secondary ${showRules ? 'ring-2 ring-blue-300' : ''}`}>
               <SlidersHorizontal className="w-4 h-4" /> Regras
             </button>
-            <button onClick={syncRentPayments} disabled={syncing} className="btn-secondary">
-              {syncing ? <><Loader2 className="w-4 h-4 animate-spin" /> A sincronizar...</> : <><RefreshCw className="w-4 h-4" /> Sincronizar pagamentos</>}
-            </button>
-            <button onClick={syncExpenses} disabled={syncingExpenses} className="btn-secondary">
-              {syncingExpenses ? <><Loader2 className="w-4 h-4 animate-spin" /> A sincronizar...</> : <><RefreshCw className="w-4 h-4" /> Sincronizar despesas</>}
-            </button>
-            <button className="btn-primary" onClick={() => { setShowImport(true); setImportStep('upload') }}>
-              <Upload className="w-4 h-4" /> Importar Extrato
-            </button>
+            {canWrite && (
+              <>
+                {pending > 0 && (
+                  <button onClick={validateAll} disabled={validatingAll} className="btn-secondary">
+                    {validatingAll ? <><Loader2 className="w-4 h-4 animate-spin" /> A validar...</> : <><CheckCircle className="w-4 h-4" /> Validar Todas ({pending})</>}
+                  </button>
+                )}
+                <button onClick={syncRentPayments} disabled={syncing} className="btn-secondary">
+                  {syncing ? <><Loader2 className="w-4 h-4 animate-spin" /> A sincronizar...</> : <><RefreshCw className="w-4 h-4" /> Sincronizar pagamentos</>}
+                </button>
+                <button onClick={syncExpenses} disabled={syncingExpenses} className="btn-secondary">
+                  {syncingExpenses ? <><Loader2 className="w-4 h-4 animate-spin" /> A sincronizar...</> : <><RefreshCw className="w-4 h-4" /> Sincronizar despesas</>}
+                </button>
+                <button className="btn-primary" onClick={() => { setShowImport(true); setImportStep('upload') }}>
+                  <Upload className="w-4 h-4" /> Importar Extrato
+                </button>
+              </>
+            )}
           </div>
         </div>
 

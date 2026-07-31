@@ -3,13 +3,13 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { useAuth } from '@/lib/auth-context'
-import { Shield, Plus, Trash2, Eye, Zap, Key, ChevronLeft, History } from 'lucide-react'
+import { Shield, Plus, Trash2, Eye, Zap, Key, ChevronLeft, History, BookOpen } from 'lucide-react'
 import Link from 'next/link'
 
 type Profile = {
   id: string
   email: string
-  role: 'admin' | 'coadmin' | 'viewer' | 'electrician'
+  role: 'admin' | 'coadmin' | 'viewer' | 'electrician' | 'super_reader'
   created_at: string
 }
 
@@ -54,7 +54,7 @@ export default function UtilizadoresPage() {
   const [showCreate, setShowCreate] = useState(false)
   const [newEmail, setNewEmail] = useState('')
   const [newPassword, setNewPassword] = useState('')
-  const [newRole, setNewRole] = useState<'admin' | 'coadmin' | 'viewer' | 'electrician'>('viewer')
+  const [newRole, setNewRole] = useState<'admin' | 'coadmin' | 'viewer' | 'electrician' | 'super_reader'>('viewer')
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
 
@@ -150,6 +150,7 @@ export default function UtilizadoresPage() {
     if (role === 'admin') return 'Administrador'
     if (role === 'coadmin') return 'Co-Administrador'
     if (role === 'electrician') return 'Eletricista'
+    if (role === 'super_reader') return 'Super Leitor'
     return 'Visualizador'
   }
 
@@ -157,6 +158,7 @@ export default function UtilizadoresPage() {
     if (role === 'admin') return <Shield className="w-4 h-4 text-red-500" />
     if (role === 'coadmin') return <Key className="w-4 h-4 text-orange-500" />
     if (role === 'electrician') return <Zap className="w-4 h-4 text-yellow-500" />
+    if (role === 'super_reader') return <BookOpen className="w-4 h-4 text-blue-500" />
     return <Eye className="w-4 h-4 text-gray-400" />
   }
 
@@ -164,6 +166,7 @@ export default function UtilizadoresPage() {
     if (role === 'admin') return 'bg-red-100 text-red-700'
     if (role === 'coadmin') return 'bg-orange-100 text-orange-700'
     if (role === 'electrician') return 'bg-yellow-100 text-yellow-700'
+    if (role === 'super_reader') return 'bg-blue-100 text-blue-700'
     return 'bg-gray-100 text-gray-600'
   }
 
@@ -197,7 +200,7 @@ export default function UtilizadoresPage() {
       </div>
 
       {/* Legenda de roles */}
-      <div className="bg-gray-50 rounded-lg p-4 mb-6 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+      <div className="bg-gray-50 rounded-lg p-4 mb-6 grid grid-cols-2 sm:grid-cols-5 gap-3 text-sm">
         <div className="flex items-center gap-2">
           <Shield className="w-4 h-4 text-red-500" />
           <div>
@@ -217,6 +220,13 @@ export default function UtilizadoresPage() {
           <div>
             <div className="font-medium text-gray-700">Eletricista</div>
             <div className="text-gray-500 text-xs">Ver tudo + editar eletricidade</div>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <BookOpen className="w-4 h-4 text-blue-500" />
+          <div>
+            <div className="font-medium text-gray-700">Super Leitor</div>
+            <div className="text-gray-500 text-xs">Vê tudo, incl. e-mails e registos. Não altera nem envia</div>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -303,6 +313,7 @@ export default function UtilizadoresPage() {
                   className="w-full border rounded-lg px-3 py-2 mt-1 text-sm"
                 >
                   <option value="viewer">Visualizador — só leitura</option>
+                  <option value="super_reader">Super Leitor — vê tudo (incl. e-mails e registos), não altera nem envia</option>
                   <option value="electrician">Eletricista — ver tudo + editar eletricidade</option>
                   <option value="coadmin">Co-Administrador — acesso total, sem gerir utilizadores</option>
                   <option value="admin">Administrador — acesso total</option>

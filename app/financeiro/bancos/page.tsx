@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase-client'
 import { formatCurrency } from '@/lib/utils'
 import { Plus, Building, CreditCard, ArrowUpRight, ArrowDownRight, Upload, Eye, X, Loader2, FileText, CheckCircle } from 'lucide-react'
 import { useFileDrop } from '@/lib/useFileDrop'
+import { useAuth } from '@/lib/auth-context'
 import Link from 'next/link'
 
 interface Bank {
@@ -20,6 +21,7 @@ interface Bank {
 }
 
 export default function BancosPage() {
+  const { canWrite } = useAuth()
   const [banks, setBanks] = useState<Bank[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
@@ -60,9 +62,11 @@ export default function BancosPage() {
             <h1 className="text-2xl font-bold text-gray-900">Bancos</h1>
             <p className="text-sm text-gray-500 mt-1">Gestão de contas bancárias e extratos</p>
           </div>
-          <button className="btn-primary" onClick={() => { setEditBank(null); setShowModal(true) }}>
-            <Plus className="w-4 h-4" /> Novo Banco
-          </button>
+          {canWrite && (
+            <button className="btn-primary" onClick={() => { setEditBank(null); setShowModal(true) }}>
+              <Plus className="w-4 h-4" /> Novo Banco
+            </button>
+          )}
         </div>
 
         {loading ? (
@@ -74,9 +78,11 @@ export default function BancosPage() {
             <Building className="w-12 h-12 text-gray-300 mb-3" />
             <p className="text-lg font-semibold text-gray-700">Nenhum banco configurado</p>
             <p className="text-sm text-gray-500 mt-1 mb-4">Adiciona o teu primeiro banco para começar a importar extratos</p>
-            <button className="btn-primary" onClick={() => setShowModal(true)}>
-              <Plus className="w-4 h-4" /> Adicionar Banco
-            </button>
+            {canWrite && (
+              <button className="btn-primary" onClick={() => setShowModal(true)}>
+                <Plus className="w-4 h-4" /> Adicionar Banco
+              </button>
+            )}
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-4">
@@ -98,8 +104,10 @@ export default function BancosPage() {
                     {bank._stats && bank._stats.pending > 0 && (
                       <span className="badge-amarelo">{bank._stats.pending} por validar</span>
                     )}
-                    <button onClick={() => { setEditBank(bank); setShowModal(true) }}
-                      className="btn-secondary text-xs py-1.5 px-3">Editar</button>
+                    {canWrite && (
+                      <button onClick={() => { setEditBank(bank); setShowModal(true) }}
+                        className="btn-secondary text-xs py-1.5 px-3">Editar</button>
+                    )}
                     <Link href={`/financeiro/bancos/${bank.id}`} className="btn-primary text-xs py-1.5 px-3">
                       <Eye className="w-3 h-3" /> Ver extrato
                     </Link>

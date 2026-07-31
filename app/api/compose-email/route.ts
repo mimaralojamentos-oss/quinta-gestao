@@ -7,7 +7,8 @@ import { EMAIL_CONTEXT_LABELS, type EmailContextData } from '@/lib/emailConfig'
 // onde foi pedido (renda em atraso, eletricidade, dívida, etc.).
 // Não envia nada — devolve o texto para o utilizador ler, editar e validar.
 export async function POST(request: Request) {
-  const auth = await requireRole(['admin', 'coadmin'])
+  // O Super Leitor pode redigir e ver o e-mail, mas não o envia (ver /api/send-email).
+  const auth = await requireRole(['admin', 'coadmin', 'super_reader'])
   if (auth.error) return auth.error
 
   try {
