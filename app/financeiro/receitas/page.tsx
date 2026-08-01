@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { Plus, Trash2, X, Search, FileText, TrendingUp } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
+import { incomeCategoryLabel, mergeCategories } from '@/lib/incomeCategories'
 
 interface IncomeRecord {
   id: string
@@ -18,17 +19,11 @@ interface IncomeRecord {
   document_id: string | null
 }
 
-const CATEGORIES = [
-  { value: 'energia_solar', label: '☀️ Energia Solar' },
-  { value: 'arrendamento_comercial', label: '🏢 Arrendamento Comercial' },
-  { value: 'subsidio', label: '💶 Subsídio / Apoio' },
-  { value: 'indemnizacao', label: '⚖️ Indemnização' },
-  { value: 'venda_ativo', label: '📦 Venda de Ativo' },
-  { value: 'outros', label: '💰 Outros' },
-]
-
+// As origens vêm de lib/incomeCategories — a mesma fonte usada no modal do
+// extrato bancário, para não haver listas diferentes conforme o sítio onde
+// a receita é criada.
 function categoryLabel(cat: string) {
-  return CATEGORIES.find(c => c.value === cat)?.label ?? cat
+  return incomeCategoryLabel(cat)
 }
 
 export default function ReceitasPage() {
@@ -105,6 +100,9 @@ export default function ReceitasPage() {
   const years = Array.from(new Set(records.map(r => r.income_date.slice(0, 4)))).sort((a, b) => b.localeCompare(a))
   if (!years.includes(new Date().getFullYear().toString())) years.unshift(new Date().getFullYear().toString())
 
+  // Origens conhecidas + as que já foram usadas, para as novas aparecerem aqui
+  const categoriasDisponiveis = mergeCategories(records.map(r => r.category))
+
   const filtered = records.filter(r => {
     const matchSearch = !search || r.description.toLowerCase().includes(search.toLowerCase()) || (r.notes ?? '').toLowerCase().includes(search.toLowerCase())
     const matchCat = filterCategory === 'all' || r.category === filterCategory
@@ -149,7 +147,7 @@ export default function ReceitasPage() {
           </div>
           <select className="input w-40" value={filterCategory} onChange={e => setFilterCategory(e.target.value)}>
             <option value="all">Todas as categorias</option>
-            {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+            {categoriasDisponiveis.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
           </select>
           <select className="input w-28" value={filterYear} onChange={e => setFilterYear(e.target.value)}>
             <option value="all">Todos os anos</option>
@@ -232,7 +230,7 @@ export default function ReceitasPage() {
               <div>
                 <label className="label">Categoria</label>
                 <select className="input w-full" value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}>
-                  {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                  {categoriasDisponiveis.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
                 </select>
               </div>
               <div>

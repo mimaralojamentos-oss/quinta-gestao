@@ -8,6 +8,7 @@ import { buildRentPaymentPlan, applyRentPaymentPlan } from '@/lib/rentPaymentPla
 import { ensureExpenseForTransaction, emptySummary, addToSummary, describeSummary } from '@/lib/bankExpense'
 import { useFileDrop } from '@/lib/useFileDrop'
 import { useAuth } from '@/lib/auth-context'
+import { mergeCategories, normalizeCategory } from '@/lib/incomeCategories'
 import {
   Upload, CheckCircle, Clock, XCircle, ArrowUpRight,
   ArrowDownRight, ChevronLeft, Loader2, X, ArrowRight, Link2, Edit2, Search, SlidersHorizontal, Sparkles, RefreshCw, FileText
@@ -1495,8 +1496,13 @@ function MatchModalComponent({ tx, tenants, leases, expenses, documents, autoMat
   const [ruleKeyword, setRuleKeyword] = useState('')
   const [incomeId, setIncomeId] = useState('')
   const [incomeRecords, setIncomeRecords] = useState<any[]>([])
+  const [incomeCategoryInput, setIncomeCategoryInput] = useState('')
+  const [creatingIncome, setCreatingIncome] = useState(false)
   const [wideSearch, setWideSearch] = useState(false)
   const supabase = createClient()
+
+  // Origens conhecidas + as que já foram usadas antes, para a lista crescer sozinha
+  const categoriasDisponiveis = mergeCategories(incomeRecords.map(r => r.category))
 
   useEffect(() => {
     supabase.from('income_records').select('id, description, amount, income_date, category').order('income_date', { ascending: false }).then(({ data }) => setIncomeRecords(data ?? []))
@@ -1690,16 +1696,44 @@ function MatchModalComponent({ tx, tenants, leases, expenses, documents, autoMat
           )}
 
           {type === 'receita_extraordinaria' && (
-            <div>
-              <label className="label">Receita Extraordinária associada</label>
-              <select className="input" value={incomeId} onChange={e => setIncomeId(e.target.value)} size={5}>
-                <option value="">— Nenhuma —</option>
-                {incomeRecords.map(r => (
-                  <option key={r.id} value={r.id}>
-                    {r.income_date} · {r.description.slice(0, 50)} · {r.amount}€
-                  </option>
-                ))}
-              </select>
+            <div className="space-y-3">
+              <div>
+                <label className="label">Origem da receita</label>
+                <input
+                  className="input"
+                  list="origens-receita"
+                  placeholder="ex: Juros bancários, Energia solar..."
+                  value={incomeCategoryInput}
+                  onChange={e => setIncomeCategoryInput(e.target.value)}
+                />
+                <datalist id="origens-receita">
+                  {categoriasDisponiveis.map(c => (
+                    <option key={c.value} value={c.label.replace(/^\S+\s/, '')} />
+                  ))}
+                </datalist>
+                <p className="text-xs text-gray-400 mt-1">
+                  Escolhe da lista ou escreve uma origem nova — fica disponível das próximas vezes.
+                </p>
+              </div>
+
+              <div>
+                <label className="label">
+                  Receita já registada <span className="font-normal text-gray-400">(opcional)</span>
+                </label>
+                <select className="input" value={incomeId} onChange={e => setIncomeId(e.target.value)} size={4}>
+                  <option value="">— Criar nova a partir desta transação —</option>
+                  {incomeRecords.map(r => (
+                    <option key={r.id} value={r.id}>
+                      {r.income_date} · {r.description.slice(0, 50)} · {r.amount}€
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-400 mt-1">
+                  {incomeId
+                    ? 'A transação vai ser ligada a esta receita já existente.'
+                    : `Vai ser criada uma receita de ${formatCurrency(Math.abs(tx.amount))} com a origem indicada acima.`}
+                </p>
+              </div>
             </div>
           )}
 
@@ -1819,8 +1853,25 @@ function MatchModalComponent({ tx, tenants, leases, expenses, documents, autoMat
               })
               onSaveRule()
             }
-            onSave(tx, type, tenantId, expenseId, notes, type === 'receita_extraordinaria' ? (incomeId || undefined) : (documentId || undefined), type === 'renda' ? referenceMonth : undefined)
-          }}>Guardar</button>
+
+            // Receita sem registo escolhido: cria-a agora, com a origem indicada.
+            let finalIncomeId = incomeId
+            if (type === 'receita_extraordinaria' && !incomeId) {
+              setCreatingIncome(true)
+              const categoria = normalizeCategory(incomeCategoryInput) || 'outros'
+              const { data: novaReceita } = await supabase.from('income_records').insert({
+                description: notes.trim() || tx.description,
+                amount: Math.abs(tx.amount),
+                income_date: tx.transaction_date,
+                category: categoria,
+                notes: `Criada a partir do movimento bancário de ${formatDate(tx.transaction_date)}`,
+              }).select().single()
+              setCreatingIncome(false)
+              if (novaReceita) finalIncomeId = novaReceita.id
+            }
+
+            onSave(tx, type, tenantId, expenseId, notes, type === 'receita_extraordinaria' ? (finalIncomeId || undefined) : (documentId || undefined), type === 'renda' ? referenceMonth : undefined)
+          }}>{creatingIncome ? 'A guardar...' : 'Guardar'}</button>
         </div>
       </div>
     </div>
