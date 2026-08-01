@@ -804,6 +804,8 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
   const countIdentificadas = transactions.filter(t => t.confirmed_type || (txMatches[t.id]?.length > 0)).length
   const countNaoIdentificadas = transactions.filter(t => !t.confirmed_type && (!txMatches[t.id] || txMatches[t.id].length === 0)).length
   const countCustosBancarios = transactions.filter(t => t.confirmed_type === 'custos_bancarios').length
+  const countCreditos = transactions.filter(t => t.amount > 0).length
+  const countDebitos = transactions.filter(t => t.amount < 0).length
 
   const filtered = transactions.filter(t => {
     const autoMatches = txMatches[t.id]
@@ -1101,6 +1103,34 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
           </button>
         </div>
 
+        {/* Grupo 4: Créditos / Débitos */}
+        <div className="flex flex-wrap gap-2 mb-4">
+          <span className="text-xs font-medium text-gray-400 self-center w-16">Movimento</span>
+          {([
+            { key: 'all', label: '↕ Ambos', count: transactions.length, cor: 'bg-gray-600' },
+            { key: 'entrada', label: '↑ Créditos', count: countCreditos, cor: 'bg-emerald-600' },
+            { key: 'saida', label: '↓ Débitos', count: countDebitos, cor: 'bg-red-600' },
+          ] as const).map(btn => (
+            <button key={btn.key} onClick={() => setFilterDirection(btn.key)}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 ${
+                filterDirection === btn.key
+                  ? `${btn.cor} text-white`
+                  : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
+              }`}>
+              {btn.label}
+              <span className={`px-1.5 py-0.5 rounded-full text-xs ${filterDirection === btn.key ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-500'}`}>{btn.count}</span>
+            </button>
+          ))}
+          {filterDirection !== 'all' && (
+            <span className="self-center text-xs text-gray-500 ml-1">
+              {filterDirection === 'entrada' ? 'Total: ' : 'Total: '}
+              <strong className={filterDirection === 'entrada' ? 'text-emerald-600' : 'text-red-600'}>
+                {formatCurrency(Math.abs(filtered.reduce((s, t) => s + t.amount, 0)))}
+              </strong>
+            </span>
+          )}
+        </div>
+
         <div className="flex gap-3 mb-3">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -1121,15 +1151,9 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
 
         {showFilters && (
           <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-4 space-y-3">
+            {/* A direção (créditos/débitos) passou para a barra de filtros
+                visível, por isso deixou de estar aqui duplicada. */}
             <div className="grid grid-cols-3 gap-3">
-              <div>
-                <label className="text-xs font-medium text-gray-500 mb-1 block">Direção</label>
-                <select className="input text-sm" value={filterDirection} onChange={e => setFilterDirection(e.target.value as any)}>
-                  <option value="all">Todas</option>
-                  <option value="entrada">⬆ Entradas</option>
-                  <option value="saida">⬇ Saídas</option>
-                </select>
-              </div>
               <div>
                 <label className="text-xs font-medium text-gray-500 mb-1 block">Data — de</label>
                 <input type="date" className="input text-sm" value={filterDateFrom} onChange={e => setFilterDateFrom(e.target.value)} />
