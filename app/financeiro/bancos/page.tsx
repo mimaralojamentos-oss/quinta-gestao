@@ -20,6 +20,24 @@ interface Bank {
   _stats?: { total_in: number; total_out: number; pending: number }
 }
 
+/**
+ * Etiqueta curta para identificar a conta numa listagem agregada.
+ *
+ * Os nomes dos bancos aqui são do género "Millennium BCP - Ana Paula": o banco
+ * repete-se entre contas e o que as distingue é o titular. Por isso usamos a
+ * parte depois do travessão; se não houver, o primeiro e último nome do titular.
+ */
+function shortBankLabel(bank: { name: string; holder_name?: string | null }): string {
+  const depoisDoTravessao = bank.name.split(/\s[-–]\s/).slice(1).join(' - ').trim()
+  if (depoisDoTravessao) return depoisDoTravessao
+
+  if (bank.holder_name?.trim()) {
+    const partes = bank.holder_name.trim().split(/\s+/)
+    return partes.length > 1 ? `${partes[0]} ${partes[partes.length - 1]}` : partes[0]
+  }
+  return bank.name
+}
+
 export default function BancosPage() {
   const { canWrite } = useAuth()
   const [banks, setBanks] = useState<Bank[]>([])
@@ -27,6 +45,14 @@ export default function BancosPage() {
   const [showModal, setShowModal] = useState(false)
   const [editBank, setEditBank] = useState<Bank | null>(null)
   const supabase = createClient()
+
+  // Vista agregada de créditos de todas as contas
+  const [credits, setCredits] = useState<any[]>([])
+  const [tenants, setTenants] = useState<any[]>([])
+  const [showCredits, setShowCredits] = useState(true)
+  const [creditSearch, setCreditSearch] = useState('')
+  const [creditYear, setCreditYear] = useState('all')
+  const [creditBank, setCreditBank] = useState('all')
 
   useEffect(() => { fetchBanks() }, [])
 
@@ -47,11 +73,53 @@ export default function BancosPage() {
         }
       })
       setBanks(banksWithStats)
+
+      // Só créditos (entradas), de todas as contas
+      const { data: creditData } = await supabase
+        .from('bank_transactions')
+        .select('id, bank_id, transaction_date, description, amount, balance, status, confirmed_type, confirmed_tenant_id, notes')
+        .gt('amount', 0)
+        .order('transaction_date', { ascending: false })
+      setCredits(creditData ?? [])
+
+      const { data: tenantsData } = await supabase.from('tenants').select('id, name')
+      setTenants(tenantsData ?? [])
     } catch (e) {
       console.error(e)
     } finally {
       setLoading(false)
     }
+  }
+
+  const bankById = Object.fromEntries(banks.map(b => [b.id, b]))
+
+  const anosDisponiveis = Array.from(
+    new Set(credits.map(c => c.transaction_date?.slice(0, 4)).filter(Boolean))
+  ).sort((a, b) => b.localeCompare(a))
+
+  const creditosFiltrados = credits.filter(c => {
+    if (creditBank !== 'all' && c.bank_id !== creditBank) return false
+    if (creditYear !== 'all' && !c.transaction_date?.startsWith(creditYear)) return false
+    if (creditSearch) {
+      const q = creditSearch.toLowerCase()
+      const banco = bankById[c.bank_id] ? shortBankLabel(bankById[c.bank_id]).toLowerCase() : ''
+      if (!c.description?.toLowerCase().includes(q) && !banco.includes(q)) return false
+    }
+    return true
+  })
+
+  const totalCreditos = creditosFiltrados.reduce((s, c) => s + c.amount, 0)
+
+  function identificacaoLabel(c: any): string {
+    if (c.confirmed_type === 'renda') {
+      const t = tenants.find(x => x.id === c.confirmed_tenant_id)
+      return t ? `🏠 ${t.name}` : '🏠 Renda'
+    }
+    if (c.confirmed_type === 'receita_extraordinaria') return '💰 Receita'
+    if (c.confirmed_type === 'transferencia_interna') return '🔄 Transf. interna'
+    if (c.confirmed_type === 'outro') return `📝 ${c.notes ?? 'Outro'}`
+    if (c.confirmed_type) return c.confirmed_type
+    return '—'
   }
 
   return (
@@ -140,6 +208,117 @@ export default function BancosPage() {
                 )}
               </div>
             ))}
+          </div>
+        )}
+
+        {/* Créditos de todas as contas juntos */}
+        {!loading && banks.length > 0 && (
+          <div className="mt-6">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <ArrowUpRight className="w-5 h-5 text-emerald-500" />
+                <h2 className="text-lg font-bold text-gray-900">Entradas de todas as contas</h2>
+                <span className="text-xs text-gray-400">só créditos</span>
+              </div>
+              <button onClick={() => setShowCredits(v => !v)} className="btn-secondary text-xs py-1.5 px-3">
+                {showCredits ? 'Esconder' : 'Mostrar'}
+              </button>
+            </div>
+
+            {showCredits && (
+              <div className="card">
+                <div className="flex flex-wrap items-center gap-3 mb-4">
+                  <input
+                    className="input flex-1 min-w-48 text-sm"
+                    placeholder="Pesquisar na descrição ou no banco..."
+                    value={creditSearch}
+                    onChange={e => setCreditSearch(e.target.value)}
+                  />
+                  <select className="input w-44 text-sm" value={creditBank} onChange={e => setCreditBank(e.target.value)}>
+                    <option value="all">Todas as contas</option>
+                    {banks.map(b => (
+                      <option key={b.id} value={b.id}>{shortBankLabel(b)}</option>
+                    ))}
+                  </select>
+                  <select className="input w-28 text-sm" value={creditYear} onChange={e => setCreditYear(e.target.value)}>
+                    <option value="all">Todos</option>
+                    {anosDisponiveis.map(a => <option key={a} value={a}>{a}</option>)}
+                  </select>
+                </div>
+
+                <div className="flex items-center justify-between bg-emerald-50 border border-emerald-100 rounded-lg px-4 py-2.5 mb-3">
+                  <span className="text-sm text-emerald-700">
+                    {creditosFiltrados.length} entrada(s)
+                    {creditBank !== 'all' && ` · ${shortBankLabel(bankById[creditBank] ?? { name: '—' })}`}
+                    {creditYear !== 'all' && ` · ${creditYear}`}
+                  </span>
+                  <span className="text-xl font-bold text-emerald-700">{formatCurrency(totalCreditos)}</span>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-100 text-left">
+                        <th className="py-2 px-2 text-xs font-semibold text-gray-500 uppercase">Conta</th>
+                        <th className="py-2 px-2 text-xs font-semibold text-gray-500 uppercase">Data</th>
+                        <th className="py-2 px-2 text-xs font-semibold text-gray-500 uppercase">Descrição</th>
+                        <th className="py-2 px-2 text-xs font-semibold text-gray-500 uppercase">Identificação</th>
+                        <th className="py-2 px-2 text-xs font-semibold text-gray-500 uppercase text-right">Valor</th>
+                        <th className="py-2 px-2 text-xs font-semibold text-gray-500 uppercase text-right">Saldo</th>
+                        <th className="py-2 px-2 text-xs font-semibold text-gray-500 uppercase">Estado</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {creditosFiltrados.length === 0 ? (
+                        <tr>
+                          <td colSpan={7} className="py-8 text-center text-gray-400">
+                            Nenhuma entrada com estes filtros.
+                          </td>
+                        </tr>
+                      ) : creditosFiltrados.slice(0, 300).map(c => {
+                        const banco = bankById[c.bank_id]
+                        return (
+                          <tr key={c.id} className="border-b border-gray-50 last:border-0 hover:bg-gray-50">
+                            <td className="py-2 px-2">
+                              <Link href={`/financeiro/bancos/${c.bank_id}`}
+                                className="text-xs font-medium text-blue-600 hover:underline whitespace-nowrap">
+                                {banco ? shortBankLabel(banco) : '—'}
+                              </Link>
+                            </td>
+                            <td className="py-2 px-2 text-gray-600 whitespace-nowrap">
+                              {c.transaction_date?.split('-').reverse().join('/')}
+                            </td>
+                            <td className="py-2 px-2 text-gray-800">{c.description}</td>
+                            <td className="py-2 px-2 text-gray-600 text-xs">{identificacaoLabel(c)}</td>
+                            <td className="py-2 px-2 text-right font-semibold text-emerald-600 whitespace-nowrap">
+                              +{formatCurrency(c.amount)}
+                            </td>
+                            <td className="py-2 px-2 text-right text-gray-500 whitespace-nowrap">
+                              {c.balance != null ? formatCurrency(c.balance) : '—'}
+                            </td>
+                            <td className="py-2 px-2">
+                              <span className={`text-xs px-2 py-0.5 rounded-full whitespace-nowrap ${
+                                c.status === 'validado' ? 'bg-emerald-100 text-emerald-700'
+                                : c.status === 'ignorado' ? 'bg-gray-100 text-gray-500'
+                                : 'bg-amber-100 text-amber-700'
+                              }`}>
+                                {c.status === 'validado' ? 'Validado' : c.status === 'ignorado' ? 'Ignorado' : 'Por validar'}
+                              </span>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {creditosFiltrados.length > 300 && (
+                  <p className="text-xs text-gray-400 mt-3 text-center">
+                    A mostrar as 300 mais recentes de {creditosFiltrados.length}. Usa os filtros para reduzir.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
