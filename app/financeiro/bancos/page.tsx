@@ -62,6 +62,7 @@ export default function BancosPage() {
   const [creditSearch, setCreditSearch] = useState('')
   const [creditYear, setCreditYear] = useState('all')
   const [creditBank, setCreditBank] = useState('all')
+  const [creditStatus, setCreditStatus] = useState<'all' | 'por_validar' | 'validado' | 'ignorado'>('all')
 
   useEffect(() => { fetchBanks() }, [])
 
@@ -114,6 +115,7 @@ export default function BancosPage() {
 
   const creditosFiltrados = credits.filter(c => {
     if (creditBank !== 'all' && c.bank_id !== creditBank) return false
+    if (creditStatus !== 'all' && c.status !== creditStatus) return false
     if (creditYear !== 'all' && !c.transaction_date?.startsWith(creditYear)) return false
     if (creditSearch) {
       const q = creditSearch.toLowerCase()
@@ -124,6 +126,26 @@ export default function BancosPage() {
   })
 
   const totalCreditos = creditosFiltrados.reduce((s, c) => s + c.amount, 0)
+
+  // Contagens por estado — respeitam os restantes filtros (conta, ano, pesquisa),
+  // para o número no botão corresponder ao que se vê ao clicar.
+  const creditsBase = credits.filter(c => {
+    if (creditBank !== 'all' && c.bank_id !== creditBank) return false
+    if (creditYear !== 'all' && !c.transaction_date?.startsWith(creditYear)) return false
+    if (creditSearch) {
+      const q = creditSearch.toLowerCase()
+      const banco = bankById[c.bank_id] ? shortBankLabel(bankById[c.bank_id]).toLowerCase() : ''
+      if (!c.description?.toLowerCase().includes(q) && !banco.includes(q)) return false
+    }
+    return true
+  })
+
+  const creditsPorEstado = {
+    all: creditsBase.length,
+    por_validar: creditsBase.filter(c => c.status === 'por_validar').length,
+    validado: creditsBase.filter(c => c.status === 'validado').length,
+    ignorado: creditsBase.filter(c => c.status === 'ignorado').length,
+  }
 
   function abrirIdentificacao(c: any) {
     setIdentifying(c)
@@ -333,9 +355,34 @@ export default function BancosPage() {
                   </select>
                 </div>
 
+                {/* Estado — atalho para o caso mais frequente: o que falta tratar */}
+                <div className="flex flex-wrap gap-2 mb-4">
+                  {([
+                    { key: 'all', label: 'Todas', count: creditsPorEstado.all },
+                    { key: 'por_validar', label: '⏳ Por validar', count: creditsPorEstado.por_validar },
+                    { key: 'validado', label: '✓ Validadas', count: creditsPorEstado.validado },
+                    { key: 'ignorado', label: 'Ignoradas', count: creditsPorEstado.ignorado },
+                  ] as const).map(btn => (
+                    <button key={btn.key} onClick={() => setCreditStatus(btn.key)}
+                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 ${
+                        creditStatus === btn.key
+                          ? (btn.key === 'por_validar' ? 'bg-amber-500 text-white' : 'bg-emerald-600 text-white')
+                          : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
+                      }`}>
+                      {btn.label}
+                      <span className={`px-1.5 py-0.5 rounded-full text-xs ${creditStatus === btn.key ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-500'}`}>
+                        {btn.count}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+
                 <div className="flex items-center justify-between bg-emerald-50 border border-emerald-100 rounded-lg px-4 py-2.5 mb-3">
                   <span className="text-sm text-emerald-700">
                     {creditosFiltrados.length} entrada(s)
+                    {creditStatus === 'por_validar' && ' por validar'}
+                    {creditStatus === 'validado' && ' validadas'}
+                    {creditStatus === 'ignorado' && ' ignoradas'}
                     {creditBank !== 'all' && ` · ${shortBankLabel(bankById[creditBank] ?? { name: '—' })}`}
                     {creditYear !== 'all' && ` · ${creditYear}`}
                   </span>
