@@ -1,12 +1,13 @@
 'use client'
 
 import AppLayout from '@/components/layout/AppLayout'
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, Fragment } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatCurrency } from '@/lib/utils'
 import { Plus, Building, CreditCard, ArrowUpRight, ArrowDownRight, Upload, Eye, X, Loader2, FileText, CheckCircle } from 'lucide-react'
 import { useFileDrop } from '@/lib/useFileDrop'
 import { useAuth } from '@/lib/auth-context'
+import { buildRentPaymentPlan, applyRentPaymentPlan } from '@/lib/rentPaymentPlan'
 import Link from 'next/link'
 
 interface Bank {
@@ -49,6 +50,14 @@ export default function BancosPage() {
   // Vista agregada de créditos de todas as contas
   const [credits, setCredits] = useState<any[]>([])
   const [tenants, setTenants] = useState<any[]>([])
+  const [leases, setLeases] = useState<any[]>([])
+  // Linha em processo de identificação (painel que abre por baixo)
+  const [identifying, setIdentifying] = useState<any | null>(null)
+  const [idType, setIdType] = useState('renda')
+  const [idTenantId, setIdTenantId] = useState('')
+  const [idMonth, setIdMonth] = useState('')
+  const [idNotes, setIdNotes] = useState('')
+  const [processing, setProcessing] = useState(false)
   const [showCredits, setShowCredits] = useState(true)
   const [creditSearch, setCreditSearch] = useState('')
   const [creditYear, setCreditYear] = useState('all')
@@ -84,6 +93,12 @@ export default function BancosPage() {
 
       const { data: tenantsData } = await supabase.from('tenants').select('id, name')
       setTenants(tenantsData ?? [])
+
+      const { data: leasesData } = await supabase
+        .from('leases')
+        .select('id, monthly_rent, tenant:tenants(id, name), space:spaces(ref)')
+        .eq('status', 'ativo')
+      setLeases(leasesData ?? [])
     } catch (e) {
       console.error(e)
     } finally {
@@ -109,6 +124,78 @@ export default function BancosPage() {
   })
 
   const totalCreditos = creditosFiltrados.reduce((s, c) => s + c.amount, 0)
+
+  function abrirIdentificacao(c: any) {
+    setIdentifying(c)
+    setIdType(c.confirmed_type ?? 'renda')
+    setIdTenantId(c.confirmed_tenant_id ?? '')
+    setIdMonth(c.transaction_date?.slice(0, 7) ?? '')
+    setIdNotes(c.notes ?? '')
+  }
+
+  // Marca como validado e, tratando-se de renda, cria o pagamento com a mesma
+  // distribuição usada no extrato individual (renda → luz → dívidas → adiantamento).
+  async function validarEntrada(c: any, tipo: string, tenantId: string, mes: string, notas: string) {
+    setProcessing(true)
+    try {
+      const lease = tenantId ? leases.find(l => (l.tenant as any)?.id === tenantId) : null
+
+      const { error } = await supabase.from('bank_transactions').update({
+        confirmed_type: tipo,
+        confirmed_tenant_id: tenantId || null,
+        confirmed_lease_id: lease?.id ?? null,
+        notes: notas || null,
+        status: 'validado',
+      }).eq('id', c.id)
+
+      if (error) { alert(`⚠️ Não foi possível validar:\n\n${error.message}`); return }
+
+      if (tipo === 'renda' && lease) {
+        const referenceMonth = `${mes || c.transaction_date.slice(0, 7)}-01`
+
+        const { data: existentes } = await supabase
+          .from('rent_payments').select('id, tipo, amount')
+          .eq('lease_id', lease.id).eq('reference_month', referenceMonth)
+
+        const jaPago = (existentes ?? [])
+          .filter((p: any) => p.tipo === 'renda' || !p.tipo)
+          .reduce((s: number, p: any) => s + (p.amount || 0), 0)
+
+        const plan = await buildRentPaymentPlan(supabase, {
+          leaseId: lease.id,
+          tenantId,
+          monthlyRent: lease.monthly_rent,
+          amount: c.amount,
+          referenceMonth,
+          alreadyPaidRenda: jaPago,
+        })
+
+        if (!window.confirm(`${plan.summary}\n\nConfirmar processamento deste pagamento?`)) {
+          setProcessing(false)
+          return
+        }
+
+        await applyRentPaymentPlan(supabase, plan, {
+          leaseId: lease.id,
+          tenantId,
+          referenceMonth,
+          paymentDate: c.transaction_date,
+          paymentMethod: 'banco',
+        })
+      }
+
+      setIdentifying(null)
+      await fetchBanks()
+    } finally {
+      setProcessing(false)
+    }
+  }
+
+  async function ignorarEntrada(c: any) {
+    const { error } = await supabase.from('bank_transactions').update({ status: 'ignorado' }).eq('id', c.id)
+    if (error) { alert(`⚠️ ${error.message}`); return }
+    fetchBanks()
+  }
 
   function identificacaoLabel(c: any): string {
     if (c.confirmed_type === 'renda') {
@@ -266,19 +353,21 @@ export default function BancosPage() {
                         <th className="py-2 px-2 text-xs font-semibold text-gray-500 uppercase text-right">Valor</th>
                         <th className="py-2 px-2 text-xs font-semibold text-gray-500 uppercase text-right">Saldo</th>
                         <th className="py-2 px-2 text-xs font-semibold text-gray-500 uppercase">Estado</th>
+                        {canWrite && <th className="py-2 px-2 text-xs font-semibold text-gray-500 uppercase text-right">Ações</th>}
                       </tr>
                     </thead>
                     <tbody>
                       {creditosFiltrados.length === 0 ? (
                         <tr>
-                          <td colSpan={7} className="py-8 text-center text-gray-400">
+                          <td colSpan={canWrite ? 8 : 7} className="py-8 text-center text-gray-400">
                             Nenhuma entrada com estes filtros.
                           </td>
                         </tr>
                       ) : creditosFiltrados.slice(0, 300).map(c => {
                         const banco = bankById[c.bank_id]
                         return (
-                          <tr key={c.id} className="border-b border-gray-50 last:border-0 hover:bg-gray-50">
+                          <Fragment key={c.id}>
+                          <tr className="border-b border-gray-50 last:border-0 hover:bg-gray-50">
                             <td className="py-2 px-2">
                               <Link href={`/financeiro/bancos/${c.bank_id}`}
                                 className="text-xs font-medium text-blue-600 hover:underline whitespace-nowrap">
@@ -305,7 +394,95 @@ export default function BancosPage() {
                                 {c.status === 'validado' ? 'Validado' : c.status === 'ignorado' ? 'Ignorado' : 'Por validar'}
                               </span>
                             </td>
+                            {canWrite && (
+                              <td className="py-2 px-2 text-right whitespace-nowrap">
+                                {c.status === 'por_validar' ? (
+                                  <div className="flex items-center gap-2 justify-end">
+                                    <button onClick={() => abrirIdentificacao(c)}
+                                      className="text-xs text-emerald-600 hover:underline font-medium">
+                                      Identificar
+                                    </button>
+                                    <button onClick={() => ignorarEntrada(c)}
+                                      className="text-xs text-gray-400 hover:text-gray-600">
+                                      Ignorar
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button onClick={() => abrirIdentificacao(c)}
+                                    className="text-xs text-gray-400 hover:text-blue-600">
+                                    Editar
+                                  </button>
+                                )}
+                              </td>
+                            )}
                           </tr>
+
+                          {identifying?.id === c.id && (
+                            <tr className="bg-emerald-50/60">
+                              <td colSpan={canWrite ? 8 : 7} className="px-3 py-4">
+                                <div className="flex flex-wrap items-end gap-3">
+                                  <div>
+                                    <label className="text-xs font-medium text-gray-500 block mb-1">Tipo</label>
+                                    <select className="input text-sm w-44" value={idType} onChange={e => setIdType(e.target.value)}>
+                                      <option value="renda">🏠 Renda / Luz / Dívida</option>
+                                      <option value="receita_extraordinaria">💰 Receita</option>
+                                      <option value="transferencia_interna">🔄 Transf. interna</option>
+                                      <option value="outro">📝 Outro</option>
+                                    </select>
+                                  </div>
+
+                                  {idType === 'renda' && (
+                                    <>
+                                      <div>
+                                        <label className="text-xs font-medium text-gray-500 block mb-1">Inquilino</label>
+                                        <select className="input text-sm w-56" value={idTenantId} onChange={e => setIdTenantId(e.target.value)}>
+                                          <option value="">— Escolher —</option>
+                                          {leases.map(l => (
+                                            <option key={l.id} value={(l.tenant as any)?.id}>
+                                              {(l.tenant as any)?.name} · {(l.space as any)?.ref}
+                                            </option>
+                                          ))}
+                                        </select>
+                                      </div>
+                                      <div>
+                                        <label className="text-xs font-medium text-gray-500 block mb-1">Mês da renda</label>
+                                        <input type="month" className="input text-sm w-40" value={idMonth} onChange={e => setIdMonth(e.target.value)} />
+                                      </div>
+                                    </>
+                                  )}
+
+                                  {idType !== 'renda' && (
+                                    <div className="flex-1 min-w-48">
+                                      <label className="text-xs font-medium text-gray-500 block mb-1">Notas</label>
+                                      <input className="input text-sm" placeholder="ex: Juros, reembolso..." value={idNotes} onChange={e => setIdNotes(e.target.value)} />
+                                    </div>
+                                  )}
+
+                                  <div className="flex gap-2 ml-auto">
+                                    <button className="btn-secondary text-xs py-1.5 px-3" onClick={() => setIdentifying(null)}>
+                                      Cancelar
+                                    </button>
+                                    <button
+                                      className="btn-primary text-xs py-1.5 px-3"
+                                      disabled={processing || (idType === 'renda' && !idTenantId)}
+                                      onClick={() => validarEntrada(c, idType, idTenantId, idMonth, idNotes)}
+                                    >
+                                      {processing ? 'A validar...' : '✓ Validar'}
+                                    </button>
+                                  </div>
+                                </div>
+
+                                {idType === 'renda' && !idTenantId && (
+                                  <p className="text-xs text-amber-600 mt-2">Escolhe o inquilino para poder validar.</p>
+                                )}
+                                <p className="text-xs text-gray-500 mt-2">
+                                  Para casos mais complexos (associar fatura, despesa ou criar regra automática),
+                                  usa <Link href={`/financeiro/bancos/${c.bank_id}`} className="text-blue-600 hover:underline">o extrato desta conta</Link>.
+                                </p>
+                              </td>
+                            </tr>
+                          )}
+                          </Fragment>
                         )
                       })}
                     </tbody>
