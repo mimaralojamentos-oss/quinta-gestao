@@ -244,8 +244,43 @@ async function handleSaveEdit() {
     category: editForm.category || null,
   }).eq('id', editDoc.id)
 
+  // Mudou de fatura para receita: o documento afinal é dinheiro a ENTRAR.
+  // Apaga a despesa criada por engano e cria o registo de receita.
+  const passouAReceita = editForm.tipo === 'receita' && editDoc.tipo !== 'receita'
+  if (passouAReceita) {
+    const valor = editForm.amount ? Math.abs(parseFloat(editForm.amount)) : null
+
+    if (editDoc.expense_id) {
+      const apagar = window.confirm(
+        'Este documento tinha uma despesa associada, criada automaticamente.\n\n' +
+        'Como agora é uma receita, essa despesa deixa de fazer sentido. Queres apagá-la?'
+      )
+      if (apagar) {
+        await supabase.from('expenses').delete().eq('id', editDoc.expense_id)
+        await supabase.from('documents').update({ expense_id: null }).eq('id', editDoc.id)
+      }
+    }
+
+    if (valor && editForm.doc_date) {
+      const { data: jaExiste } = await supabase.from('income_records')
+        .select('id').eq('document_id', editDoc.id).maybeSingle()
+
+      if (!jaExiste) {
+        await supabase.from('income_records').insert({
+          description: editForm.items_summary || editForm.supplier_name || 'Receita',
+          amount: valor,
+          income_date: editForm.doc_date,
+          category: 'energia_solar',
+          document_id: editDoc.id,
+          notes: editForm.doc_number ? `Documento nº ${editForm.doc_number}` : 'Convertido de despesa para receita',
+        })
+        alert('✅ Receita criada. Podes ajustar a origem em Financeiro → Receitas Extraordinárias.')
+      }
+    }
+  }
+
   // Se o documento tem uma despesa associada, atualiza também a categoria da despesa
-  if (editDoc.expense_id && editForm.category) {
+  if (!passouAReceita && editDoc.expense_id && editForm.category) {
     await supabase.from('expenses').update({
       category: editForm.category,
     }).eq('id', editDoc.expense_id)

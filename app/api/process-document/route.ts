@@ -77,8 +77,16 @@ Primeiro identifica o tipo de documento e depois extrai os campos correspondente
 
 Atenção especial ao tipo "transferencia_interna": usa este tipo quando o documento for um comprovativo/recibo emitido por um banco (ex: Crédito Agrícola) referente a um depósito em numerário, entrega de valores ao banco ou transferência entre contas próprias. Estes documentos tipicamente têm termos como "Dep. Numerário", "Entrega para Depósito" ou "Total Depositado", indicam um valor depositado em euros e o nome do depositante.
 
+ATENÇÃO CRÍTICA — dinheiro a entrar vs. dinheiro a sair:
+Nem toda a fatura de eletricidade é uma despesa. Existem dois casos opostos:
+ (a) COMPRA de energia — o titular consome e paga ao comercializador (EDP Comercial, Galp, Iberdrola...). É DESPESA → doc_type "fatura_luz".
+ (b) VENDA/PRODUÇÃO de energia — o titular tem painéis solares e VENDE a energia produzida. O comercializador (frequentemente "SU Eletricidade", que é o comprador de último recurso) emite uma AUTOFATURA em nome do produtor. É RECEITA → doc_type "receita".
+Sinais de (b): as palavras "autofatura", "auto-faturação", "produção", "energia produzida", "venda de energia", "UPAC", "produtor"; o titular aparece como FORNECEDOR e não como cliente; o documento indica energia injetada na rede.
+Se for o caso (b), usa doc_type "receita" e mete "is_venda_energia": true.
+
 {
-  "doc_type": "um de: fatura, fatura_luz, fatura_agua, registo_predial, carta, transferencia_interna, outro",
+  "doc_type": "um de: fatura, fatura_luz, fatura_agua, receita, registo_predial, carta, transferencia_interna, outro",
+  "is_venda_energia": true se for autofatura de venda/produção de energia (dinheiro a ENTRAR), false caso contrário,
   "doc_number": "número do documento/fatura se existir",
   "supplier_name": "nome do fornecedor/entidade emissora",
   "supplier_nif": "NIF do fornecedor (só números, null se não existir)",
@@ -172,6 +180,25 @@ IMPORTANTE sobre o valor ("amount"):
         // Se for automático, usar o tipo detetado pela IA
         if (isAutomatic && extracted.doc_type) {
           tipo = extracted.doc_type
+        }
+
+        // Rede de segurança: mesmo que a IA falhe a distinção, estas
+        // expressões só aparecem em documentos de VENDA de energia, nunca
+        // numa fatura de consumo. Um erro aqui criaria uma despesa a partir
+        // de dinheiro que na verdade entrou.
+        const textoParaAnalise = [
+          file.name, extracted.items_summary, extracted.supplier_name,
+        ].filter(Boolean).join(' ').toLowerCase()
+
+        const sinaisDeVenda = [
+          'autofatura', 'auto-fatura', 'autofaturação', 'auto-faturação',
+          'produção de energia', 'energia produzida', 'venda de energia',
+          'upac', 'energia injetada',
+        ]
+
+        if (extracted.is_venda_energia === true || sinaisDeVenda.some(s => textoParaAnalise.includes(s))) {
+          tipo = 'receita'
+          extracted.category = 'energia_solar'
         }
 
       } catch (e) {
@@ -379,13 +406,18 @@ IMPORTANTE sobre o valor ("amount"):
     }
 
     // ── CRIAR RECEITA automaticamente para documentos do tipo receita ──
+    // Quando a venda de energia é detetada automaticamente, a receita é criada
+    // sem esperar pela opção do formulário — o utilizador pediu uma fatura e o
+    // que existe é dinheiro a entrar, seria estranho não ficar registado.
     let autoIncome = false
-    if (tipo === 'receita' && createIncome && doc && extracted.amount && extracted.doc_date) {
+    const criarReceita = tipo === 'receita' && (createIncome || extracted.is_venda_energia === true || extracted.category === 'energia_solar')
+
+    if (criarReceita && doc && extracted.amount && extracted.doc_date && canWriteFinance) {
       const { data: newIncome } = await supabase.from('income_records').insert({
         description: extracted.items_summary ?? extracted.supplier_name ?? 'Receita',
-        amount: extracted.amount,
+        amount: Math.abs(extracted.amount),
         income_date: extracted.doc_date,
-        category: 'energia_solar',
+        category: extracted.category ?? 'energia_solar',
         document_id: doc.id,
         notes: extracted.doc_number ? `Documento nº ${extracted.doc_number}` : null,
       }).select().single()
