@@ -8,7 +8,7 @@ import { buildRentPaymentPlan, applyRentPaymentPlan } from '@/lib/rentPaymentPla
 import { ensureExpenseForTransaction, emptySummary, addToSummary, describeSummary } from '@/lib/bankExpense'
 import { useFileDrop } from '@/lib/useFileDrop'
 import { useAuth } from '@/lib/auth-context'
-import { mergeCategories, normalizeCategory } from '@/lib/incomeCategories'
+import { mergeCategories, normalizeCategory, incomeCategoryLabel } from '@/lib/incomeCategories'
 import {
   Upload, CheckCircle, Clock, XCircle, ArrowUpRight,
   ArrowDownRight, ChevronLeft, Loader2, X, ArrowRight, Link2, Edit2, Search, SlidersHorizontal, Sparkles, RefreshCw, FileText
@@ -32,6 +32,7 @@ interface Transaction {
   confirmed_expense_id: string | null
   confirmed_tenant_id: string | null
   confirmed_document_id: string | null
+  confirmed_income_id: string | null
   notes: string | null
 }
 
@@ -118,6 +119,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
   const [syncingExpenses, setSyncingExpenses] = useState(false)
   const [documents, setDocuments] = useState<any[]>([])
   const [pendingCashTransfers, setPendingCashTransfers] = useState<any[]>([])
+  const [incomeRecords, setIncomeRecords] = useState<any[]>([])
   const [matchingRules, setMatchingRules] = useState<MatchingRule[]>([])
   const [showRules, setShowRules] = useState(false)
   const [newRuleKeyword, setNewRuleKeyword] = useState('')
@@ -192,6 +194,12 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
         .eq('bank_id', bankId)
         .order('created_at', { ascending: false })
       setMatchingRules(rulesData ?? [])
+
+      // Receitas — para mostrar a origem no rótulo da transação
+      const { data: incomeData } = await supabase
+        .from('income_records').select('id, description, amount, income_date, category')
+        .order('income_date', { ascending: false })
+      setIncomeRecords(incomeData ?? [])
 
       // Transferências de caixa pendentes — para sugerir a entrada correspondente
       const { data: cashData } = await supabase
@@ -364,7 +372,9 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
       return { label: `📝 ${tx.notes ?? 'Outro'}`, color: 'text-gray-600', confirmed: true }
     }
     if (tx.confirmed_type === 'receita_extraordinaria') {
-      return { label: `💰 Receita Extraordinária`, color: 'text-emerald-600', confirmed: true }
+      const rec = incomeRecords.find(r => r.id === tx.confirmed_income_id)
+      const origem = rec?.category ? incomeCategoryLabel(rec.category) : 'Receita'
+      return { label: `💰 ${origem}`, color: 'text-emerald-600', confirmed: true }
     }
     if (tx.confirmed_type === 'transferencia_interna') {
       return { label: `🔄 ${tx.notes ?? 'Transferência Interna'}`, color: 'text-indigo-600', confirmed: true }
@@ -525,16 +535,28 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     fetchData()
   }
 
-  async function saveManualMatch(tx: Transaction, type: string, tenantId: string, expenseId: string, notes: string, documentId?: string, referenceMonth?: string) {
+  async function saveManualMatch(tx: Transaction, type: string, tenantId: string, expenseId: string, notes: string, documentId?: string, referenceMonth?: string, incomeId?: string) {
     const confirmedLeaseId = tenantId ? (leases.find(l => (l.tenant as any)?.id === tenantId)?.id ?? null) : null
-    await supabase.from('bank_transactions').update({
+
+    const { error } = await supabase.from('bank_transactions').update({
       confirmed_type: type,
       confirmed_tenant_id: tenantId || null,
       confirmed_lease_id: confirmedLeaseId,
       confirmed_expense_id: expenseId || null,
+      // A receita tem campo próprio. Antes era guardada em confirmed_document_id,
+      // que aponta para a tabela de documentos — a base de dados recusava.
       confirmed_document_id: documentId || null,
+      confirmed_income_id: incomeId || null,
       notes: notes || null, status: 'validado',
     }).eq('id', tx.id)
+
+    // Sem isto, uma falha na gravação passava despercebida e a transação
+    // continuava a aparecer como "por validar" sem explicação.
+    if (error) {
+      alert(`⚠️ Não foi possível guardar a identificação:\n\n${error.message}`)
+      return
+    }
+
     setMatchModal(null)
     if (type === 'renda' && confirmedLeaseId) {
       const result = await processRendaTransaction({ ...tx, confirmed_type: 'renda', confirmed_tenant_id: tenantId || null, confirmed_lease_id: confirmedLeaseId }, referenceMonth)
@@ -1479,7 +1501,7 @@ function MatchModalComponent({ tx, tenants, leases, expenses, documents, autoMat
   documents: any[]
   autoMatches: any[]
   bankId: string
-  onSave: (tx: Transaction, type: string, tenantId: string, expenseId: string, notes: string, documentId?: string, referenceMonth?: string) => void
+  onSave: (tx: Transaction, type: string, tenantId: string, expenseId: string, notes: string, documentId?: string, referenceMonth?: string, incomeId?: string) => void
   onSaveRule: () => void
   onClose: () => void
 }) {
@@ -1494,7 +1516,7 @@ function MatchModalComponent({ tx, tenants, leases, expenses, documents, autoMat
   const [searchDoc, setSearchDoc] = useState('')
   const [saveAsRule, setSaveAsRule] = useState(false)
   const [ruleKeyword, setRuleKeyword] = useState('')
-  const [incomeId, setIncomeId] = useState('')
+  const [incomeId, setIncomeId] = useState(tx.confirmed_income_id ?? '')
   const [incomeRecords, setIncomeRecords] = useState<any[]>([])
   const [incomeCategoryInput, setIncomeCategoryInput] = useState('')
   const [creatingIncome, setCreatingIncome] = useState(false)
@@ -1870,7 +1892,12 @@ function MatchModalComponent({ tx, tenants, leases, expenses, documents, autoMat
               if (novaReceita) finalIncomeId = novaReceita.id
             }
 
-            onSave(tx, type, tenantId, expenseId, notes, type === 'receita_extraordinaria' ? (finalIncomeId || undefined) : (documentId || undefined), type === 'renda' ? referenceMonth : undefined)
+            onSave(
+              tx, type, tenantId, expenseId, notes,
+              documentId || undefined,
+              type === 'renda' ? referenceMonth : undefined,
+              type === 'receita_extraordinaria' ? (finalIncomeId || undefined) : undefined,
+            )
           }}>{creatingIncome ? 'A guardar...' : 'Guardar'}</button>
         </div>
       </div>
