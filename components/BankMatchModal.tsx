@@ -30,6 +30,8 @@ export interface BankTransaction {
   confirmed_tenant_id: string | null
   confirmed_document_id: string | null
   confirmed_income_id: string | null
+  /** Identificada mas deliberadamente fora de qualquer processamento automático. */
+  skip_processing?: boolean | null
   notes: string | null
 }
 
@@ -41,7 +43,7 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
   documents: any[]
   autoMatches: any[]
   bankId: string
-  onSave: (tx: BankTransaction, type: string, tenantId: string, expenseId: string, notes: string, documentId?: string, referenceMonth?: string, incomeId?: string) => void
+  onSave: (tx: BankTransaction, type: string, tenantId: string, expenseId: string, notes: string, documentId?: string, referenceMonth?: string, incomeId?: string, skipProcessing?: boolean) => void
   onSaveRule: () => void
   onClose: () => void
 }) {
@@ -55,6 +57,7 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
   const [documentId, setDocumentId] = useState(tx.confirmed_document_id ?? '')
   const [searchDoc, setSearchDoc] = useState('')
   const [saveAsRule, setSaveAsRule] = useState(false)
+  const [skipProcessing, setSkipProcessing] = useState(tx.skip_processing ?? false)
   const [ruleKeyword, setRuleKeyword] = useState('')
   const [incomeId, setIncomeId] = useState(tx.confirmed_income_id ?? '')
   const [incomeRecords, setIncomeRecords] = useState<any[]>([])
@@ -390,7 +393,24 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
           )}
         </div>
 
-        <div className="border-t border-gray-100 pt-4 mt-4">
+        <div className="border-t border-gray-100 pt-4 mt-4 space-y-3">
+          {/* Movimentos antigos: identificar sem mexer nas contas correntes */}
+          <label className={`flex items-start gap-2 cursor-pointer rounded-lg px-3 py-2 border transition-colors ${
+            skipProcessing ? 'bg-amber-50 border-amber-200' : 'bg-gray-50 border-gray-100'
+          }`}>
+            <input type="checkbox" className="rounded mt-0.5" checked={skipProcessing}
+              onChange={e => setSkipProcessing(e.target.checked)} />
+            <span className="text-xs">
+              <span className={`font-medium ${skipProcessing ? 'text-amber-800' : 'text-gray-700'}`}>
+                📁 Histórico — não processar
+              </span>
+              <span className="block text-gray-500 mt-0.5">
+                Identifica a transação mas não cria pagamentos nem despesas, agora nem no futuro.
+                Fica de fora dos botões de sincronização. Para movimentos antigos já tratados.
+              </span>
+            </span>
+          </label>
+
           <label className="flex items-center gap-2 cursor-pointer">
             <input type="checkbox" className="rounded" checked={saveAsRule} onChange={e => setSaveAsRule(e.target.checked)} />
             <span className="text-xs text-gray-600">Guardar como regra automática</span>
@@ -416,9 +436,9 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
               onSaveRule()
             }
 
-            // Receita sem registo escolhido: cria-a agora, com a origem indicada.
+            // Marcada como histórico: não cria nada, só identifica.
             let finalIncomeId = incomeId
-            if (type === 'receita_extraordinaria' && !incomeId) {
+            if (type === 'receita_extraordinaria' && !incomeId && !skipProcessing) {
               setCreatingIncome(true)
               const categoria = normalizeCategory(incomeCategoryInput) || 'outros'
               const { data: novaReceita } = await supabase.from('income_records').insert({
@@ -437,6 +457,7 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
               documentId || undefined,
               type === 'renda' ? referenceMonth : undefined,
               type === 'receita_extraordinaria' ? (finalIncomeId || undefined) : undefined,
+              skipProcessing,
             )
           }}>{creatingIncome ? 'A guardar...' : 'Guardar'}</button>
         </div>

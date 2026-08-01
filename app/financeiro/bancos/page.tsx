@@ -86,7 +86,7 @@ export default function BancosPage() {
       // Só créditos (entradas), de todas as contas
       const { data: creditData } = await supabase
         .from('bank_transactions')
-        .select('id, bank_id, transaction_date, description, amount, balance, reference, status, suggested_type, suggested_lease_id, confirmed_type, confirmed_tenant_id, confirmed_lease_id, confirmed_expense_id, confirmed_document_id, confirmed_income_id, notes')
+        .select('id, bank_id, transaction_date, description, amount, balance, reference, status, suggested_type, suggested_lease_id, confirmed_type, confirmed_tenant_id, confirmed_lease_id, confirmed_expense_id, confirmed_document_id, confirmed_income_id, skip_processing, notes')
         .gt('amount', 0)
         .order('transaction_date', { ascending: false })
       setCredits(creditData ?? [])
@@ -162,7 +162,7 @@ export default function BancosPage() {
   // extrato individual: grava, e depois processa renda ou despesa conforme o tipo.
   async function saveManualMatch(
     tx: any, type: string, tenantId: string, expenseId: string, notes: string,
-    documentId?: string, referenceMonth?: string, incomeId?: string,
+    documentId?: string, referenceMonth?: string, incomeId?: string, skipProcessing?: boolean,
   ) {
     const lease = tenantId ? leases.find(l => (l.tenant as any)?.id === tenantId) : null
 
@@ -173,6 +173,7 @@ export default function BancosPage() {
       confirmed_expense_id: expenseId || null,
       confirmed_document_id: documentId || null,
       confirmed_income_id: incomeId || null,
+      skip_processing: skipProcessing ?? false,
       notes: notes || null,
       status: 'validado',
     }).eq('id', tx.id)
@@ -183,6 +184,12 @@ export default function BancosPage() {
     }
 
     setMatchModal(null)
+
+    // Marcada como histórico: fica identificada e mais nada acontece.
+    if (skipProcessing) {
+      await fetchBanks()
+      return
+    }
 
     if (type === 'renda' && lease) {
       const mes = `${referenceMonth ?? tx.transaction_date.slice(0, 7)}-01`
@@ -438,7 +445,15 @@ export default function BancosPage() {
                               {c.transaction_date?.split('-').reverse().join('/')}
                             </td>
                             <td className="py-2 px-2 text-gray-800">{c.description}</td>
-                            <td className="py-2 px-2 text-gray-600 text-xs">{identificacaoLabel(c)}</td>
+                            <td className="py-2 px-2 text-gray-600 text-xs">
+                              {identificacaoLabel(c)}
+                              {c.skip_processing && (
+                                <span className="ml-1.5 text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded whitespace-nowrap"
+                                  title="Identificada como histórico — não gera pagamentos nem despesas">
+                                  📁 histórico
+                                </span>
+                              )}
+                            </td>
                             <td className="py-2 px-2 text-right font-semibold text-emerald-600 whitespace-nowrap">
                               +{formatCurrency(c.amount)}
                             </td>

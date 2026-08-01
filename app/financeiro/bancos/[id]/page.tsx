@@ -34,6 +34,8 @@ interface Transaction {
   confirmed_tenant_id: string | null
   confirmed_document_id: string | null
   confirmed_income_id: string | null
+  /** Identificada mas fora de qualquer processamento automático (histórico). */
+  skip_processing?: boolean | null
   notes: string | null
 }
 
@@ -401,6 +403,9 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
   // Devolve 'created' se criou, 'skipped' se já existia pagamento de renda para o mês,
   // 'cancelled' se o utilizador rejeitou o resumo, ou 'no_lease' se não há contrato associado.
   async function processRendaTransaction(tx: Transaction, overrideMonth?: string, skipConfirm?: boolean): Promise<'created' | 'skipped' | 'no_lease' | 'cancelled'> {
+    // Movimentos marcados como histórico nunca geram pagamentos, nem sequer
+    // através dos botões de sincronização (que não pedem confirmação).
+    if (tx.skip_processing) return 'no_lease'
     if (tx.confirmed_type !== 'renda' || !tx.confirmed_lease_id || tx.amount <= 0) return 'no_lease'
 
     const lease = allLeases.find(l => l.id === tx.confirmed_lease_id)
@@ -444,6 +449,10 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
   // Cria (ou reutiliza) a despesa correspondente a um débito validado como "despesa".
   // Toda a proteção anti-duplicação está em lib/bankExpense.ts + UNIQUE na BD.
   async function ensureExpense(tx: Transaction, documentId?: string | null) {
+    // Histórico: identificado, mas nunca gera despesa.
+    if (tx.skip_processing) {
+      return { outcome: 'not_expense' as const, expenseId: null, message: 'Marcada como histórico' }
+    }
     return ensureExpenseForTransaction(supabase, tx as any, { documentId })
   }
 
@@ -536,7 +545,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     fetchData()
   }
 
-  async function saveManualMatch(tx: Transaction, type: string, tenantId: string, expenseId: string, notes: string, documentId?: string, referenceMonth?: string, incomeId?: string) {
+  async function saveManualMatch(tx: Transaction, type: string, tenantId: string, expenseId: string, notes: string, documentId?: string, referenceMonth?: string, incomeId?: string, skipProcessing?: boolean) {
     const confirmedLeaseId = tenantId ? (leases.find(l => (l.tenant as any)?.id === tenantId)?.id ?? null) : null
 
     const { error } = await supabase.from('bank_transactions').update({
@@ -548,6 +557,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
       // que aponta para a tabela de documentos — a base de dados recusava.
       confirmed_document_id: documentId || null,
       confirmed_income_id: incomeId || null,
+      skip_processing: skipProcessing ?? false,
       notes: notes || null, status: 'validado',
     }).eq('id', tx.id)
 
@@ -559,6 +569,9 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     }
 
     setMatchModal(null)
+
+    // Marcada como histórico: identificada, mas sem gerar movimentos.
+    if (skipProcessing) { fetchData(); return }
     if (type === 'renda' && confirmedLeaseId) {
       const result = await processRendaTransaction({ ...tx, confirmed_type: 'renda', confirmed_tenant_id: tenantId || null, confirmed_lease_id: confirmedLeaseId }, referenceMonth)
       warnIfSkipped(result)
@@ -647,7 +660,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
   // existir despesa ligada (ou uma compatível), apenas liga.
   async function syncExpenses() {
     const candidates = transactions.filter(t =>
-      t.status === 'validado' && t.confirmed_type === 'despesa' && t.amount < 0
+      t.status === 'validado' && t.confirmed_type === 'despesa' && t.amount < 0 && !t.skip_processing
     )
     if (candidates.length === 0) { alert('Não há débitos validados como despesa para sincronizar.'); return }
     if (!window.confirm(`Verificar ${candidates.length} movimento(s) e criar as despesas em falta?\n\nMovimentos que já tenham despesa associada não serão duplicados.`)) return
@@ -663,8 +676,11 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
   }
 
   async function syncRentPayments() {
+    // Exclui explicitamente as marcadas como histórico: esta função não pede
+    // confirmação, por isso seria aqui que os pagamentos antigos apareceriam
+    // sem aviso.
     const candidates = transactions.filter(t =>
-      t.status === 'validado' && t.confirmed_type === 'renda' && t.confirmed_lease_id && t.amount > 0
+      t.status === 'validado' && t.confirmed_type === 'renda' && t.confirmed_lease_id && t.amount > 0 && !t.skip_processing
     )
     if (candidates.length === 0) { alert('Não há transações de renda validadas para sincronizar.'); return }
     setSyncing(true)
@@ -1259,6 +1275,12 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
                           <div>
                             <div className="flex items-center gap-2 flex-wrap">
                               <span className={`text-xs font-medium ${matchInfo.color}`}>{matchInfo.label}</span>
+                              {tx.skip_processing && (
+                                <span className="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded whitespace-nowrap"
+                                  title="Histórico — não gera pagamentos nem despesas, nem na sincronização">
+                                  📁 histórico
+                                </span>
+                              )}
                               {(matchInfo as any).filePath && (
                                 <a
                                   href={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/documents/${(matchInfo as any).filePath}`}

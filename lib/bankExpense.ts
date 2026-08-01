@@ -22,6 +22,8 @@ export interface BankTxLike {
   confirmed_type: string | null
   confirmed_expense_id: string | null
   confirmed_document_id: string | null
+  /** Marcada como histórico: identificada, mas fora de qualquer automatismo. */
+  skip_processing?: boolean | null
   notes: string | null
 }
 
@@ -85,6 +87,13 @@ export async function ensureExpenseForTransaction(
 ): Promise<BankExpenseResult> {
   try {
     const type = tx.confirmed_type
+
+    // Última linha de defesa: movimentos marcados como histórico nunca geram
+    // despesa, venha o pedido de onde vier. Está aqui — e não só nas páginas —
+    // para que qualquer código futuro que chame esta função fique coberto.
+    if (tx.skip_processing) {
+      return { outcome: 'not_expense', expenseId: null, message: 'Movimento marcado como histórico' }
+    }
 
     // Só débitos classificados como despesa entram aqui.
     if (!type || NON_EXPENSE_TYPES.has(type)) {
