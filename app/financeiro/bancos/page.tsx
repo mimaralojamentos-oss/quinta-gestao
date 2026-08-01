@@ -8,6 +8,8 @@ import { Plus, Building, CreditCard, ArrowUpRight, ArrowDownRight, Upload, Eye, 
 import { useFileDrop } from '@/lib/useFileDrop'
 import { useAuth } from '@/lib/auth-context'
 import { buildRentPaymentPlan, applyRentPaymentPlan } from '@/lib/rentPaymentPlan'
+import { ensureExpenseForTransaction } from '@/lib/bankExpense'
+import BankMatchModal from '@/components/BankMatchModal'
 import Link from 'next/link'
 
 interface Bank {
@@ -51,13 +53,10 @@ export default function BancosPage() {
   const [credits, setCredits] = useState<any[]>([])
   const [tenants, setTenants] = useState<any[]>([])
   const [leases, setLeases] = useState<any[]>([])
-  // Linha em processo de identificação (painel que abre por baixo)
-  const [identifying, setIdentifying] = useState<any | null>(null)
-  const [idType, setIdType] = useState('renda')
-  const [idTenantId, setIdTenantId] = useState('')
-  const [idMonth, setIdMonth] = useState('')
-  const [idNotes, setIdNotes] = useState('')
-  const [processing, setProcessing] = useState(false)
+  const [expenses, setExpenses] = useState<any[]>([])
+  const [documents, setDocuments] = useState<any[]>([])
+  // Transação a identificar — abre o mesmo ecrã completo do extrato individual
+  const [matchModal, setMatchModal] = useState<any | null>(null)
   const [showCredits, setShowCredits] = useState(true)
   const [creditSearch, setCreditSearch] = useState('')
   const [creditYear, setCreditYear] = useState('all')
@@ -87,7 +86,7 @@ export default function BancosPage() {
       // Só créditos (entradas), de todas as contas
       const { data: creditData } = await supabase
         .from('bank_transactions')
-        .select('id, bank_id, transaction_date, description, amount, balance, status, confirmed_type, confirmed_tenant_id, notes')
+        .select('id, bank_id, transaction_date, description, amount, balance, reference, status, suggested_type, suggested_lease_id, confirmed_type, confirmed_tenant_id, confirmed_lease_id, confirmed_expense_id, confirmed_document_id, confirmed_income_id, notes')
         .gt('amount', 0)
         .order('transaction_date', { ascending: false })
       setCredits(creditData ?? [])
@@ -100,6 +99,18 @@ export default function BancosPage() {
         .select('id, monthly_rent, tenant:tenants(id, name), space:spaces(ref)')
         .eq('status', 'ativo')
       setLeases(leasesData ?? [])
+
+      // Necessários ao ecrã completo de identificação
+      const { data: expensesData } = await supabase
+        .from('expenses').select('id, expense_date, description, amount, supplier, payment_method')
+        .eq('payment_method', 'banco').order('expense_date', { ascending: false })
+      setExpenses(expensesData ?? [])
+
+      const { data: docsData } = await supabase
+        .from('documents')
+        .select('id, original_name, tipo, supplier_name, amount, doc_date, expense_id, file_path')
+        .not('amount', 'is', null).eq('status', 'ativo')
+      setDocuments(docsData ?? [])
     } catch (e) {
       console.error(e)
     } finally {
@@ -147,70 +158,72 @@ export default function BancosPage() {
     ignorado: creditsBase.filter(c => c.status === 'ignorado').length,
   }
 
-  function abrirIdentificacao(c: any) {
-    setIdentifying(c)
-    setIdType(c.confirmed_type ?? 'renda')
-    setIdTenantId(c.confirmed_tenant_id ?? '')
-    setIdMonth(c.transaction_date?.slice(0, 7) ?? '')
-    setIdNotes(c.notes ?? '')
-  }
+  // Guarda a identificação feita no ecrã completo. Segue a mesma sequência do
+  // extrato individual: grava, e depois processa renda ou despesa conforme o tipo.
+  async function saveManualMatch(
+    tx: any, type: string, tenantId: string, expenseId: string, notes: string,
+    documentId?: string, referenceMonth?: string, incomeId?: string,
+  ) {
+    const lease = tenantId ? leases.find(l => (l.tenant as any)?.id === tenantId) : null
 
-  // Marca como validado e, tratando-se de renda, cria o pagamento com a mesma
-  // distribuição usada no extrato individual (renda → luz → dívidas → adiantamento).
-  async function validarEntrada(c: any, tipo: string, tenantId: string, mes: string, notas: string) {
-    setProcessing(true)
-    try {
-      const lease = tenantId ? leases.find(l => (l.tenant as any)?.id === tenantId) : null
+    const { error } = await supabase.from('bank_transactions').update({
+      confirmed_type: type,
+      confirmed_tenant_id: tenantId || null,
+      confirmed_lease_id: lease?.id ?? null,
+      confirmed_expense_id: expenseId || null,
+      confirmed_document_id: documentId || null,
+      confirmed_income_id: incomeId || null,
+      notes: notes || null,
+      status: 'validado',
+    }).eq('id', tx.id)
 
-      const { error } = await supabase.from('bank_transactions').update({
-        confirmed_type: tipo,
-        confirmed_tenant_id: tenantId || null,
-        confirmed_lease_id: lease?.id ?? null,
-        notes: notas || null,
-        status: 'validado',
-      }).eq('id', c.id)
+    if (error) {
+      alert(`⚠️ Não foi possível guardar a identificação:\n\n${error.message}`)
+      return
+    }
 
-      if (error) { alert(`⚠️ Não foi possível validar:\n\n${error.message}`); return }
+    setMatchModal(null)
 
-      if (tipo === 'renda' && lease) {
-        const referenceMonth = `${mes || c.transaction_date.slice(0, 7)}-01`
+    if (type === 'renda' && lease) {
+      const mes = `${referenceMonth ?? tx.transaction_date.slice(0, 7)}-01`
 
-        const { data: existentes } = await supabase
-          .from('rent_payments').select('id, tipo, amount')
-          .eq('lease_id', lease.id).eq('reference_month', referenceMonth)
+      const { data: existentes } = await supabase
+        .from('rent_payments').select('id, tipo, amount')
+        .eq('lease_id', lease.id).eq('reference_month', mes)
 
-        const jaPago = (existentes ?? [])
-          .filter((p: any) => p.tipo === 'renda' || !p.tipo)
-          .reduce((s: number, p: any) => s + (p.amount || 0), 0)
+      const jaPago = (existentes ?? [])
+        .filter((p: any) => p.tipo === 'renda' || !p.tipo)
+        .reduce((s: number, p: any) => s + (p.amount || 0), 0)
 
-        const plan = await buildRentPaymentPlan(supabase, {
-          leaseId: lease.id,
-          tenantId,
-          monthlyRent: lease.monthly_rent,
-          amount: c.amount,
-          referenceMonth,
-          alreadyPaidRenda: jaPago,
-        })
+      const plan = await buildRentPaymentPlan(supabase, {
+        leaseId: lease.id,
+        tenantId,
+        monthlyRent: lease.monthly_rent,
+        amount: tx.amount,
+        referenceMonth: mes,
+        alreadyPaidRenda: jaPago,
+      })
 
-        if (!window.confirm(`${plan.summary}\n\nConfirmar processamento deste pagamento?`)) {
-          setProcessing(false)
-          return
-        }
-
+      if (window.confirm(`${plan.summary}\n\nConfirmar processamento deste pagamento?`)) {
         await applyRentPaymentPlan(supabase, plan, {
           leaseId: lease.id,
           tenantId,
-          referenceMonth,
-          paymentDate: c.transaction_date,
+          referenceMonth: mes,
+          paymentDate: tx.transaction_date,
           paymentMethod: 'banco',
         })
       }
-
-      setIdentifying(null)
-      await fetchBanks()
-    } finally {
-      setProcessing(false)
+    } else if (type === 'despesa') {
+      const result = await ensureExpenseForTransaction(
+        supabase,
+        { ...tx, confirmed_type: 'despesa', confirmed_expense_id: expenseId || null, confirmed_document_id: documentId || null },
+        { documentId: documentId || null },
+      )
+      if (result.outcome === 'created') alert('✅ Despesa criada automaticamente a partir deste movimento.')
+      else if (result.outcome === 'error') alert(`⚠️ Não foi possível criar a despesa: ${result.message}`)
     }
+
+    await fetchBanks()
   }
 
   async function ignorarEntrada(c: any) {
@@ -445,7 +458,7 @@ export default function BancosPage() {
                               <td className="py-2 px-2 text-right whitespace-nowrap">
                                 {c.status === 'por_validar' ? (
                                   <div className="flex items-center gap-2 justify-end">
-                                    <button onClick={() => abrirIdentificacao(c)}
+                                    <button onClick={() => setMatchModal(c)}
                                       className="text-xs text-emerald-600 hover:underline font-medium">
                                       Identificar
                                     </button>
@@ -455,7 +468,7 @@ export default function BancosPage() {
                                     </button>
                                   </div>
                                 ) : (
-                                  <button onClick={() => abrirIdentificacao(c)}
+                                  <button onClick={() => setMatchModal(c)}
                                     className="text-xs text-gray-400 hover:text-blue-600">
                                     Editar
                                   </button>
@@ -464,71 +477,6 @@ export default function BancosPage() {
                             )}
                           </tr>
 
-                          {identifying?.id === c.id && (
-                            <tr className="bg-emerald-50/60">
-                              <td colSpan={canWrite ? 8 : 7} className="px-3 py-4">
-                                <div className="flex flex-wrap items-end gap-3">
-                                  <div>
-                                    <label className="text-xs font-medium text-gray-500 block mb-1">Tipo</label>
-                                    <select className="input text-sm w-44" value={idType} onChange={e => setIdType(e.target.value)}>
-                                      <option value="renda">🏠 Renda / Luz / Dívida</option>
-                                      <option value="receita_extraordinaria">💰 Receita</option>
-                                      <option value="transferencia_interna">🔄 Transf. interna</option>
-                                      <option value="outro">📝 Outro</option>
-                                    </select>
-                                  </div>
-
-                                  {idType === 'renda' && (
-                                    <>
-                                      <div>
-                                        <label className="text-xs font-medium text-gray-500 block mb-1">Inquilino</label>
-                                        <select className="input text-sm w-56" value={idTenantId} onChange={e => setIdTenantId(e.target.value)}>
-                                          <option value="">— Escolher —</option>
-                                          {leases.map(l => (
-                                            <option key={l.id} value={(l.tenant as any)?.id}>
-                                              {(l.tenant as any)?.name} · {(l.space as any)?.ref}
-                                            </option>
-                                          ))}
-                                        </select>
-                                      </div>
-                                      <div>
-                                        <label className="text-xs font-medium text-gray-500 block mb-1">Mês da renda</label>
-                                        <input type="month" className="input text-sm w-40" value={idMonth} onChange={e => setIdMonth(e.target.value)} />
-                                      </div>
-                                    </>
-                                  )}
-
-                                  {idType !== 'renda' && (
-                                    <div className="flex-1 min-w-48">
-                                      <label className="text-xs font-medium text-gray-500 block mb-1">Notas</label>
-                                      <input className="input text-sm" placeholder="ex: Juros, reembolso..." value={idNotes} onChange={e => setIdNotes(e.target.value)} />
-                                    </div>
-                                  )}
-
-                                  <div className="flex gap-2 ml-auto">
-                                    <button className="btn-secondary text-xs py-1.5 px-3" onClick={() => setIdentifying(null)}>
-                                      Cancelar
-                                    </button>
-                                    <button
-                                      className="btn-primary text-xs py-1.5 px-3"
-                                      disabled={processing || (idType === 'renda' && !idTenantId)}
-                                      onClick={() => validarEntrada(c, idType, idTenantId, idMonth, idNotes)}
-                                    >
-                                      {processing ? 'A validar...' : '✓ Validar'}
-                                    </button>
-                                  </div>
-                                </div>
-
-                                {idType === 'renda' && !idTenantId && (
-                                  <p className="text-xs text-amber-600 mt-2">Escolhe o inquilino para poder validar.</p>
-                                )}
-                                <p className="text-xs text-gray-500 mt-2">
-                                  Para casos mais complexos (associar fatura, despesa ou criar regra automática),
-                                  usa <Link href={`/financeiro/bancos/${c.bank_id}`} className="text-blue-600 hover:underline">o extrato desta conta</Link>.
-                                </p>
-                              </td>
-                            </tr>
-                          )}
                           </Fragment>
                         )
                       })}
@@ -552,6 +500,21 @@ export default function BancosPage() {
           bank={editBank}
           onClose={() => setShowModal(false)}
           onSaved={() => { setShowModal(false); fetchBanks() }}
+        />
+      )}
+
+      {matchModal && (
+        <BankMatchModal
+          tx={matchModal}
+          tenants={tenants}
+          leases={leases}
+          expenses={expenses}
+          documents={documents}
+          autoMatches={[]}
+          bankId={matchModal.bank_id}
+          onSave={saveManualMatch}
+          onSaveRule={fetchBanks}
+          onClose={() => setMatchModal(null)}
         />
       )}
     </AppLayout>
