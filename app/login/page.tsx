@@ -4,7 +4,20 @@ import { createClient } from '@/lib/supabase-client'
 import { logAccess } from '@/lib/logAccess'
 import { Home, Eye, EyeOff, Loader2 } from 'lucide-react'
 
-const images = ['/QdBC1.jpeg', '/QdBC2.jpeg']
+// Imagens de fundo do login, configuráveis por propriedade.
+//
+// A mesma base de código serve a Quinta e o Serpa Pinto, por isso as fotos
+// vêm de NEXT_PUBLIC_LOGIN_IMAGES — uma lista de caminhos separados por
+// vírgula, ex: "/serpa1.jpg,/serpa2.jpg". Sem a variável definida, mantém
+// as fotos da Quinta (comportamento anterior).
+const DEFAULT_IMAGES = ['/QdBC1.jpeg', '/QdBC2.jpeg']
+
+const images = (process.env.NEXT_PUBLIC_LOGIN_IMAGES ?? '')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean)
+
+const backgroundImages = images.length > 0 ? images : DEFAULT_IMAGES
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -17,7 +30,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      setCurrentImage(prev => (prev + 1) % images.length)
+      setCurrentImage(prev => (prev + 1) % backgroundImages.length)
     }, 5000)
     return () => clearInterval(interval)
   }, [])
@@ -36,7 +49,7 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden">
       {/* Imagens de fundo com transição */}
-      {images.map((img, idx) => (
+      {backgroundImages.map((img, idx) => (
         <div
           key={img}
           className="absolute inset-0 transition-opacity duration-1000"
@@ -88,9 +101,9 @@ export default function LoginPage() {
           </form>
         </div>
 
-        {/* Indicadores de imagem */}
+        {/* Indicadores de imagem — só fazem sentido com mais do que uma */}
         <div className="flex justify-center gap-2 mt-4">
-          {images.map((_, idx) => (
+          {backgroundImages.length > 1 && backgroundImages.map((_, idx) => (
             <button
               key={idx}
               onClick={() => setCurrentImage(idx)}
