@@ -69,6 +69,11 @@ export default function BancosPage() {
   const [creditYear, setCreditYear] = useState('all')
   const [creditBank, setCreditBank] = useState('all')
   const [creditStatus, setCreditStatus] = useState<'all' | 'por_validar' | 'validado' | 'ignorado'>('all')
+  // Entradas por omissão; o utilizador alterna para saídas quando quiser.
+  const [direcao, setDirecao] = useState<'entradas' | 'saidas'>('entradas')
+
+  /** Ao trocar de direção, fecha a linha aberta — deixaria de fazer sentido. */
+  function setDividaSeguro() { setMatchModal(null) }
 
   useEffect(() => { fetchBanks() }, [])
 
@@ -107,11 +112,12 @@ export default function BancosPage() {
       })
       setBanks(banksWithStats)
 
-      // Só créditos (entradas), de todas as contas
+      // Todos os movimentos de todas as contas. A separação entre entradas e
+      // saídas é feita no ecrã, para alternar sem nova consulta.
       const { data: creditData } = await supabase
         .from('bank_transactions')
         .select('id, bank_id, transaction_date, description, amount, balance, reference, status, suggested_type, suggested_lease_id, confirmed_type, confirmed_tenant_id, confirmed_lease_id, confirmed_expense_id, confirmed_document_id, confirmed_income_id, skip_processing, notes')
-        .gt('amount', 0)
+        .neq('amount', 0)
         .order('transaction_date', { ascending: false })
       setCredits(creditData ?? [])
 
@@ -149,6 +155,7 @@ export default function BancosPage() {
   ).sort((a, b) => b.localeCompare(a))
 
   const creditosFiltrados = credits.filter(c => {
+    if (direcao === 'entradas' ? c.amount <= 0 : c.amount >= 0) return false
     if (creditBank !== 'all' && c.bank_id !== creditBank) return false
     if (creditStatus !== 'all' && c.status !== creditStatus) return false
     if (creditYear !== 'all' && !c.transaction_date?.startsWith(creditYear)) return false
@@ -165,6 +172,7 @@ export default function BancosPage() {
   // Contagens por estado — respeitam os restantes filtros (conta, ano, pesquisa),
   // para o número no botão corresponder ao que se vê ao clicar.
   const creditsBase = credits.filter(c => {
+    if (direcao === 'entradas' ? c.amount <= 0 : c.amount >= 0) return false
     if (creditBank !== 'all' && c.bank_id !== creditBank) return false
     if (creditYear !== 'all' && !c.transaction_date?.startsWith(creditYear)) return false
     if (creditSearch) {
@@ -271,6 +279,13 @@ export default function BancosPage() {
     if (c.confirmed_type === 'receita_extraordinaria') return '💰 Receita'
     if (c.confirmed_type === 'transferencia_interna') return '🔄 Transf. interna'
     if (c.confirmed_type === 'outro') return `📝 ${c.notes ?? 'Outro'}`
+    // Tipos que só aparecem nas saídas
+    if (c.confirmed_type === 'despesa') {
+      const e = expenses.find(x => x.id === c.confirmed_expense_id)
+      return e ? `💸 ${e.description}` : '💸 Despesa'
+    }
+    if (c.confirmed_type === 'custos_bancarios') return `🏦 ${c.notes ?? 'Custos bancários'}`
+    if (c.confirmed_type === 'impostos') return `🧾 ${c.notes ?? 'Impostos'}`
     if (c.confirmed_type) return c.confirmed_type
     return '—'
   }
@@ -392,13 +407,39 @@ export default function BancosPage() {
           <div className="mt-6">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
-                <ArrowUpRight className="w-5 h-5 text-emerald-500" />
-                <h2 className="text-lg font-bold text-gray-900">Entradas de todas as contas</h2>
-                <span className="text-xs text-gray-400">só créditos</span>
+                {direcao === 'entradas'
+                  ? <ArrowUpRight className="w-5 h-5 text-emerald-500" />
+                  : <ArrowDownRight className="w-5 h-5 text-red-500" />}
+                <h2 className="text-lg font-bold text-gray-900">
+                  {direcao === 'entradas' ? 'Entradas' : 'Saídas'} de todas as contas
+                </h2>
+                <span className="text-xs text-gray-400">
+                  {direcao === 'entradas' ? 'só créditos' : 'só débitos'}
+                </span>
               </div>
-              <button onClick={() => setShowCredits(v => !v)} className="btn-secondary text-xs py-1.5 px-3">
-                {showCredits ? 'Esconder' : 'Mostrar'}
-              </button>
+
+              <div className="flex items-center gap-2">
+                {/* Alternar entre entradas e saídas */}
+                <div className="flex rounded-lg border border-gray-200 overflow-hidden">
+                  <button
+                    onClick={() => { setDirecao('entradas'); setDividaSeguro() }}
+                    className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                      direcao === 'entradas' ? 'bg-emerald-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
+                    }`}>
+                    ↑ Entradas
+                  </button>
+                  <button
+                    onClick={() => { setDirecao('saidas'); setDividaSeguro() }}
+                    className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                      direcao === 'saidas' ? 'bg-red-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
+                    }`}>
+                    ↓ Saídas
+                  </button>
+                </div>
+                <button onClick={() => setShowCredits(v => !v)} className="btn-secondary text-xs py-1.5 px-3">
+                  {showCredits ? 'Esconder' : 'Mostrar'}
+                </button>
+              </div>
             </div>
 
             {showCredits && (
@@ -444,16 +485,22 @@ export default function BancosPage() {
                   ))}
                 </div>
 
-                <div className="flex items-center justify-between bg-emerald-50 border border-emerald-100 rounded-lg px-4 py-2.5 mb-3">
-                  <span className="text-sm text-emerald-700">
-                    {creditosFiltrados.length} entrada(s)
+                <div className={`flex items-center justify-between rounded-lg px-4 py-2.5 mb-3 border ${
+                  direcao === 'entradas'
+                    ? 'bg-emerald-50 border-emerald-100'
+                    : 'bg-red-50 border-red-100'
+                }`}>
+                  <span className={`text-sm ${direcao === 'entradas' ? 'text-emerald-700' : 'text-red-700'}`}>
+                    {creditosFiltrados.length} {direcao === 'entradas' ? 'entrada(s)' : 'saída(s)'}
                     {creditStatus === 'por_validar' && ' por validar'}
                     {creditStatus === 'validado' && ' validadas'}
                     {creditStatus === 'ignorado' && ' ignoradas'}
                     {creditBank !== 'all' && ` · ${shortBankLabel(bankById[creditBank] ?? { name: '—' })}`}
                     {creditYear !== 'all' && ` · ${creditYear}`}
                   </span>
-                  <span className="text-xl font-bold text-emerald-700">{formatCurrency(totalCreditos)}</span>
+                  <span className={`text-xl font-bold ${direcao === 'entradas' ? 'text-emerald-700' : 'text-red-700'}`}>
+                    {formatCurrency(Math.abs(totalCreditos))}
+                  </span>
                 </div>
 
                 <div className="overflow-x-auto">
@@ -474,7 +521,7 @@ export default function BancosPage() {
                       {creditosFiltrados.length === 0 ? (
                         <tr>
                           <td colSpan={canWrite ? 8 : 7} className="py-8 text-center text-gray-400">
-                            Nenhuma entrada com estes filtros.
+                            Nenhuma {direcao === 'entradas' ? 'entrada' : 'saída'} com estes filtros.
                           </td>
                         </tr>
                       ) : creditosFiltrados.slice(0, 300).map(c => {
@@ -501,8 +548,10 @@ export default function BancosPage() {
                                 </span>
                               )}
                             </td>
-                            <td className="py-2 px-2 text-right font-semibold text-emerald-600 whitespace-nowrap">
-                              +{formatCurrency(c.amount)}
+                            <td className={`py-2 px-2 text-right font-semibold whitespace-nowrap ${
+                              c.amount >= 0 ? 'text-emerald-600' : 'text-red-600'
+                            }`}>
+                              {c.amount >= 0 ? '+' : ''}{formatCurrency(c.amount)}
                             </td>
                             <td className="py-2 px-2 text-right text-gray-500 whitespace-nowrap">
                               {c.balance != null ? formatCurrency(c.balance) : '—'}
