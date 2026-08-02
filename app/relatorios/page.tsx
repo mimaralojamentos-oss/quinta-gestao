@@ -257,7 +257,8 @@ export default function RelatoriosPage() {
       const linhas = tenants.map(t => {
         const tLeases = leases.filter(l => l.tenant_id === t.id)
         const leaseIds = tLeases.map(l => l.id)
-        const parcelas: { grupo: string; descricao: string; valor: number }[] = []
+        // `data` serve só para ordenar as parcelas cronologicamente no fim
+        const parcelas: { grupo: string; descricao: string; valor: number; data: string }[] = []
 
         // Rendas registadas sem data de pagamento
         for (const p of payments.filter(p => leaseIds.includes(p.lease_id) && !p.payment_date)) {
@@ -265,6 +266,7 @@ export default function RelatoriosPage() {
             grupo: 'Renda',
             descricao: `Renda de ${mesLegivel(p.reference_month)} (registada por pagar)`,
             valor: p.amount ?? 0,
+            data: p.reference_month ?? '',
           })
         }
 
@@ -298,6 +300,7 @@ export default function RelatoriosPage() {
                   ? `Renda de ${mesLegivel(mes)}${espacoRef ? ` · ${espacoRef}` : ''} — falta parte (${fmt(registado)} de ${fmt(rendaMes)})`
                   : `Renda de ${mesLegivel(mes)}${espacoRef ? ` · ${espacoRef}` : ''}`,
                 valor: emFalta,
+                data: `${mes}-01`,
               })
             }
             cursor.setMonth(cursor.getMonth() + 1)
@@ -320,6 +323,7 @@ export default function RelatoriosPage() {
               grupo: 'Eletricidade',
               descricao: `Luz — ${detalhes}`,
               valor: emFalta,
+              data: c.charge_date ?? c.reference_month ?? '',
             })
           }
         }
@@ -333,6 +337,7 @@ export default function RelatoriosPage() {
               grupo: 'Dívida',
               descricao: `${d.description}${pago > 0 ? ` (já pagou ${fmt(pago)})` : ''}`,
               valor: emFalta,
+              data: d.reference_date ?? '',
             })
           }
         }
@@ -346,8 +351,17 @@ export default function RelatoriosPage() {
             grupo: 'Crédito',
             descricao: `Adiantamento de ${mesLegivel(a.reference_month)}`,
             valor: -(a.amount ?? 0),
+            data: a.reference_month ?? '',
           })
         }
+
+        // Ordem cronológica: as parcelas são recolhidas por tipo, mas o que
+        // faz sentido ler é a linha do tempo da dívida.
+        parcelas.sort((a, b) => {
+          if (!a.data) return 1
+          if (!b.data) return -1
+          return a.data.localeCompare(b.data)
+        })
 
         const total = parcelas.reduce((s, p) => s + p.valor, 0)
         const porGrupo = {
