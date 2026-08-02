@@ -20,7 +20,14 @@ interface Bank {
   holder_name: string | null
   notes: string | null
   active: boolean
-  _stats?: { total_in: number; total_out: number; pending: number }
+  _stats?: {
+    total_in: number
+    total_out: number
+    pending: number
+    /** Saldo da última linha do extrato, e a data a que corresponde. */
+    saldo: number | null
+    saldo_data: string | null
+  }
 }
 
 /**
@@ -69,15 +76,32 @@ export default function BancosPage() {
     setLoading(true)
     try {
       const { data: banksData } = await supabase.from('banks').select('*').order('name')
-      const { data: txData } = await supabase.from('bank_transactions').select('bank_id, amount, status')
+      const { data: txData } = await supabase
+        .from('bank_transactions')
+        .select('bank_id, amount, status, balance, transaction_date, created_at')
+
       const banksWithStats = (banksData ?? []).map(bank => {
         const txs = (txData ?? []).filter(t => t.bank_id === bank.id)
+
+        // Saldo atual = saldo da última linha do extrato. Entre linhas do mesmo
+        // dia, fica a que foi importada por último, que é a ordem do extrato.
+        const comSaldo = txs
+          .filter(t => t.balance != null && t.transaction_date)
+          .sort((a, b) => {
+            const porData = String(b.transaction_date).localeCompare(String(a.transaction_date))
+            if (porData !== 0) return porData
+            return String(b.created_at ?? '').localeCompare(String(a.created_at ?? ''))
+          })
+        const ultima = comSaldo[0]
+
         return {
           ...bank,
           _stats: {
             total_in: txs.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0),
             total_out: txs.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0),
             pending: txs.filter(t => t.status === 'por_validar').length,
+            saldo: ultima?.balance ?? null,
+            saldo_data: ultima?.transaction_date ?? null,
           }
         }
       })
@@ -257,7 +281,17 @@ export default function BancosPage() {
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Bancos</h1>
-            <p className="text-sm text-gray-500 mt-1">Gestão de contas bancárias e extratos</p>
+            <p className="text-sm text-gray-500 mt-1">
+              Gestão de contas bancárias e extratos
+              {banks.filter(b => b._stats?.saldo != null).length > 1 && (
+                <span className="ml-2 text-gray-700">
+                  · Saldo somado:{' '}
+                  <strong>
+                    {formatCurrency(banks.reduce((s, b) => s + (b._stats?.saldo ?? 0), 0))}
+                  </strong>
+                </span>
+              )}
+            </p>
           </div>
           {canWrite && (
             <button className="btn-primary" onClick={() => { setEditBank(null); setShowModal(true) }}>
@@ -298,6 +332,19 @@ export default function BancosPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
+                    {bank._stats?.saldo != null && (
+                      <div className="text-right mr-1">
+                        <p className="text-xs text-gray-500">Saldo atual</p>
+                        <p className={`text-xl font-bold leading-tight ${bank._stats.saldo >= 0 ? 'text-gray-900' : 'text-red-600'}`}>
+                          {formatCurrency(bank._stats.saldo)}
+                        </p>
+                        {bank._stats.saldo_data && (
+                          <p className="text-[11px] text-gray-400">
+                            a {bank._stats.saldo_data.split('-').reverse().join('/')}
+                          </p>
+                        )}
+                      </div>
+                    )}
                     {bank._stats && bank._stats.pending > 0 && (
                       <span className="badge-amarelo">{bank._stats.pending} por validar</span>
                     )}
