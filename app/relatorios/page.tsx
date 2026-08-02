@@ -195,12 +195,37 @@ export default function RelatoriosPage() {
     try {
       const [tenantsRes, leasesRes, paymentsRes, debtsRes, debtPaymentsRes, elecRes] = await Promise.all([
         supabase.from('tenants').select('id, name, email'),
-        supabase.from('leases').select('id, tenant_id, monthly_rent, start_date, status, space:spaces(ref)'),
+        supabase.from('leases').select('id, tenant_id, monthly_rent, start_date, status, space_id, space:spaces(ref)'),
         supabase.from('rent_payments').select('id, lease_id, reference_month, payment_date, amount, tipo, used'),
         supabase.from('debts').select('id, tenant_id, description, original_amount, reference_date'),
         supabase.from('debt_payments').select('debt_id, amount'),
-        supabase.from('electricity_charges').select('id, lease_id, reference_month, amount, amount_paid').eq('paid', false),
+        supabase.from('electricity_charges').select('id, lease_id, reference_month, charge_date, units, amount, amount_paid').eq('paid', false),
       ])
+
+      // Leituras por espaço, para saber o período que cada cobrança cobre.
+      // A cobrança guarda só o mês de referência; o período real é o intervalo
+      // entre a leitura anterior e a leitura que gerou a cobrança.
+      const { data: readingsData } = await supabase
+        .from('electricity_readings')
+        .select('space_id, reading_date')
+        .order('reading_date', { ascending: true })
+
+      const leiturasPorEspaco = new Map<string, string[]>()
+      for (const r of readingsData ?? []) {
+        if (!r.space_id) continue
+        const lista = leiturasPorEspaco.get(r.space_id) ?? []
+        lista.push(r.reading_date)
+        leiturasPorEspaco.set(r.space_id, lista)
+      }
+
+      function periodoDaCobranca(spaceId: string | undefined, chargeDate: string | null): string | null {
+        if (!spaceId || !chargeDate) return null
+        const datas = leiturasPorEspaco.get(spaceId)
+        if (!datas) return null
+        const i = datas.indexOf(chargeDate)
+        if (i <= 0) return null
+        return `${formatDate(datas[i - 1])} a ${formatDate(chargeDate)}`
+      }
 
       const tenants = tenantsRes.data ?? []
       const leases = leasesRes.data ?? []
@@ -255,9 +280,17 @@ export default function RelatoriosPage() {
         for (const c of elecCharges.filter(c => leaseIds.includes(c.lease_id))) {
           const emFalta = Math.max(0, (c.amount ?? 0) - (c.amount_paid ?? 0))
           if (emFalta > 0) {
+            const lease = tLeases.find(l => l.id === c.lease_id)
+            const periodo = periodoDaCobranca(lease?.space_id, c.charge_date)
+            const detalhes = [
+              periodo ? `consumo de ${periodo}` : `mês de ${mesLegivel(c.reference_month)}`,
+              c.units != null ? `${Number(c.units).toFixed(0)} kWh` : null,
+              (c.amount_paid ?? 0) > 0 ? `já pagou ${fmt(c.amount_paid ?? 0)}` : null,
+            ].filter(Boolean).join(' · ')
+
             parcelas.push({
               grupo: 'Eletricidade',
-              descricao: `Luz de ${mesLegivel(c.reference_month)}${(c.amount_paid ?? 0) > 0 ? ' (parcialmente paga)' : ''}`,
+              descricao: `Luz — ${detalhes}`,
               valor: emFalta,
             })
           }
