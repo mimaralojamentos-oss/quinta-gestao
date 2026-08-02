@@ -71,7 +71,7 @@ export default function RelatoriosPage() {
 
   const [cobrancasSort, setCobrancasSort] = useState<'espaco' | 'nome' | 'renda'>('espaco')
   const [cobrancasSortDir, setCobrancasSortDir] = useState<'asc' | 'desc'>('asc')
-  const [emailTarget, setEmailTarget] = useState<{ name: string; email: string | null; spaceRef?: string; amount?: number | null; period?: string } | null>(null)
+  const [emailTarget, setEmailTarget] = useState<{ name: string; email: string | null; spaceRef?: string; amount?: number | null; period?: string; items?: any[] } | null>(null)
 
   const [exportingPDF, setExportingPDF] = useState(false)
 
@@ -1287,7 +1287,10 @@ export default function RelatoriosPage() {
                                 </button>
                                 {l.email && (
                                   <button
-                                    onClick={() => setEmailTarget({ name: l.nome, email: l.email, spaceRef: l.espacos[0], amount: l.total })}
+                                    onClick={() => setEmailTarget({
+                                      name: l.nome, email: l.email, spaceRef: l.espacos[0],
+                                      amount: l.total, items: l.parcelas,
+                                    })}
                                     className="text-xs text-emerald-600 hover:underline font-medium flex items-center gap-1"
                                   >
                                     <Mail className="w-3 h-3" /> Enviar e-mail sobre esta dívida
@@ -1958,6 +1961,7 @@ export default function RelatoriosPage() {
         spaceRef={emailTarget.spaceRef}
         amount={emailTarget.amount ?? null}
         periods={emailTarget.period ? [emailTarget.period] : undefined}
+        items={emailTarget.items}
         onClose={() => setEmailTarget(null)}
       />
     )}

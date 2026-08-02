@@ -6,8 +6,8 @@ import {
   AlertTriangle, SpellCheck, Users,
 } from 'lucide-react'
 import {
-  EMAIL_CONTEXT_LABELS, applySubjectPrefix, DEFAULT_SUBJECT_PREFIX,
-  type EmailContext, type EmailContextData,
+  EMAIL_CONTEXT_LABELS, EMAIL_TONES, applySubjectPrefix, DEFAULT_SUBJECT_PREFIX,
+  type EmailContext, type EmailContextData, type EmailItem, type EmailTone,
 } from '@/lib/emailConfig'
 import { logAccess } from '@/lib/logAccess'
 
@@ -43,11 +43,16 @@ export interface EmailComposerProps {
   freeMode?: boolean
   /** Contactos sugeridos no modo livre (inquilinos, administradores, etc.). */
   contacts?: EmailContact[]
+  /**
+   * Detalhe da dívida, parcela a parcela. Quando existe, o utilizador
+   * escolhe primeiro a abordagem do e-mail e o texto discrimina os valores.
+   */
+  items?: EmailItem[]
   onClose: () => void
   onSent?: () => void
 }
 
-type Step = 'compose' | 'review' | 'preview' | 'sent'
+type Step = 'tom' | 'compose' | 'review' | 'preview' | 'sent'
 
 /**
  * Módulo único de envio de e-mails da aplicação.
@@ -64,9 +69,12 @@ type Step = 'compose' | 'review' | 'preview' | 'sent'
  */
 export default function EmailComposer({
   context, tenantName, tenantEmail, spaceRef, amount, periods, date,
-  senderName = 'Miguel Severino', freeMode = false, contacts = [], onClose, onSent,
+  senderName = 'Miguel Severino', freeMode = false, contacts = [], items, onClose, onSent,
 }: EmailComposerProps) {
-  const [step, setStep] = useState<Step>('compose')
+  // Havendo detalhe da dívida, começa por perguntar a abordagem.
+  const temItens = (items?.length ?? 0) > 0
+  const [step, setStep] = useState<Step>(temItens ? 'tom' : 'compose')
+  const [tone, setTone] = useState<EmailTone>('divida_atraso')
 
   const [subject, setSubject] = useState('')
   const [body, setBody] = useState('')
@@ -124,12 +132,11 @@ export default function EmailComposer({
     loadRecipients()
   }, [])
 
-  // No modo com inquilino, a IA escreve logo ao abrir.
-  // No modo livre, começa em branco — o utilizador escreve, e só pede
-  // ajuda à IA se quiser.
-  useEffect(() => { if (!freeMode) generate() }, [])
+  // No modo com inquilino, a IA escreve logo ao abrir — exceto se houver
+  // abordagem a escolher primeiro. No modo livre começa em branco.
+  useEffect(() => { if (!freeMode && !temItens) generate() }, [])
 
-  async function generate(notes?: string) {
+  async function generate(notes?: string, toneOverride?: EmailTone) {
     setGenerating(true); setError('')
     setReviewed(false); setCorrections([]); setNoErrorsFound(false)
     try {
@@ -137,6 +144,8 @@ export default function EmailComposer({
         context,
         tenantName: freeMode ? (recipientName || 'destinatário') : tenantName,
         spaceRef, amount, periods, date,
+        items,
+        tone: toneOverride ?? tone,
         extraNotes: notes ?? null,
         senderName,
       }
@@ -272,6 +281,67 @@ export default function EmailComposer({
         </div>
         <div className="flex justify-end">
           <button className="btn-primary" onClick={onClose}>Fechar</button>
+        </div>
+      </Shell>
+    )
+  }
+
+  // ── Ecrã: escolher a abordagem ──
+  if (step === 'tom') {
+    const total = (items ?? []).reduce((s, i) => s + i.valor, 0)
+    return (
+      <Shell onClose={onClose} title="Que tipo de e-mail queres enviar?">
+        <p className="text-sm text-gray-500 mb-1">
+          Para <strong className="text-gray-800">{tenantName}</strong>
+          {spaceRef ? ` · ${spaceRef}` : ''} — {(items ?? []).length} rubrica(s), total de{' '}
+          <strong className="text-gray-800">
+            {total.toLocaleString('pt-PT', { style: 'currency', currency: 'EUR' })}
+          </strong>
+        </p>
+        <p className="text-xs text-gray-400 mb-4">
+          Todas as opções incluem o detalhe mês a mês. Muda apenas o tom.
+        </p>
+
+        <div className="space-y-2 mb-5">
+          {EMAIL_TONES.map(t => (
+            <button
+              key={t.value}
+              onClick={() => setTone(t.value)}
+              className={`w-full text-left rounded-lg border px-4 py-3 transition-colors ${
+                tone === t.value
+                  ? 'border-emerald-500 bg-emerald-50'
+                  : 'border-gray-200 hover:border-emerald-300 hover:bg-gray-50'
+              }`}
+            >
+              <p className={`text-sm font-medium ${tone === t.value ? 'text-emerald-800' : 'text-gray-800'}`}>
+                {t.emoji} {t.label}
+              </p>
+              <p className="text-xs text-gray-500 mt-0.5">{t.descricao}</p>
+            </button>
+          ))}
+        </div>
+
+        <details className="mb-5">
+          <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-700">
+            Ver as rubricas que vão ser incluídas
+          </summary>
+          <div className="mt-2 border border-gray-100 rounded-lg divide-y divide-gray-50">
+            {(items ?? []).map((i, idx) => (
+              <div key={idx} className="flex justify-between gap-3 px-3 py-1.5 text-xs">
+                <span className="text-gray-600">{i.descricao}</span>
+                <span className={`font-medium whitespace-nowrap ${i.valor < 0 ? 'text-emerald-600' : 'text-gray-800'}`}>
+                  {i.valor.toLocaleString('pt-PT', { style: 'currency', currency: 'EUR' })}
+                </span>
+              </div>
+            ))}
+          </div>
+        </details>
+
+        <div className="flex justify-end gap-3">
+          <button className="btn-secondary" onClick={onClose}>Cancelar</button>
+          <button className="btn-primary" onClick={() => { setStep('compose'); generate(undefined, tone) }}>
+            <Sparkles className="w-4 h-4" /> Escrever e-mail
+          </button>
         </div>
       </Shell>
     )
@@ -431,7 +501,19 @@ export default function EmailComposer({
         <div className="flex items-center justify-between mb-1">
           <label className="label mb-0">
             Mensagem
-            <span className="ml-2 text-xs font-normal text-gray-400">{EMAIL_CONTEXT_LABELS[context]}</span>
+            <span className="ml-2 text-xs font-normal text-gray-400">
+              {temItens
+                ? EMAIL_TONES.find(t => t.value === tone)?.label ?? EMAIL_CONTEXT_LABELS[context]
+                : EMAIL_CONTEXT_LABELS[context]}
+            </span>
+            {temItens && (
+              <button
+                onClick={() => setStep('tom')}
+                className="ml-2 text-xs font-normal text-blue-600 hover:underline"
+              >
+                mudar
+              </button>
+            )}
           </label>
           <button
             className="text-xs text-emerald-600 hover:underline disabled:text-gray-300 flex items-center gap-1"

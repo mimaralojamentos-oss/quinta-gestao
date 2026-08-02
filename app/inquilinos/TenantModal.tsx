@@ -1350,6 +1350,22 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
         tenantEmail={tenant.email}
         spaceRef={leases.find((l: any) => l.status === 'ativo')?.space?.ref ?? leases[0]?.space?.ref}
         amount={totalDebt > 0 ? totalDebt : null}
+        // Detalhe da conta corrente, para o e-mail poder discriminar
+        // rubrica a rubrica em vez de apresentar só o total.
+        items={totalDebt > 0
+          ? payments
+              .filter(p => !p.payment_date || (p as any).isPartialElec)
+              .map(p => ({
+                grupo: p.isElecCharge ? 'Eletricidade' : p.isManualDebt ? 'Dívida' : 'Renda',
+                descricao: p.isElecCharge
+                  ? `Eletricidade de ${formatDate(p.reference_month)}`
+                  : p.isManualDebt
+                    ? (p.notes ?? 'Dívida')
+                    : `Renda de ${formatDate(p.reference_month)}`,
+                valor: (p as any).isPartialElec ? ((p as any).remainingAmount ?? 0) : (p.amount ?? 0),
+              }))
+              .filter(i => i.valor > 0)
+          : undefined}
         onClose={() => setShowEmailModal(false)}
       />
     )}

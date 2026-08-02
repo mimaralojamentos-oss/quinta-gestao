@@ -20,21 +20,52 @@ export async function POST(request: Request) {
 
     const contextLabel = EMAIL_CONTEXT_LABELS[data.context] ?? 'Assunto geral'
 
+    const eur = (v: number) => `${Number(v).toFixed(2).replace('.', ',')} €`
+
+    const detalhe = (data.items ?? []).length > 0
+      ? `\nDetalhe das rubricas (usa-as TODAS no e-mail, uma por linha, com o respetivo valor):\n` +
+        (data.items ?? []).map(i => `- [${i.grupo}] ${i.descricao}: ${eur(i.valor)}`).join('\n')
+      : ''
+
     const factos = [
       `Destinatário: ${data.tenantName}`,
       data.spaceRef ? `Espaço arrendado: ${data.spaceRef}` : null,
-      data.amount != null
-        ? `Valor em causa: ${Number(data.amount).toFixed(2).replace('.', ',')} €`
-        : null,
+      data.amount != null ? `Valor total: ${eur(data.amount)}` : null,
       data.periods && data.periods.length > 0 ? `Períodos em causa: ${data.periods.join(', ')}` : null,
       data.date ? `Data relevante: ${data.date}` : null,
       data.extraNotes ? `Instruções adicionais do remetente: ${data.extraNotes}` : null,
-    ].filter(Boolean).join('\n')
+    ].filter(Boolean).join('\n') + detalhe
+
+    // Três abordagens para a mesma informação. A escolha é do utilizador.
+    const abordagens: Record<string, string> = {
+      divida_atraso: `ABORDAGEM: DÍVIDA EM ATRASO (firme mas educada).
+- Informa que existem valores em atraso e pede a regularização.
+- Discrimina TODAS as rubricas listadas acima, uma por linha, com o valor de cada uma.
+- Apresenta o total no fim.
+- Sê claro e direto, sem ameaças, sem prazos inventados e sem falar em consequências legais.`,
+
+      valores_pagar: `ABORDAGEM: VALORES A PAGAR (cordial e leve).
+- NUNCA uses as palavras "dívida", "atraso", "em falta", "devedor", "regularizar" ou "incumprimento".
+- Apresenta simplesmente os valores que estão por pagar, como um resumo de conta.
+- Discrimina TODAS as rubricas listadas acima, uma por linha, com o valor de cada uma.
+- Apresenta o total no fim.
+- Pede o pagamento "quando lhe for possível" ou "assim que puder". Tom compreensivo e sem pressão.
+- Termina com disponibilidade para combinar a melhor forma de pagamento.`,
+
+      informativo: `ABORDAGEM: INFORMATIVA (neutra).
+- É apenas um ponto de situação da conta. NÃO peças pagamento nem uses linguagem de cobrança.
+- Lista TODAS as rubricas em aberto, uma por linha, com o valor de cada uma, e o total.
+- Termina dizendo que é apenas para conhecimento e que ficas disponível para esclarecer qualquer questão.`,
+    }
+
+    const instrucaoTom = abordagens[data.tone ?? 'divida_atraso'] ?? abordagens.divida_atraso
 
     const prompt = `És assistente de um senhorio em Évora, Portugal, que gere alojamentos para arrendamento.
 Escreve um e-mail em PORTUGUÊS EUROPEU (de Portugal, nunca do Brasil) para enviar a um inquilino.
 
 Tipo de e-mail: ${contextLabel}
+
+${instrucaoTom}
 
 Factos reais a usar (não inventes nada além disto):
 ${factos}
@@ -45,7 +76,9 @@ Regras de redação:
 - Se um dado não foi fornecido, não o menciones nem uses marcadores como [valor] ou XXX.
 - Não incluas assinatura no final — a assinatura é acrescentada automaticamente pela aplicação.
 - Não incluas saudação de fecho do tipo "Com os melhores cumprimentos" — também é acrescentada.
-- Entre 4 e 10 linhas. Parágrafos curtos separados por linha em branco.
+- Quando houver rubricas a discriminar, escreve cada uma na sua linha, no formato
+  "• Descrição — valor €", e o total numa linha própria a seguir.
+- Sem rubricas, mantém entre 4 e 10 linhas. Parágrafos curtos separados por linha em branco.
 - Ortografia e gramática impecáveis em português europeu.
 - Se for um aviso de pagamento, sê firme mas educado, sem ameaças.
 

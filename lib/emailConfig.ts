@@ -43,6 +43,40 @@ export const EMAIL_CONTEXT_LABELS: Record<EmailContext, string> = {
   geral: '📋 Assunto geral',
 }
 
+/**
+ * Abordagem do e-mail de cobrança. A mesma informação, três registos
+ * diferentes — escolhidos pelo utilizador antes de o texto ser escrito.
+ */
+export type EmailTone = 'divida_atraso' | 'valores_pagar' | 'informativo'
+
+export const EMAIL_TONES: { value: EmailTone; label: string; descricao: string; emoji: string }[] = [
+  {
+    value: 'divida_atraso',
+    label: 'Dívida em atraso',
+    emoji: '⚠️',
+    descricao: 'Firme e direto. Trata os valores como dívida em atraso e pede regularização, com o detalhe mês a mês.',
+  },
+  {
+    value: 'valores_pagar',
+    label: 'Valores a pagar',
+    emoji: '🤝',
+    descricao: 'Cordial. Nunca fala em dívida nem em atraso — apresenta os valores a pagar e pede o pagamento quando for possível.',
+  },
+  {
+    value: 'informativo',
+    label: 'Informativo',
+    emoji: 'ℹ️',
+    descricao: 'Neutro. Informa das rubricas em aberto, sem pedir pagamento nem pressionar.',
+  },
+]
+
+/** Uma linha do detalhe (renda de um mês, uma fatura de luz, etc.). */
+export interface EmailItem {
+  grupo: string
+  descricao: string
+  valor: number
+}
+
 /** Dados que a IA recebe para redigir o e-mail. */
 export interface EmailContextData {
   context: EmailContext
@@ -54,6 +88,10 @@ export interface EmailContextData {
   periods?: string[]
   /** Data relevante (ex: data de renovação do contrato). */
   date?: string | null
+  /** Detalhe parcela a parcela, para o e-mail poder discriminar os valores. */
+  items?: EmailItem[]
+  /** Abordagem escolhida pelo utilizador. */
+  tone?: EmailTone
   /** Instruções livres do utilizador para a IA. */
   extraNotes?: string | null
 }
