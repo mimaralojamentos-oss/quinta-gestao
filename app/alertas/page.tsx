@@ -103,22 +103,32 @@ export default function AlertasPage() {
     setDismissed(dismissedKeys)
 
     const newAlerts: AlertItem[] = []
-    const paidLeaseIds = new Set((payments ?? []).filter(p => p.tipo === 'renda' || !p.tipo).map(p => p.lease_id))
+    // Um pagamento parcial não liquida o mês — o alerta mantém-se até
+    // o total recebido cobrir a renda.
+    const paidByLease = new Map<string, number>()
+    for (const p of (payments ?? []).filter(p => p.tipo === 'renda' || !p.tipo)) {
+      paidByLease.set(p.lease_id, (paidByLease.get(p.lease_id) ?? 0) + (p.amount ?? 0))
+    }
 
-    // Rendas em falta
+    // Rendas em falta (total ou parcial)
     ;(leases ?? []).forEach(l => {
-      if (!paidLeaseIds.has(l.id) && l.monthly_rent > 0) {
-        newAlerts.push({
-          id: `rent-${l.id}`,
-          type: 'renda_em_falta',
-          severity: 'high',
-          title: 'Renda por receber',
-          description: `Renda de ${getMonthLabel(currentMonth)} ainda não foi registada`,
-          spaceRef: l.space?.ref ?? '—',
-          tenantName: l.tenant?.name ?? '—',
-          value: l.monthly_rent,
-        })
-      }
+      if (l.monthly_rent <= 0) return
+      const recebido = paidByLease.get(l.id) ?? 0
+      const emFalta = parseFloat((l.monthly_rent - recebido).toFixed(2))
+      if (emFalta < 0.01) return
+
+      newAlerts.push({
+        id: `rent-${l.id}`,
+        type: 'renda_em_falta',
+        severity: 'high',
+        title: recebido > 0 ? 'Renda paga em parte' : 'Renda por receber',
+        description: recebido > 0
+          ? `Renda de ${getMonthLabel(currentMonth)}: recebidos ${formatCurrency(recebido)} de ${formatCurrency(l.monthly_rent)}`
+          : `Renda de ${getMonthLabel(currentMonth)} ainda não foi registada`,
+        spaceRef: l.space?.ref ?? '—',
+        tenantName: l.tenant?.name ?? '—',
+        value: emFalta,
+      })
     })
 
     // Contratos a renovar (baseado na próxima data de renovação)

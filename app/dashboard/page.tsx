@@ -70,8 +70,15 @@ export default function Dashboard() {
         return { ...meter, lastReadingDate: lastReading?.reading_date ?? null, lastReadingAmount: lastReading?.invoice_amount ?? null }
       })
 
-      const paidLeaseIds = new Set(payments.filter(p => p.tipo === 'renda' || !p.tipo).map(p => p.lease_id))
-      const pendingLeases = leases.filter(l => !paidLeaseIds.has(l.id) && l.monthly_rent > 0)
+      // Um pagamento parcial não liquida o mês: continua pendente enquanto
+      // o total recebido for inferior à renda.
+      const paidByLease = new Map<string, number>()
+      for (const p of payments.filter(p => p.tipo === 'renda' || !p.tipo)) {
+        paidByLease.set(p.lease_id, (paidByLease.get(p.lease_id) ?? 0) + (p.amount ?? 0))
+      }
+      const pendingLeases = leases.filter(l =>
+        l.monthly_rent > 0 && (paidByLease.get(l.id) ?? 0) < l.monthly_rent - 0.01
+      )
 
       setStats({
         totalSpaces: spaces.length,

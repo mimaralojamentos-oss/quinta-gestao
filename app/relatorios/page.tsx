@@ -205,6 +205,19 @@ export default function RelatoriosPage() {
         supabase.from('electricity_charges').select('id, lease_id, reference_month, charge_date, units, amount, amount_paid').eq('paid', false),
       ])
 
+      // Histórico de atualizações de renda: a renda de um mês antigo pode ser
+      // diferente da renda atual do contrato.
+      const { data: rentHistory } = await supabase
+        .from('lease_rent_history').select('lease_id, effective_date, monthly_rent')
+        .order('effective_date', { ascending: true })
+
+      function rendaDoMes(leaseId: string, mes: string, fallback: number): number {
+        const aplicaveis = (rentHistory ?? [])
+          .filter((h: any) => h.lease_id === leaseId && h.effective_date <= `${mes}-01`)
+          .sort((a: any, b: any) => b.effective_date.localeCompare(a.effective_date))
+        return aplicaveis[0]?.monthly_rent ?? fallback
+      }
+
       // Leituras por espaço, para saber o período que cada cobrança cobre.
       // A cobrança guarda só o mês de referência; o período real é o intervalo
       // entre a leitura anterior e a leitura que gerou a cobrança.
@@ -255,24 +268,36 @@ export default function RelatoriosPage() {
           })
         }
 
-        // Meses sem qualquer pagamento de renda
+        // Rendas em falta, mês a mês.
+        // Conta também os pagamentos PARCIAIS: se o mês tem 375 € de renda e
+        // só entraram 200 €, faltam 175 € — antes o mês era dado como pago
+        // só por existir um pagamento, e a diferença desaparecia da dívida.
         for (const lease of tLeases.filter(l => l.status === 'ativo')) {
           if (!lease.start_date) continue
           const inicio = new Date(lease.start_date)
           inicio.setDate(1)
           const cursor = new Date(inicio > mayStart ? inicio : mayStart)
+          const espacoRef = (lease.space as any)?.ref
+
           while (cursor <= hoje) {
             const mes = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`
-            const temPagamento = payments.some(p =>
+            const rendaMes = rendaDoMes(lease.id, mes, lease.monthly_rent)
+
+            const doMes = payments.filter(p =>
               p.lease_id === lease.id &&
               p.reference_month?.slice(0, 7) === mes &&
               (p.tipo === 'renda' || !p.tipo)
             )
-            if (!temPagamento && lease.monthly_rent > 0) {
+            const registado = doMes.reduce((s, p) => s + (p.amount ?? 0), 0)
+            const emFalta = parseFloat((rendaMes - registado).toFixed(2))
+
+            if (rendaMes > 0 && emFalta >= 0.01) {
               parcelas.push({
                 grupo: 'Renda',
-                descricao: `Renda de ${mesLegivel(mes)}${(lease.space as any)?.ref ? ` · ${(lease.space as any).ref}` : ''}`,
-                valor: lease.monthly_rent,
+                descricao: doMes.length > 0
+                  ? `Renda de ${mesLegivel(mes)}${espacoRef ? ` · ${espacoRef}` : ''} — falta parte (${fmt(registado)} de ${fmt(rendaMes)})`
+                  : `Renda de ${mesLegivel(mes)}${espacoRef ? ` · ${espacoRef}` : ''}`,
+                valor: emFalta,
               })
             }
             cursor.setMonth(cursor.getMonth() + 1)

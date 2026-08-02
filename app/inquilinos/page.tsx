@@ -99,6 +99,18 @@ export default function InquilinosPage() {
       .select('lease_id, amount, amount_paid')
       .eq('paid', false)
 
+    // Histórico de atualizações de renda — a renda de um mês antigo pode ser
+    // diferente da atual do contrato.
+    const { data: rentHistoryData } = await supabase
+      .from('lease_rent_history').select('lease_id, effective_date, monthly_rent')
+
+    const getRentForMonth = (leaseId: string, monthStr: string, fallback: number): number => {
+      const aplicaveis = (rentHistoryData ?? [])
+        .filter((h: any) => h.lease_id === leaseId && h.effective_date <= `${monthStr}-01`)
+        .sort((a: any, b: any) => b.effective_date.localeCompare(a.effective_date))
+      return aplicaveis[0]?.monthly_rent ?? fallback
+    }
+
     const mayStart = new Date('2026-05-01')
     const today = new Date()
     today.setDate(1)
@@ -114,6 +126,9 @@ export default function InquilinosPage() {
         .filter(p => leaseIds.includes(p.lease_id) && !p.payment_date)
         .reduce((sum, p) => sum + (p.amount ?? 0), 0)
 
+      // Rendas em falta mês a mês, incluindo pagamentos PARCIAIS.
+      // Antes bastava existir um pagamento no mês para o mês contar como
+      // liquidado, e a diferença em falta desaparecia da dívida.
       let missingDebt = 0
       for (const lease of leases.filter(l => l.status === 'ativo')) {
         if (!lease.start_date) continue
@@ -123,12 +138,17 @@ export default function InquilinosPage() {
         const cursor = new Date(start)
         while (cursor <= today) {
           const monthStr = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`
-          const hasPayment = (paymentsData ?? []).some(p =>
-            p.lease_id === lease.id &&
-            p.reference_month?.slice(0, 7) === monthStr &&
-            (p.tipo === 'renda' || !p.tipo)
-          )
-          if (!hasPayment) missingDebt += lease.monthly_rent
+          const rentForMonth = getRentForMonth(lease.id, monthStr, lease.monthly_rent)
+          const registered = (paymentsData ?? [])
+            .filter(p =>
+              p.lease_id === lease.id &&
+              p.reference_month?.slice(0, 7) === monthStr &&
+              (p.tipo === 'renda' || !p.tipo)
+            )
+            .reduce((s, p) => s + (p.amount ?? 0), 0)
+
+          const shortfall = parseFloat((rentForMonth - registered).toFixed(2))
+          if (shortfall >= 0.01) missingDebt += shortfall
           cursor.setMonth(cursor.getMonth() + 1)
         }
       }
