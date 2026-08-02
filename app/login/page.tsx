@@ -7,17 +7,21 @@ import { Home, Eye, EyeOff, Loader2 } from 'lucide-react'
 // Imagens de fundo do login, configuráveis por propriedade.
 //
 // A mesma base de código serve a Quinta e o Serpa Pinto, por isso as fotos
-// vêm de NEXT_PUBLIC_LOGIN_IMAGES — uma lista de caminhos separados por
-// vírgula, ex: "/serpa1.jpg,/serpa2.jpg". Sem a variável definida, mantém
-// as fotos da Quinta (comportamento anterior).
+// vêm de variáveis de ambiente — listas de caminhos separados por vírgula:
+//   NEXT_PUBLIC_LOGIN_IMAGES         → ecrãs largos (computador)
+//   NEXT_PUBLIC_LOGIN_IMAGES_MOBILE  → ecrãs estreitos (telemóvel)
+//
+// Uma foto panorâmica cortada num ecrã de telemóvel deixa de mostrar o que
+// interessa, por isso a versão vertical é servida separadamente. Sem
+// variáveis definidas, mantém as fotos da Quinta.
 const DEFAULT_IMAGES = ['/QdBC1.jpeg', '/QdBC2.jpeg']
 
-const images = (process.env.NEXT_PUBLIC_LOGIN_IMAGES ?? '')
-  .split(',')
-  .map(s => s.trim())
-  .filter(Boolean)
+function parseList(value: string | undefined): string[] {
+  return (value ?? '').split(',').map(s => s.trim()).filter(Boolean)
+}
 
-const backgroundImages = images.length > 0 ? images : DEFAULT_IMAGES
+const desktopImages = parseList(process.env.NEXT_PUBLIC_LOGIN_IMAGES)
+const mobileImages = parseList(process.env.NEXT_PUBLIC_LOGIN_IMAGES_MOBILE)
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -26,14 +30,30 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [currentImage, setCurrentImage] = useState(0)
+  // Decidido depois de montar, para o servidor e o navegador gerarem o mesmo HTML
+  const [isMobile, setIsMobile] = useState(false)
   const supabase = createClient()
 
+  const backgroundImages =
+    (isMobile && mobileImages.length > 0 ? mobileImages : desktopImages).length > 0
+      ? (isMobile && mobileImages.length > 0 ? mobileImages : desktopImages)
+      : DEFAULT_IMAGES
+
   useEffect(() => {
+    const mq = window.matchMedia('(max-width: 768px)')
+    const update = () => setIsMobile(mq.matches)
+    update()
+    mq.addEventListener('change', update)
+    return () => mq.removeEventListener('change', update)
+  }, [])
+
+  useEffect(() => {
+    if (backgroundImages.length < 2) return
     const interval = setInterval(() => {
       setCurrentImage(prev => (prev + 1) % backgroundImages.length)
     }, 5000)
     return () => clearInterval(interval)
-  }, [])
+  }, [backgroundImages.length])
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
