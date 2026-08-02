@@ -4,7 +4,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatDate } from '@/lib/utils'
-import { BarChart3, TrendingUp, Home, FileText, Calendar, ChevronDown, ChevronUp, Edit2, X, Save, ClipboardList, Download, Loader2, Receipt, Mail } from 'lucide-react'
+import { BarChart3, TrendingUp, Home, FileText, Calendar, ChevronDown, ChevronUp, Edit2, X, Save, ClipboardList, Download, Loader2, Receipt, Mail, AlertTriangle } from 'lucide-react'
 import EmailComposer from '@/components/EmailComposer'
 
 interface MonthOption { label: string; value: string }
@@ -33,6 +33,16 @@ const TIPO_LABELS: Record<string, string> = {
   outro: '📝 Outro',
 }
 
+/** "2026-07-01" ou "2026-07" → "Julho 2026" */
+function mesLegivel(valor: string | null | undefined): string {
+  if (!valor) return 'sem data'
+  const [ano, mes] = String(valor).split('-')
+  const nomes = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+    'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro']
+  const i = Number(mes) - 1
+  return nomes[i] ? `${nomes[i]} ${ano}` : String(valor)
+}
+
 export default function RelatoriosPage() {
   const supabase = createClient()
   const [activeReport, setActiveReport] = useState('rendas')
@@ -43,6 +53,8 @@ export default function RelatoriosPage() {
   const [ocupacao, setOcupacao] = useState<any>(null)
   const [financeiro, setFinanceiro] = useState<any>(null)
   const [contratos, setContratos] = useState<any>(null)
+  const [dividas, setDividas] = useState<any>(null)
+  const [dividaExpandida, setDividaExpandida] = useState<string | null>(null)
 
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null)
 
@@ -74,6 +86,7 @@ export default function RelatoriosPage() {
     if (activeReport === 'financeiro') fetchFinanceiro()
     if (activeReport === 'contratos') fetchContratos()
     if (activeReport === 'pagamentos') fetchPagamentos()
+    if (activeReport === 'dividas') fetchDividas()
   }, [activeReport, selectedMonth])
 
   useEffect(() => {
@@ -164,6 +177,144 @@ export default function RelatoriosPage() {
       .order('reference_month', { ascending: false })
     setContaCorrenteData(data ?? [])
     setLoadingCC(false)
+  }
+
+  /**
+   * Dívida por inquilino, decomposta parcela a parcela.
+   *
+   * Usa exatamente a mesma regra da página de Inquilinos, para os totais
+   * baterem certo entre os dois sítios:
+   *   rendas registadas por pagar
+   * + meses sem pagamento (só de contratos ativos, a partir de maio de 2026)
+   * + dívidas manuais em aberto
+   * + eletricidade por pagar
+   * − adiantamentos disponíveis
+   */
+  async function fetchDividas() {
+    setLoading(true)
+    try {
+      const [tenantsRes, leasesRes, paymentsRes, debtsRes, debtPaymentsRes, elecRes] = await Promise.all([
+        supabase.from('tenants').select('id, name, email'),
+        supabase.from('leases').select('id, tenant_id, monthly_rent, start_date, status, space:spaces(ref)'),
+        supabase.from('rent_payments').select('id, lease_id, reference_month, payment_date, amount, tipo, used'),
+        supabase.from('debts').select('id, tenant_id, description, original_amount, reference_date'),
+        supabase.from('debt_payments').select('debt_id, amount'),
+        supabase.from('electricity_charges').select('id, lease_id, reference_month, amount, amount_paid').eq('paid', false),
+      ])
+
+      const tenants = tenantsRes.data ?? []
+      const leases = leasesRes.data ?? []
+      const payments = paymentsRes.data ?? []
+      const debts = debtsRes.data ?? []
+      const debtPayments = debtPaymentsRes.data ?? []
+      const elecCharges = elecRes.data ?? []
+
+      const mayStart = new Date('2026-05-01')
+      const hoje = new Date()
+      hoje.setDate(1)
+
+      const linhas = tenants.map(t => {
+        const tLeases = leases.filter(l => l.tenant_id === t.id)
+        const leaseIds = tLeases.map(l => l.id)
+        const parcelas: { grupo: string; descricao: string; valor: number }[] = []
+
+        // Rendas registadas sem data de pagamento
+        for (const p of payments.filter(p => leaseIds.includes(p.lease_id) && !p.payment_date)) {
+          parcelas.push({
+            grupo: 'Renda',
+            descricao: `Renda de ${mesLegivel(p.reference_month)} (registada por pagar)`,
+            valor: p.amount ?? 0,
+          })
+        }
+
+        // Meses sem qualquer pagamento de renda
+        for (const lease of tLeases.filter(l => l.status === 'ativo')) {
+          if (!lease.start_date) continue
+          const inicio = new Date(lease.start_date)
+          inicio.setDate(1)
+          const cursor = new Date(inicio > mayStart ? inicio : mayStart)
+          while (cursor <= hoje) {
+            const mes = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`
+            const temPagamento = payments.some(p =>
+              p.lease_id === lease.id &&
+              p.reference_month?.slice(0, 7) === mes &&
+              (p.tipo === 'renda' || !p.tipo)
+            )
+            if (!temPagamento && lease.monthly_rent > 0) {
+              parcelas.push({
+                grupo: 'Renda',
+                descricao: `Renda de ${mesLegivel(mes)}${(lease.space as any)?.ref ? ` · ${(lease.space as any).ref}` : ''}`,
+                valor: lease.monthly_rent,
+              })
+            }
+            cursor.setMonth(cursor.getMonth() + 1)
+          }
+        }
+
+        // Eletricidade por pagar
+        for (const c of elecCharges.filter(c => leaseIds.includes(c.lease_id))) {
+          const emFalta = Math.max(0, (c.amount ?? 0) - (c.amount_paid ?? 0))
+          if (emFalta > 0) {
+            parcelas.push({
+              grupo: 'Eletricidade',
+              descricao: `Luz de ${mesLegivel(c.reference_month)}${(c.amount_paid ?? 0) > 0 ? ' (parcialmente paga)' : ''}`,
+              valor: emFalta,
+            })
+          }
+        }
+
+        // Dívidas manuais
+        for (const d of debts.filter(d => d.tenant_id === t.id)) {
+          const pago = debtPayments.filter(p => p.debt_id === d.id).reduce((s, p) => s + p.amount, 0)
+          const emFalta = Math.max(0, d.original_amount - pago)
+          if (emFalta > 0) {
+            parcelas.push({
+              grupo: 'Dívida',
+              descricao: `${d.description}${pago > 0 ? ` (já pagou ${fmt(pago)})` : ''}`,
+              valor: emFalta,
+            })
+          }
+        }
+
+        // Adiantamentos disponíveis (abatem à dívida)
+        const adiantamentos = payments.filter(p =>
+          leaseIds.includes(p.lease_id) && p.tipo === 'adiantamento' && !p.used
+        )
+        for (const a of adiantamentos) {
+          parcelas.push({
+            grupo: 'Crédito',
+            descricao: `Adiantamento de ${mesLegivel(a.reference_month)}`,
+            valor: -(a.amount ?? 0),
+          })
+        }
+
+        const total = parcelas.reduce((s, p) => s + p.valor, 0)
+        const porGrupo = {
+          Renda: parcelas.filter(p => p.grupo === 'Renda').reduce((s, p) => s + p.valor, 0),
+          Eletricidade: parcelas.filter(p => p.grupo === 'Eletricidade').reduce((s, p) => s + p.valor, 0),
+          Dívida: parcelas.filter(p => p.grupo === 'Dívida').reduce((s, p) => s + p.valor, 0),
+          Crédito: parcelas.filter(p => p.grupo === 'Crédito').reduce((s, p) => s + p.valor, 0),
+        }
+        const espacos = tLeases.filter(l => l.status === 'ativo').map(l => (l.space as any)?.ref).filter(Boolean)
+
+        return { id: t.id, nome: t.name, email: t.email, espacos, parcelas, porGrupo, total }
+      })
+        .filter(l => Math.abs(l.total) >= 0.01)
+        .sort((a, b) => b.total - a.total)
+
+      setDividas({
+        linhas,
+        total: linhas.reduce((s, l) => s + l.total, 0),
+        totalRenda: linhas.reduce((s, l) => s + l.porGrupo.Renda, 0),
+        totalLuz: linhas.reduce((s, l) => s + l.porGrupo.Eletricidade, 0),
+        totalManual: linhas.reduce((s, l) => s + l.porGrupo.Dívida, 0),
+        totalCredito: linhas.reduce((s, l) => s + l.porGrupo.Crédito, 0),
+      })
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setLoading(false)
+    }
   }
 
   async function fetchOcupacao() {
@@ -592,6 +743,7 @@ export default function RelatoriosPage() {
     { key: 'contratos', label: 'Contratos a Expirar', icon: Calendar, color: 'text-orange-600', bg: 'bg-orange-50' },
     { key: 'cobrancas', label: 'Lista de Cobrancas', icon: ClipboardList, color: 'text-rose-600', bg: 'bg-rose-50' },
     { key: 'pagamentos', label: 'Pagamentos dos Inquilinos', icon: Receipt, color: 'text-teal-600', bg: 'bg-teal-50' },
+    { key: 'dividas', label: 'Dividas', icon: AlertTriangle, color: 'text-red-600', bg: 'bg-red-50' },
   ]
 
   const showMonthPicker = activeReport === 'rendas' || activeReport === 'financeiro' || activeReport === 'cobrancas'
@@ -761,6 +913,142 @@ export default function RelatoriosPage() {
                     </div>
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* DIVIDAS */}
+            {activeReport === 'dividas' && dividas && (
+              <div className="space-y-5">
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                  <div className="bg-red-50 border border-red-200 rounded-xl p-4 col-span-2 sm:col-span-1">
+                    <p className="text-xs text-red-600 mb-1">Dívida total</p>
+                    <p className="text-2xl font-bold text-red-700">{fmt(dividas.total)}</p>
+                    <p className="text-xs text-red-500 mt-0.5">{dividas.linhas.length} inquilino(s)</p>
+                  </div>
+                  <div className="bg-white border border-gray-200 rounded-xl p-4">
+                    <p className="text-xs text-gray-500 mb-1">Rendas</p>
+                    <p className="text-lg font-bold text-gray-900">{fmt(dividas.totalRenda)}</p>
+                  </div>
+                  <div className="bg-white border border-gray-200 rounded-xl p-4">
+                    <p className="text-xs text-gray-500 mb-1">Eletricidade</p>
+                    <p className="text-lg font-bold text-gray-900">{fmt(dividas.totalLuz)}</p>
+                  </div>
+                  <div className="bg-white border border-gray-200 rounded-xl p-4">
+                    <p className="text-xs text-gray-500 mb-1">Dívidas manuais</p>
+                    <p className="text-lg font-bold text-gray-900">{fmt(dividas.totalManual)}</p>
+                  </div>
+                  <div className="bg-white border border-gray-200 rounded-xl p-4">
+                    <p className="text-xs text-gray-500 mb-1">Créditos a abater</p>
+                    <p className="text-lg font-bold text-emerald-600">{fmt(Math.abs(dividas.totalCredito))}</p>
+                  </div>
+                </div>
+
+                {dividas.linhas.length === 0 ? (
+                  <div className="bg-white border border-gray-200 rounded-xl p-10 text-center">
+                    <p className="text-gray-500">Nenhum inquilino com dívida em aberto.</p>
+                  </div>
+                ) : (
+                  <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                    <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
+                      <p className="font-semibold text-gray-900 text-sm">Dívida por inquilino</p>
+                      <p className="text-xs text-gray-400">clica numa linha para ver a decomposição</p>
+                    </div>
+
+                    {dividas.linhas.map((l: any) => {
+                      const aberta = dividaExpandida === l.id
+                      return (
+                        <div key={l.id} className="border-b border-gray-50 last:border-0">
+                          <button
+                            onClick={() => setDividaExpandida(aberta ? null : l.id)}
+                            className="w-full px-5 py-3 flex items-center gap-3 hover:bg-gray-50 text-left print:hover:bg-transparent"
+                          >
+                            {aberta
+                              ? <ChevronUp className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                              : <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />}
+                            <div className="flex-1 min-w-0">
+                              <p className="font-medium text-gray-900 text-sm">{l.nome}</p>
+                              <p className="text-xs text-gray-500">
+                                {l.espacos.length > 0 ? l.espacos.join(', ') : 'sem espaço ativo'} · {l.parcelas.length} parcela(s)
+                              </p>
+                            </div>
+                            <div className="hidden sm:flex items-center gap-3 text-xs">
+                              {l.porGrupo.Renda > 0 && (
+                                <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full whitespace-nowrap">
+                                  Rendas {fmt(l.porGrupo.Renda)}
+                                </span>
+                              )}
+                              {l.porGrupo.Eletricidade > 0 && (
+                                <span className="bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full whitespace-nowrap">
+                                  Luz {fmt(l.porGrupo.Eletricidade)}
+                                </span>
+                              )}
+                              {l.porGrupo['Dívida'] > 0 && (
+                                <span className="bg-purple-50 text-purple-700 px-2 py-0.5 rounded-full whitespace-nowrap">
+                                  Dívidas {fmt(l.porGrupo['Dívida'])}
+                                </span>
+                              )}
+                              {l.porGrupo['Crédito'] < 0 && (
+                                <span className="bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full whitespace-nowrap">
+                                  Crédito {fmt(Math.abs(l.porGrupo['Crédito']))}
+                                </span>
+                              )}
+                            </div>
+                            <span className={`font-bold text-sm whitespace-nowrap ${l.total > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                              {fmt(l.total)}
+                            </span>
+                          </button>
+
+                          {aberta && (
+                            <div className="px-5 pb-4 bg-gray-50/60">
+                              <table className="w-full text-sm">
+                                <tbody>
+                                  {l.parcelas.map((p: any, i: number) => (
+                                    <tr key={i} className="border-b border-gray-100 last:border-0">
+                                      <td className="py-1.5 pr-3 w-28">
+                                        <span className={`text-xs px-2 py-0.5 rounded-full whitespace-nowrap ${
+                                          p.grupo === 'Renda' ? 'bg-gray-100 text-gray-600'
+                                          : p.grupo === 'Eletricidade' ? 'bg-amber-50 text-amber-700'
+                                          : p.grupo === 'Dívida' ? 'bg-purple-50 text-purple-700'
+                                          : 'bg-emerald-50 text-emerald-700'
+                                        }`}>
+                                          {p.grupo}
+                                        </span>
+                                      </td>
+                                      <td className="py-1.5 text-gray-700">{p.descricao}</td>
+                                      <td className={`py-1.5 text-right font-medium whitespace-nowrap ${p.valor < 0 ? 'text-emerald-600' : 'text-gray-900'}`}>
+                                        {fmt(p.valor)}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                  <tr className="border-t-2 border-gray-200">
+                                    <td colSpan={2} className="py-2 font-semibold text-gray-800">Total</td>
+                                    <td className={`py-2 text-right font-bold ${l.total > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                                      {fmt(l.total)}
+                                    </td>
+                                  </tr>
+                                </tbody>
+                              </table>
+
+                              {l.email && (
+                                <button
+                                  onClick={() => setEmailTarget({ name: l.nome, email: l.email, spaceRef: l.espacos[0], amount: l.total })}
+                                  className="mt-3 text-xs text-emerald-600 hover:underline font-medium flex items-center gap-1 print:hidden"
+                                >
+                                  <Mail className="w-3 h-3" /> Enviar e-mail sobre esta dívida
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+
+                <p className="text-xs text-gray-400">
+                  As rendas em falta contam a partir de maio de 2026 e apenas para contratos ativos.
+                  Ao terminar um contrato, os meses seguintes deixam de ser contabilizados.
+                </p>
               </div>
             )}
 
