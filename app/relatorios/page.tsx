@@ -4,7 +4,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatDate } from '@/lib/utils'
-import { BarChart3, TrendingUp, Home, FileText, Calendar, ChevronDown, ChevronUp, Edit2, X, Save, ClipboardList, Download, Loader2, Receipt, Mail, AlertTriangle } from 'lucide-react'
+import { BarChart3, TrendingUp, Home, FileText, Calendar, ChevronDown, ChevronUp, Edit2, X, Save, ClipboardList, Download, Loader2, Receipt, Mail, AlertTriangle, Printer } from 'lucide-react'
 import EmailComposer from '@/components/EmailComposer'
 
 interface MonthOption { label: string; value: string }
@@ -45,7 +45,7 @@ function mesLegivel(valor: string | null | undefined): string {
 
 export default function RelatoriosPage() {
   const supabase = createClient()
-  const [activeReport, setActiveReport] = useState('rendas')
+  const [activeReport, setActiveReport] = useState('dividas')
   const [selectedMonth, setSelectedMonth] = useState(MONTHS[0].value)
   const [loading, setLoading] = useState(false)
 
@@ -55,6 +55,9 @@ export default function RelatoriosPage() {
   const [contratos, setContratos] = useState<any>(null)
   const [dividas, setDividas] = useState<any>(null)
   const [dividaExpandida, setDividaExpandida] = useState<string | null>(null)
+  const [dividaOrdem, setDividaOrdem] = useState<'valor' | 'espaco'>('valor')
+  const [dividaOrdemDir, setDividaOrdemDir] = useState<'asc' | 'desc'>('desc')
+  const [dividaFiltro, setDividaFiltro] = useState('all')
 
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null)
 
@@ -348,6 +351,134 @@ export default function RelatoriosPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  /** Etiqueta "A10 - Fernando" usada no filtro e nos cabeçalhos. */
+  function etiquetaInquilino(l: any): string {
+    const espaco = l.espacos?.[0]
+    return espaco ? `${espaco} - ${l.nome}` : l.nome
+  }
+
+  const dividasOrdenadas: any[] = (() => {
+    if (!dividas) return []
+    const lista = dividas.linhas.filter((l: any) => dividaFiltro === 'all' || l.id === dividaFiltro)
+    const dir = dividaOrdemDir === 'asc' ? 1 : -1
+    return [...lista].sort((a, b) => {
+      if (dividaOrdem === 'espaco') {
+        // Sem espaço ativo vai para o fim, seja qual for a direção
+        const ea = a.espacos?.[0] ?? ''
+        const eb = b.espacos?.[0] ?? ''
+        if (!ea && !eb) return 0
+        if (!ea) return 1
+        if (!eb) return -1
+        return dir * ea.localeCompare(eb, 'pt', { numeric: true })
+      }
+      return dir * (a.total - b.total)
+    })
+  })()
+
+  function alternarOrdem(campo: 'valor' | 'espaco') {
+    if (dividaOrdem === campo) setDividaOrdemDir(d => (d === 'asc' ? 'desc' : 'asc'))
+    else { setDividaOrdem(campo); setDividaOrdemDir(campo === 'espaco' ? 'asc' : 'desc') }
+  }
+
+  /** Folha A4 com a decomposição da dívida de um inquilino. */
+  function imprimirDivida(l: any) {
+    const hoje = new Date().toLocaleDateString('pt-PT')
+    const propriedade = process.env.NEXT_PUBLIC_APP_NAME ?? 'Gestão de Alojamentos'
+    const local = process.env.NEXT_PUBLIC_APP_LOCATION ?? 'Évora'
+
+    const linhas = l.parcelas.map((p: any) => `
+      <tr>
+        <td class="grupo">${p.grupo}</td>
+        <td>${p.descricao}</td>
+        <td class="valor ${p.valor < 0 ? 'credito' : ''}">${fmt(p.valor)}</td>
+      </tr>`).join('')
+
+    const resumo = [
+      l.porGrupo.Renda > 0 ? `<tr><td>Rendas em atraso</td><td class="valor">${fmt(l.porGrupo.Renda)}</td></tr>` : '',
+      l.porGrupo.Eletricidade > 0 ? `<tr><td>Eletricidade</td><td class="valor">${fmt(l.porGrupo.Eletricidade)}</td></tr>` : '',
+      l.porGrupo['Dívida'] > 0 ? `<tr><td>Outras dívidas</td><td class="valor">${fmt(l.porGrupo['Dívida'])}</td></tr>` : '',
+      l.porGrupo['Crédito'] < 0 ? `<tr><td>Créditos a abater</td><td class="valor credito">${fmt(l.porGrupo['Crédito'])}</td></tr>` : '',
+    ].filter(Boolean).join('')
+
+    const html = `<!DOCTYPE html>
+<html lang="pt"><head><meta charset="UTF-8"><title>Divida - ${l.nome}</title>
+<style>
+  @page { size: A4; margin: 20mm; }
+  * { box-sizing: border-box; }
+  body { font-family: Arial, Helvetica, sans-serif; color: #1f2937; font-size: 12px; margin: 0; }
+  .cabecalho { border-bottom: 2px solid #059669; padding-bottom: 12px; margin-bottom: 20px;
+               display: flex; justify-content: space-between; align-items: flex-end; }
+  .cabecalho h1 { margin: 0; font-size: 20px; color: #059669; }
+  .cabecalho .sub { color: #6b7280; font-size: 11px; margin-top: 2px; }
+  .cabecalho .data { text-align: right; color: #6b7280; font-size: 11px; }
+  .ficha { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px;
+           padding: 12px 16px; margin-bottom: 20px; }
+  .ficha .nome { font-size: 15px; font-weight: bold; }
+  .ficha .espaco { color: #6b7280; font-size: 11px; margin-top: 2px; }
+  h2 { font-size: 13px; margin: 22px 0 8px; color: #374151; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .04em;
+       color: #6b7280; border-bottom: 1px solid #d1d5db; padding: 6px 4px; }
+  td { padding: 6px 4px; border-bottom: 1px solid #f3f4f6; vertical-align: top; }
+  td.grupo { width: 90px; color: #6b7280; font-size: 11px; }
+  td.valor, th.valor { text-align: right; white-space: nowrap; }
+  td.credito { color: #059669; }
+  .total { margin-top: 16px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 6px;
+           padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; }
+  .total .rotulo { font-weight: bold; font-size: 13px; }
+  .total .montante { font-size: 22px; font-weight: bold; color: #dc2626; }
+  .rodape { margin-top: 28px; padding-top: 10px; border-top: 1px solid #e5e7eb;
+            color: #9ca3af; font-size: 10px; }
+  .assinatura { margin-top: 42px; display: flex; gap: 60px; }
+  .assinatura div { flex: 1; border-top: 1px solid #9ca3af; padding-top: 5px;
+                    font-size: 10px; color: #6b7280; text-align: center; }
+</style></head><body>
+  <div class="cabecalho">
+    <div>
+      <h1>Extrato de conta</h1>
+      <div class="sub">${propriedade} · ${local}</div>
+    </div>
+    <div class="data">Emitido em ${hoje}</div>
+  </div>
+
+  <div class="ficha">
+    <div class="nome">${l.nome}</div>
+    <div class="espaco">${l.espacos?.length ? `Espaço: ${l.espacos.join(', ')}` : 'Sem espaço associado'}</div>
+  </div>
+
+  <h2>Decomposição dos valores em dívida</h2>
+  <table>
+    <thead><tr><th>Tipo</th><th>Descrição</th><th class="valor">Valor</th></tr></thead>
+    <tbody>${linhas}</tbody>
+  </table>
+
+  <h2>Resumo</h2>
+  <table><tbody>${resumo}</tbody></table>
+
+  <div class="total">
+    <span class="rotulo">Total em dívida</span>
+    <span class="montante">${fmt(l.total)}</span>
+  </div>
+
+  <div class="assinatura">
+    <div>Assinatura do senhorio</div>
+    <div>Tomei conhecimento (inquilino)</div>
+  </div>
+
+  <div class="rodape">
+    Documento informativo gerado automaticamente. As rendas em falta são contabilizadas
+    a partir de maio de 2026 e apenas para contratos ativos.
+  </div>
+
+  <script>window.onload = function(){ window.print(); }</script>
+</body></html>`
+
+    const janela = window.open('', '_blank', 'width=900,height=1000')
+    if (!janela) { alert('O navegador bloqueou a janela de impressão. Permite pop-ups para este site.'); return }
+    janela.document.write(html)
+    janela.document.close()
   }
 
   async function fetchOcupacao() {
@@ -954,25 +1085,37 @@ export default function RelatoriosPage() {
               <div className="space-y-5">
                 <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
                   <div className="bg-red-50 border border-red-200 rounded-xl p-4 col-span-2 sm:col-span-1">
-                    <p className="text-xs text-red-600 mb-1">Dívida total</p>
-                    <p className="text-2xl font-bold text-red-700">{fmt(dividas.total)}</p>
-                    <p className="text-xs text-red-500 mt-0.5">{dividas.linhas.length} inquilino(s)</p>
+                    <p className="text-xs text-red-600 mb-1">
+                      Dívida {dividaFiltro === 'all' ? 'total' : 'do inquilino'}
+                    </p>
+                    <p className="text-2xl font-bold text-red-700">
+                      {fmt(dividasOrdenadas.reduce((s: number, l: any) => s + l.total, 0))}
+                    </p>
+                    <p className="text-xs text-red-500 mt-0.5">{dividasOrdenadas.length} inquilino(s)</p>
                   </div>
                   <div className="bg-white border border-gray-200 rounded-xl p-4">
                     <p className="text-xs text-gray-500 mb-1">Rendas</p>
-                    <p className="text-lg font-bold text-gray-900">{fmt(dividas.totalRenda)}</p>
+                    <p className="text-lg font-bold text-gray-900">
+                      {fmt(dividasOrdenadas.reduce((s: number, l: any) => s + l.porGrupo.Renda, 0))}
+                    </p>
                   </div>
                   <div className="bg-white border border-gray-200 rounded-xl p-4">
                     <p className="text-xs text-gray-500 mb-1">Eletricidade</p>
-                    <p className="text-lg font-bold text-gray-900">{fmt(dividas.totalLuz)}</p>
+                    <p className="text-lg font-bold text-gray-900">
+                      {fmt(dividasOrdenadas.reduce((s: number, l: any) => s + l.porGrupo.Eletricidade, 0))}
+                    </p>
                   </div>
                   <div className="bg-white border border-gray-200 rounded-xl p-4">
                     <p className="text-xs text-gray-500 mb-1">Dívidas manuais</p>
-                    <p className="text-lg font-bold text-gray-900">{fmt(dividas.totalManual)}</p>
+                    <p className="text-lg font-bold text-gray-900">
+                      {fmt(dividasOrdenadas.reduce((s: number, l: any) => s + l.porGrupo['Dívida'], 0))}
+                    </p>
                   </div>
                   <div className="bg-white border border-gray-200 rounded-xl p-4">
                     <p className="text-xs text-gray-500 mb-1">Créditos a abater</p>
-                    <p className="text-lg font-bold text-emerald-600">{fmt(Math.abs(dividas.totalCredito))}</p>
+                    <p className="text-lg font-bold text-emerald-600">
+                      {fmt(Math.abs(dividasOrdenadas.reduce((s: number, l: any) => s + l.porGrupo['Crédito'], 0)))}
+                    </p>
                   </div>
                 </div>
 
@@ -982,12 +1125,46 @@ export default function RelatoriosPage() {
                   </div>
                 ) : (
                   <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-                    <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
-                      <p className="font-semibold text-gray-900 text-sm">Dívida por inquilino</p>
-                      <p className="text-xs text-gray-400">clica numa linha para ver a decomposição</p>
+                    <div className="px-5 py-3 border-b border-gray-100 flex flex-wrap items-center gap-3">
+                      <p className="font-semibold text-gray-900 text-sm flex-1 min-w-40">Dívida por inquilino</p>
+
+                      <select
+                        className="input text-sm py-1.5 w-64 print:hidden"
+                        value={dividaFiltro}
+                        onChange={e => { setDividaFiltro(e.target.value); setDividaExpandida(null) }}
+                      >
+                        <option value="all">Todos os inquilinos ({dividas.linhas.length})</option>
+                        {[...dividas.linhas]
+                          .sort((a: any, b: any) => etiquetaInquilino(a).localeCompare(etiquetaInquilino(b), 'pt', { numeric: true }))
+                          .map((l: any) => (
+                            <option key={l.id} value={l.id}>{etiquetaInquilino(l)}</option>
+                          ))}
+                      </select>
+
+                      <div className="flex items-center gap-1 print:hidden">
+                        <span className="text-xs text-gray-400 mr-1">Ordenar:</span>
+                        <button
+                          onClick={() => alternarOrdem('espaco')}
+                          className={`text-xs px-2.5 py-1.5 rounded-lg border transition-colors ${
+                            dividaOrdem === 'espaco'
+                              ? 'bg-emerald-600 text-white border-emerald-600'
+                              : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                          }`}>
+                          Habitação {dividaOrdem === 'espaco' && (dividaOrdemDir === 'asc' ? '↑' : '↓')}
+                        </button>
+                        <button
+                          onClick={() => alternarOrdem('valor')}
+                          className={`text-xs px-2.5 py-1.5 rounded-lg border transition-colors ${
+                            dividaOrdem === 'valor'
+                              ? 'bg-emerald-600 text-white border-emerald-600'
+                              : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                          }`}>
+                          Valor {dividaOrdem === 'valor' && (dividaOrdemDir === 'asc' ? '↑' : '↓')}
+                        </button>
+                      </div>
                     </div>
 
-                    {dividas.linhas.map((l: any) => {
+                    {dividasOrdenadas.map((l: any) => {
                       const aberta = dividaExpandida === l.id
                       return (
                         <div key={l.id} className="border-b border-gray-50 last:border-0">
@@ -1062,14 +1239,22 @@ export default function RelatoriosPage() {
                                 </tbody>
                               </table>
 
-                              {l.email && (
+                              <div className="mt-3 flex items-center gap-4 print:hidden">
                                 <button
-                                  onClick={() => setEmailTarget({ name: l.nome, email: l.email, spaceRef: l.espacos[0], amount: l.total })}
-                                  className="mt-3 text-xs text-emerald-600 hover:underline font-medium flex items-center gap-1 print:hidden"
+                                  onClick={() => imprimirDivida(l)}
+                                  className="text-xs text-blue-600 hover:underline font-medium flex items-center gap-1"
                                 >
-                                  <Mail className="w-3 h-3" /> Enviar e-mail sobre esta dívida
+                                  <Printer className="w-3 h-3" /> Imprimir extrato (A4)
                                 </button>
-                              )}
+                                {l.email && (
+                                  <button
+                                    onClick={() => setEmailTarget({ name: l.nome, email: l.email, spaceRef: l.espacos[0], amount: l.total })}
+                                    className="text-xs text-emerald-600 hover:underline font-medium flex items-center gap-1"
+                                  >
+                                    <Mail className="w-3 h-3" /> Enviar e-mail sobre esta dívida
+                                  </button>
+                                )}
+                              </div>
                             </div>
                           )}
                         </div>
