@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { Zap, Trash2, X, ChevronDown, ChevronRight, Settings, Save, Pencil, Search, Printer } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
+import { logAccess } from '@/lib/logAccess'
 
 interface ElectricityConfig {
   id: number
@@ -41,6 +42,23 @@ interface ReadingModal {
   lastReading: Reading | null
 }
 
+/**
+ * Fecho de contas de eletricidade na saída de um inquilino.
+ *
+ * Junta as três operações que, feitas à mão, é fácil esquecer uma:
+ *   1. leitura de saída com o valor atual do contador
+ *   2. perdão das cobranças em aberto (sem as contar como recebidas)
+ *   3. limpeza do valor acumulado, para não passar ao inquilino seguinte
+ */
+interface ResetModal {
+  space: Space
+  lastReading: Reading | null
+  /** Cobranças de luz por pagar do inquilino atual neste espaço. */
+  pendingCharges: { id: string; reference_month: string; amount: number; amount_paid: number | null }[]
+  accumulated: number
+  tenantName: string
+}
+
 export default function QuadrosEspacosPage() {
   const { isAdmin, isCoAdmin, profile } = useAuth()
   const canEdit = isAdmin || isCoAdmin || profile?.role === 'electrician'
@@ -49,6 +67,17 @@ export default function QuadrosEspacosPage() {
   const [loading, setLoading] = useState(true)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [readingModal, setReadingModal] = useState<ReadingModal | null>(null)
+
+  const [resetModal, setResetModal] = useState<ResetModal | null>(null)
+  const [resetLoading, setResetLoading] = useState(false)
+  const [resetting, setResetting] = useState(false)
+  const [resetForm, setResetForm] = useState({
+    reading_date: new Date().toISOString().slice(0, 10),
+    reading_value: '',
+    forgiveCharges: true,
+    notes: '',
+  })
+  const [resetConfirm, setResetConfirm] = useState(false)
   const [editReadingModal, setEditReadingModal] = useState<Reading | null>(null)
   const [saving, setSaving] = useState(false)
   const [readingForm, setReadingForm] = useState({
@@ -162,6 +191,112 @@ export default function QuadrosEspacosPage() {
     if (!tenant) return ''
     if (Array.isArray(tenant)) return tenant[0]?.name ?? ''
     return tenant.name ?? ''
+  }
+
+  async function openResetModal(space: Space) {
+    setResetLoading(true)
+    setResetConfirm(false)
+    const lastReading = (readings[space.id] ?? [])[0] ?? null
+    setResetForm({
+      reading_date: new Date().toISOString().slice(0, 10),
+      reading_value: '',
+      forgiveCharges: true,
+      notes: '',
+    })
+
+    // Cobranças por pagar do contrato ativo neste espaço
+    let pendingCharges: ResetModal['pendingCharges'] = []
+    let tenantName = '—'
+    try {
+      const { data: lease } = await supabase
+        .from('leases').select('id, tenant:tenants(name)')
+        .eq('space_id', space.id).eq('status', 'ativo').maybeSingle()
+
+      if (lease) {
+        tenantName = (lease.tenant as any)?.name ?? '—'
+        const { data: charges } = await supabase
+          .from('electricity_charges')
+          .select('id, reference_month, amount, amount_paid')
+          .eq('lease_id', lease.id).eq('paid', false)
+          .order('reference_month')
+        pendingCharges = charges ?? []
+      }
+    } catch (e) { console.error(e) }
+
+    setResetModal({
+      space, lastReading, pendingCharges,
+      accumulated: getAccumulatedAmount(space.id),
+      tenantName,
+    })
+    setResetLoading(false)
+  }
+
+  async function executeReset() {
+    if (!resetModal) return
+    setResetting(true)
+    try {
+      const { space, lastReading, pendingCharges } = resetModal
+      const novoValor = parseFloat(String(resetForm.reading_value).replace(',', '.'))
+      const anterior = lastReading?.reading_value ?? null
+      const kwh = anterior != null ? parseFloat((novoValor - anterior).toFixed(2)) : null
+
+      // 1. Leitura de saída. Fica logo marcada como tratada (charged, não
+      //    acumulada, valor 0) para o consumo deste período não transitar
+      //    para o inquilino seguinte.
+      const { error: readingError } = await supabase.from('electricity_readings').insert({
+        space_id: space.id,
+        reading_date: resetForm.reading_date,
+        reading_value: novoValor,
+        previous_value: anterior,
+        kwh_consumed: kwh,
+        amount_calculated: 0,
+        charged: true,
+        accumulated: false,
+        notes: resetForm.notes.trim() || `Fecho de contas — saída de ${resetModal.tenantName}`,
+      })
+      if (readingError) { alert(`Erro ao registar a leitura: ${readingError.message}`); return }
+
+      // 2. Perdoar as cobranças em aberto.
+      //    paid = true tira-as da dívida; payment_date fica VAZIA para não
+      //    aparecerem nos relatórios como dinheiro recebido — porque não foi.
+      let perdoadas = 0
+      if (resetForm.forgiveCharges && pendingCharges.length > 0) {
+        const { error: chargeError } = await supabase.from('electricity_charges').update({
+          paid: true,
+          amount_paid: 0,
+          payment_date: null,
+          payment_method: null,
+          notes: `Dívida perdoada no fecho de contas de ${formatDate(resetForm.reading_date)}`,
+        }).in('id', pendingCharges.map(c => c.id))
+        if (chargeError) { alert(`Erro ao perdoar as cobranças: ${chargeError.message}`); return }
+        perdoadas = pendingCharges.length
+      }
+
+      // 3. Limpar acumulados antigos que ainda não foram cobrados.
+      const { error: accError } = await supabase.from('electricity_readings')
+        .update({ accumulated: false, charged: true })
+        .eq('space_id', space.id).eq('charged', false)
+      if (accError) console.error(accError)
+
+      await logAccess({
+        action: 'editar',
+        page: '/eletricidade/espacos',
+        details: `Fecho de contas de eletricidade do ${space.ref} (${resetModal.tenantName}): leitura ${novoValor}${perdoadas > 0 ? `, ${perdoadas} cobrança(s) perdoada(s)` : ''}`,
+      })
+
+      const totalPerdoado = pendingCharges.reduce((s, c) => s + (c.amount - (c.amount_paid ?? 0)), 0)
+      alert(
+        `✅ Fecho de contas concluído no ${space.ref}.\n\n` +
+        `Leitura de saída: ${novoValor} kWh\n` +
+        (perdoadas > 0 ? `Cobranças perdoadas: ${perdoadas} (${formatCurrency(totalPerdoado)})\n` : '') +
+        `O próximo inquilino começa a contar a partir deste valor.`
+      )
+
+      setResetModal(null)
+      fetchAll()
+    } finally {
+      setResetting(false)
+    }
   }
 
   function getAccumulatedAmount(spaceId: string): number {
@@ -735,6 +870,14 @@ export default function QuadrosEspacosPage() {
                           + Leitura
                         </button>
                       )}
+                      {canEdit && (isAdmin || isCoAdmin) && (
+                        <button
+                          onClick={e => { e.stopPropagation(); openResetModal(space) }}
+                          className="text-xs text-amber-600 hover:underline font-medium whitespace-nowrap"
+                          title="Fechar contas do inquilino que sai e pôr o contador a zero para o próximo">
+                          ⟲ Fecho de contas
+                        </button>
+                      )}
                       {spaceReadings.length > 0 && (
                         <button
                           onClick={e => { e.stopPropagation(); printElectricity(space) }}
@@ -812,6 +955,149 @@ export default function QuadrosEspacosPage() {
       </div>
 
       {/* Modal Nova Leitura */}
+      {resetModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-semibold text-lg text-gray-900">
+                Fecho de contas — {resetModal.space.ref}
+              </h2>
+              <button onClick={() => setResetModal(null)}><X className="w-5 h-5 text-gray-400" /></button>
+            </div>
+
+            {!resetConfirm ? (
+              <>
+                <p className="text-sm text-gray-500 mb-4">
+                  Fecha as contas de eletricidade do inquilino que sai e deixa o contador pronto para o próximo.
+                </p>
+
+                <div className="bg-gray-50 rounded-lg p-3 mb-4 space-y-1.5 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Inquilino atual</span>
+                    <span className="font-medium text-gray-800">{resetModal.tenantName}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Última leitura</span>
+                    <span className="font-medium text-gray-800">
+                      {resetModal.lastReading
+                        ? `${resetModal.lastReading.reading_value} kWh · ${formatDate(resetModal.lastReading.reading_date)}`
+                        : 'sem leituras'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Cobranças por pagar</span>
+                    <span className={`font-medium ${resetModal.pendingCharges.length > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                      {resetModal.pendingCharges.length > 0
+                        ? `${resetModal.pendingCharges.length} · ${formatCurrency(resetModal.pendingCharges.reduce((s, c) => s + (c.amount - (c.amount_paid ?? 0)), 0))}`
+                        : 'nenhuma'}
+                    </span>
+                  </div>
+                  {resetModal.accumulated > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">Valor acumulado por cobrar</span>
+                      <span className="font-medium text-amber-600">{formatCurrency(resetModal.accumulated)}</span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="label">Leitura atual do contador *</label>
+                      <input className="input" type="number" step="0.001" placeholder="ex: 9012.500"
+                        value={resetForm.reading_value}
+                        onChange={e => setResetForm(f => ({ ...f, reading_value: e.target.value }))} />
+                    </div>
+                    <div>
+                      <label className="label">Data</label>
+                      <input className="input" type="date" value={resetForm.reading_date}
+                        onChange={e => setResetForm(f => ({ ...f, reading_date: e.target.value }))} />
+                    </div>
+                  </div>
+
+                  {resetForm.reading_value && resetModal.lastReading && (
+                    <p className={`text-xs px-3 py-2 rounded-lg ${
+                      parseFloat(resetForm.reading_value) < resetModal.lastReading.reading_value
+                        ? 'text-red-700 bg-red-50'
+                        : 'text-gray-600 bg-gray-50'
+                    }`}>
+                      {parseFloat(resetForm.reading_value) < resetModal.lastReading.reading_value
+                        ? '⚠️ O valor é inferior à última leitura. Confirma que não te enganaste.'
+                        : `Consumo desde a última leitura: ${(parseFloat(resetForm.reading_value) - resetModal.lastReading.reading_value).toFixed(2)} kWh — não vai ser cobrado a ninguém.`}
+                    </p>
+                  )}
+
+                  {resetModal.pendingCharges.length > 0 && (
+                    <label className={`flex items-start gap-2 cursor-pointer rounded-lg px-3 py-2 border ${
+                      resetForm.forgiveCharges ? 'bg-amber-50 border-amber-200' : 'bg-gray-50 border-gray-100'
+                    }`}>
+                      <input type="checkbox" className="rounded mt-0.5" checked={resetForm.forgiveCharges}
+                        onChange={e => setResetForm(f => ({ ...f, forgiveCharges: e.target.checked }))} />
+                      <span className="text-xs">
+                        <span className="font-medium text-gray-800">Perdoar as cobranças em aberto</span>
+                        <span className="block text-gray-500 mt-0.5">
+                          Saem da conta corrente do inquilino, mas não entram nos relatórios como dinheiro recebido.
+                        </span>
+                      </span>
+                    </label>
+                  )}
+
+                  <div>
+                    <label className="label">Notas <span className="font-normal text-gray-400">(opcional)</span></label>
+                    <input className="input text-sm" placeholder="ex: chaves entregues a 31/07"
+                      value={resetForm.notes}
+                      onChange={e => setResetForm(f => ({ ...f, notes: e.target.value }))} />
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-3 mt-6">
+                  <button className="btn-secondary" onClick={() => setResetModal(null)}>Cancelar</button>
+                  <button className="btn-primary" disabled={!resetForm.reading_value || resetLoading}
+                    onClick={() => setResetConfirm(true)}>
+                    Continuar
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4">
+                  <p className="text-sm font-medium text-amber-900 mb-2">
+                    Confirmas que queres fazer isto no {resetModal.space.ref}?
+                  </p>
+                  <ul className="text-sm text-amber-800 space-y-1.5 list-disc list-inside">
+                    <li>
+                      Registar leitura de saída de <strong>{resetForm.reading_value} kWh</strong> a {formatDate(resetForm.reading_date)}
+                    </li>
+                    {resetForm.forgiveCharges && resetModal.pendingCharges.length > 0 && (
+                      <li>
+                        <strong>Perdoar {resetModal.pendingCharges.length} cobrança(s)</strong> no total de{' '}
+                        <strong>{formatCurrency(resetModal.pendingCharges.reduce((s, c) => s + (c.amount - (c.amount_paid ?? 0)), 0))}</strong> de {resetModal.tenantName}
+                      </li>
+                    )}
+                    <li>Limpar valores acumulados, para não serem cobrados ao próximo inquilino</li>
+                  </ul>
+                </div>
+
+                <p className="text-xs text-gray-500 mb-4">
+                  Esta operação não pode ser desfeita automaticamente. As leituras anteriores mantêm-se no histórico.
+                </p>
+
+                <div className="flex justify-end gap-3">
+                  <button className="btn-secondary" onClick={() => setResetConfirm(false)} disabled={resetting}>
+                    ← Voltar
+                  </button>
+                  <button
+                    className="px-4 py-2 rounded-lg bg-amber-600 text-white text-sm font-medium hover:bg-amber-700 disabled:opacity-60"
+                    onClick={executeReset} disabled={resetting}>
+                    {resetting ? 'A processar...' : 'Sim, fechar contas'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       {readingModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
