@@ -471,23 +471,70 @@ export default function QuadrosEspacosPage() {
     }
   }
 
+  /**
+   * Recalcula a cadeia de leituras de um espaço.
+   *
+   * Cada leitura guarda o valor da anterior para calcular o consumo. Se uma
+   * data for corrigida, a ordem muda e essas ligações passam a estar erradas —
+   * por isso são refeitas por ordem cronológica depois de qualquer edição.
+   *
+   * Os valores de leituras já cobradas ou oferecidas não são mexidos: essas
+   * já produziram (ou dispensaram) uma cobrança e reescrevê-las alteraria
+   * contas fechadas.
+   */
+  async function recalcularCadeia(spaceId: string) {
+    const { data: todas } = await supabase
+      .from('electricity_readings')
+      .select('id, reading_date, reading_value, charged, waived, amount_calculated')
+      .eq('space_id', spaceId)
+      .order('reading_date', { ascending: true })
+
+    if (!todas || todas.length === 0) return
+
+    let anterior: number | null = null
+    for (const r of todas) {
+      const kwh = anterior != null ? parseFloat((r.reading_value - anterior).toFixed(2)) : null
+      const patch: Record<string, any> = { previous_value: anterior, kwh_consumed: kwh }
+
+      if (!r.charged && !r.waived) {
+        patch.amount_calculated = kwh != null ? parseFloat((kwh * priceWithVat).toFixed(2)) : null
+      }
+
+      await supabase.from('electricity_readings').update(patch).eq('id', r.id)
+      anterior = r.reading_value
+    }
+  }
+
   async function saveEditReading() {
     if (!editReadingModal || !editForm.reading_value) return
+    if (!editForm.reading_date) { alert('Indica a data da leitura.'); return }
+
+    const newValue = parseFloat(String(editForm.reading_value).replace(',', '.'))
+    if (isNaN(newValue)) { alert('O valor da leitura não é um número válido.'); return }
+
     setSaving(true)
 
-    const newValue = parseFloat(editForm.reading_value)
-    const prevValue = editReadingModal.previous_value
-    const kwhConsumed = prevValue != null ? parseFloat((newValue - prevValue).toFixed(2)) : editReadingModal.kwh_consumed
-    const acc = editReadingModal.accumulated ? (editReadingModal.amount_calculated ?? 0) : 0
-    const amountCalc = kwhConsumed != null ? parseFloat((kwhConsumed * priceWithVat).toFixed(2)) : editReadingModal.amount_calculated
-
-    await supabase.from('electricity_readings').update({
+    // A data e o valor mudam aqui; o consumo e os montantes são refeitos a
+    // seguir pela recalcularCadeia, que olha para todas as leituras em conjunto.
+    const { error } = await supabase.from('electricity_readings').update({
       reading_date: editForm.reading_date,
       reading_value: newValue,
-      kwh_consumed: kwhConsumed,
-      amount_calculated: amountCalc,
       notes: editForm.notes || null,
     }).eq('id', editReadingModal.id)
+
+    if (error) {
+      setSaving(false)
+      alert(`Não foi possível guardar a alteração:\n\n${error.message}`)
+      return
+    }
+
+    await recalcularCadeia(editReadingModal.space_id)
+
+    await logAccess({
+      action: 'editar',
+      page: '/eletricidade/espacos',
+      details: `Editou leitura de eletricidade (${formatDate(editForm.reading_date)} · ${newValue} kWh)`,
+    })
 
     setSaving(false)
     setEditReadingModal(null)
@@ -768,10 +815,15 @@ export default function QuadrosEspacosPage() {
     if (!confirm(`Apagar esta leitura?${extra}`)) return
 
     if (n > 0) {
-      await supabase.from('electricity_charges').delete().in('id', unpaidCharges.map(c => c.id))
+      const { error } = await supabase.from('electricity_charges').delete().in('id', unpaidCharges.map(c => c.id))
+      if (error) { alert(`Não foi possível apagar as cobranças:\n\n${error.message}`); return }
     }
 
-    await supabase.from('electricity_readings').delete().eq('id', reading.id)
+    const { error: delError } = await supabase.from('electricity_readings').delete().eq('id', reading.id)
+    if (delError) { alert(`Não foi possível apagar a leitura:\n\n${delError.message}`); return }
+
+    // Apagar uma leitura no meio parte a cadeia de consumos das seguintes.
+    await recalcularCadeia(reading.space_id)
     fetchAll()
   }
 
@@ -1070,13 +1122,14 @@ export default function QuadrosEspacosPage() {
                                           não cobrar
                                         </button>
                                       )}
-                                      {index === 0 && (
-                                        <button onClick={() => openEditModal(r)}
-                                          className="text-gray-300 hover:text-blue-500 transition-colors"
-                                          title="Editar última leitura">
-                                          <Pencil className="w-3.5 h-3.5" />
-                                        </button>
-                                      )}
+                                      {/* Editar qualquer leitura: um engano numa data antiga
+                                          também precisa de ser corrigido. A cadeia de consumos
+                                          é refeita automaticamente ao gravar. */}
+                                      <button onClick={() => openEditModal(r)}
+                                        className="text-gray-300 hover:text-blue-500 transition-colors"
+                                        title="Editar leitura">
+                                        <Pencil className="w-3.5 h-3.5" />
+                                      </button>
                                       <button onClick={() => deleteReading(r)} className="text-gray-300 hover:text-red-500 transition-colors">
                                         <Trash2 className="w-3.5 h-3.5" />
                                       </button>
