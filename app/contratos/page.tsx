@@ -279,7 +279,7 @@ export default function ContratosPage() {
                           const isRenewed = renewal && new Date(r.end_date) < new Date()
                           return renewal ? (
                             <span className={isRenewed ? 'text-blue-600 font-medium text-xs' : 'text-gray-600 text-xs'}>
-                              {isRenewed && '🔄 '}{renewal.toLocaleDateString('pt-PT')}
+                              {isRenewed && '🔄 '}{formatDate(renewal)}
                             </span>
                           ) : <span className="text-gray-300">—</span>
                         })() : <span className="text-gray-300">—</span>}

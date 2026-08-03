@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase-client'
 import { useAuth } from '@/lib/auth-context'
 import { Shield, Plus, Trash2, Eye, Zap, Key, ChevronLeft, History, BookOpen } from 'lucide-react'
 import Link from 'next/link'
+import { formatDateTime } from '@/lib/utils'
 
 type Profile = {
   id: string
@@ -37,13 +38,6 @@ const actionColors: Record<string, string> = {
   apagar: 'bg-red-100 text-red-700',
   login: 'bg-emerald-100 text-emerald-700',
   logout: 'bg-gray-100 text-gray-600',
-}
-
-function formatDateTime(dateStr: string): string {
-  if (!dateStr) return '—'
-  const d = new Date(dateStr)
-  return d.toLocaleDateString('pt-PT', { day: '2-digit', month: '2-digit', year: 'numeric' }) +
-    ' ' + d.toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' })
 }
 
 export default function UtilizadoresPage() {

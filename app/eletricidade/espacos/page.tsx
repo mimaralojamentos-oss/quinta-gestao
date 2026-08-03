@@ -321,7 +321,7 @@ export default function QuadrosEspacosPage() {
 
     const rows = spaceReadings.map(r => `
       <tr>
-        <td>${r.reading_date ? new Date(r.reading_date).toLocaleDateString('pt-PT') : '—'}</td>
+        <td>${formatDate(r.reading_date)}</td>
         <td style="font-family:monospace">${r.reading_value ?? '—'}</td>
         <td style="font-family:monospace;color:#888">${r.previous_value ?? '—'}</td>
         <td>${r.kwh_consumed != null ? Number(r.kwh_consumed).toFixed(2) + ' kWh' : '—'}</td>

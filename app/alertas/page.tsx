@@ -144,7 +144,7 @@ export default function AlertasPage() {
           type: 'contrato_a_expirar',
           severity: daysLeft <= 30 ? 'high' : daysLeft <= 90 ? 'medium' : 'low',
           title: isRenewed ? 'Contrato a renovar' : 'Contrato a expirar',
-          description: `${isRenewed ? 'Próxima renovação' : 'Contrato termina'} em ${renewal.toLocaleDateString('pt-PT')} (em ${daysLeft} dias)`,
+          description: `${isRenewed ? 'Próxima renovação' : 'Contrato termina'} em ${formatDate(renewal)} (em ${daysLeft} dias)`,
           spaceRef: l.space?.ref ?? '—',
           tenantName: l.tenant?.name ?? '—',
         })

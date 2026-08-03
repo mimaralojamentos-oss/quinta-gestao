@@ -4,7 +4,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import Link from 'next/link'
 import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
-import { formatCurrency, formatDate } from '@/lib/utils'
+import { formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
 import { Search, FileText, Eye, FolderOpen, Trash2, X, Plus, Upload, Loader2, CheckCircle, AlertCircle, Edit2, Filter, ChevronDown, ChevronUp, ArrowUpDown, ArrowUp, ArrowDown, Zap } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import { logAccess } from '@/lib/logAccess'
@@ -86,13 +86,6 @@ const tipoColors: Record<string, string> = {
   contrato: 'bg-blue-100 text-blue-700',
   transferencia_interna: 'bg-indigo-100 text-indigo-700',
   receita: 'bg-emerald-100 text-emerald-700',
-}
-
-function formatDateTime(dateStr: string): string {
-  if (!dateStr) return '—'
-  const d = new Date(dateStr)
-  return d.toLocaleDateString('pt-PT', { day: '2-digit', month: '2-digit', year: 'numeric' }) +
-    ' ' + d.toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' })
 }
 
 export default function DocumentosPage() {

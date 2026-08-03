@@ -629,7 +629,7 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
                   {lease.payments_this_month.map((p: any) => (
                     <div key={p.id} className={`flex justify-between items-center text-sm py-1.5 px-2 rounded-lg mb-1 ${editingPayment?.id === p.id ? 'bg-emerald-50 border border-emerald-200' : 'hover:bg-gray-100'}`}>
                       <div className="flex items-center gap-2">
-                        <span className="text-gray-700">{p.payment_date ? new Date(p.payment_date).toLocaleDateString('pt-PT') : '—'}</span>
+                        <span className="text-gray-700">{formatDate(p.payment_date)}</span>
                         <span className="text-xs px-2 py-0.5 rounded-full bg-gray-200 text-gray-600">{tipoLabels[p.tipo] ?? p.tipo}</span>
                         <span className={`text-xs px-1.5 py-0.5 rounded-full ${p.payment_method === 'dinheiro' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
                           {p.payment_method === 'dinheiro' ? '💵' : '🏦'}

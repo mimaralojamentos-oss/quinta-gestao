@@ -734,7 +734,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
       return `<div style="margin-bottom:12px;border:1px solid #e5e7eb;border-radius:6px;overflow:hidden">
         <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:#f0fdf4;border-bottom:1px solid #bbf7d0">
           <div>
-            <span style="font-size:12px;font-weight:700;color:#111">${new Date(g.date + 'T00:00:00').toLocaleDateString('pt-PT')}</span>
+            <span style="font-size:12px;font-weight:700;color:#111">${formatDate(g.date)}</span>
             <span style="margin-left:10px;font-size:11px;color:#059669;font-weight:600">${methodLabel[g.method] ?? g.method}</span>
           </div>
           <span style="font-size:13px;font-weight:700;color:#059669">${formatCurrency(g.total)}</span>

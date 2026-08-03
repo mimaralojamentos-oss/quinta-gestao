@@ -1722,7 +1722,7 @@ export default function RelatoriosPage() {
                           <td style="padding:6px 8px;text-align:right;font-weight:600;font-size:13px">${(p.amount ?? 0).toFixed(2)} €</td>
                         </tr>`
                       }).join('')
-                      const dateStr = new Date(g.date).toLocaleDateString('pt-PT')
+                      const dateStr = formatDate(g.date)
                       const methodStr = g.method === 'dinheiro' ? '💵 Dinheiro' : '🏦 Banco'
                       return `<div style="margin-bottom:16px;border:1px solid #99f6e4;border-radius:8px;overflow:hidden;page-break-inside:avoid">
                         <div style="background:#f0fdfa;padding:10px 14px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #99f6e4">

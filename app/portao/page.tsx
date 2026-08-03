@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Plus, Trash2, Send, MessageSquare, Check, X, Search, ChevronDown, Filter } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
+import { formatDate } from '@/lib/utils'
 
 interface GatePhone {
   id: string
@@ -386,7 +387,7 @@ export default function PortaoPage() {
                               {phone.space ? <span className="bg-emerald-100 text-emerald-700 text-xs font-medium px-2 py-0.5 rounded-full">{phone.space}</span> : <span className="text-gray-300">—</span>}
                             </td>
                             <td className="px-4 py-3 text-gray-500 text-xs cursor-pointer" onClick={() => startEdit(phone)}>
-                              {phone.activation_date ? new Date(phone.activation_date).toLocaleDateString('pt-PT') : <span className="text-gray-300">—</span>}
+                              {phone.activation_date ? formatDate(phone.activation_date) : <span className="text-gray-300">—</span>}
                             </td>
                             <td className="px-4 py-3 text-gray-500 text-xs cursor-pointer max-w-[150px] truncate" onClick={() => startEdit(phone)}>{phone.notes ?? <span className="text-gray-300">—</span>}</td>
                             <td className="px-4 py-3">
@@ -448,7 +449,7 @@ export default function PortaoPage() {
                                   {phone.space ? <span className="bg-gray-100 text-gray-500 text-xs font-medium px-2 py-0.5 rounded-full">{phone.space}</span> : <span className="text-gray-300">—</span>}
                                 </td>
                                 <td className="px-4 py-3 text-gray-500 text-xs cursor-pointer" onClick={() => startEdit(phone)}>
-                                  {phone.activation_date ? new Date(phone.activation_date).toLocaleDateString('pt-PT') : <span className="text-gray-300">—</span>}
+                                  {phone.activation_date ? formatDate(phone.activation_date) : <span className="text-gray-300">—</span>}
                                 </td>
                                 <td className="px-4 py-3 text-gray-500 text-xs cursor-pointer max-w-[150px] truncate" onClick={() => startEdit(phone)}>{phone.notes ?? <span className="text-gray-300">—</span>}</td>
                                 <td className="px-4 py-3">
