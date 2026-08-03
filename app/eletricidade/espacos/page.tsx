@@ -34,6 +34,9 @@ interface Reading {
   amount_calculated: number | null
   charged: boolean
   accumulated: boolean
+  /** Leitura registada mas deliberadamente não cobrada (oferta). */
+  waived?: boolean
+  waived_reason?: string | null
   notes: string | null
 }
 
@@ -84,6 +87,7 @@ export default function QuadrosEspacosPage() {
     reading_date: new Date().toISOString().slice(0, 10),
     reading_value: '',
     notes: '',
+    waived_reason: '',
   })
   const [editForm, setEditForm] = useState({
     reading_date: '',
@@ -301,7 +305,9 @@ export default function QuadrosEspacosPage() {
 
   function getAccumulatedAmount(spaceId: string): number {
     const latest = (readings[spaceId] ?? [])[0]
-    if (latest && latest.accumulated && !latest.charged) {
+    // Uma oferta não acumula: o valor foi perdoado, não pode reaparecer
+    // somado à leitura seguinte.
+    if (latest && latest.accumulated && !latest.charged && !latest.waived) {
       return latest.amount_calculated ?? 0
     }
     return 0
@@ -320,7 +326,13 @@ export default function QuadrosEspacosPage() {
         <td style="font-family:monospace;color:#888">${r.previous_value ?? '—'}</td>
         <td>${r.kwh_consumed != null ? Number(r.kwh_consumed).toFixed(2) + ' kWh' : '—'}</td>
         <td style="font-weight:600">${r.amount_calculated != null ? r.amount_calculated.toFixed(2) + ' €' : '—'}</td>
-        <td><span style="padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;${r.charged ? 'background:#d1fae5;color:#065f46' : 'background:#fef3c7;color:#92400e'}">${r.charged ? 'Cobrado' : 'Acumulado'}</span></td>
+        <td><span style="padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;${
+          r.waived ? 'background:#dbeafe;color:#1d4ed8'
+          : r.charged ? 'background:#d1fae5;color:#065f46'
+          : 'background:#fef3c7;color:#92400e'
+        }">${r.waived ? 'Oferta' : r.charged ? 'Cobrado' : 'Acumulado'}</span>${
+          r.waived && r.waived_reason ? `<br><span style="font-size:10px;color:#888">${r.waived_reason}</span>` : ''
+        }</td>
       </tr>`).join('')
 
     const totalCobrado = spaceReadings.filter(r => r.charged && r.amount_calculated).reduce((s, r) => s + (r.amount_calculated ?? 0), 0)
@@ -422,6 +434,7 @@ export default function QuadrosEspacosPage() {
       reading_date: new Date().toISOString().slice(0, 10),
       reading_value: '',
       notes: '',
+      waived_reason: '',
     })
   }
 
@@ -550,7 +563,13 @@ export default function QuadrosEspacosPage() {
     fetchAll()
   }
 
-  async function saveReading(charge: boolean) {
+  /**
+   * Grava uma leitura. Três destinos possíveis:
+   *   'cobrar'    → cria a cobrança na conta corrente do inquilino
+   *   'acumular'  → guarda o valor para somar à leitura seguinte
+   *   'oferta'    → regista o consumo mas não cobra nada, nem agora nem depois
+   */
+  async function saveReading(destino: 'cobrar' | 'acumular' | 'oferta') {
     if (!readingModal || !readingForm.reading_value) return
     setSaving(true)
 
@@ -560,7 +579,8 @@ export default function QuadrosEspacosPage() {
     const kwhConsumed = prevValue != null ? parseFloat((newValue - prevValue).toFixed(2)) : null
     const accumulatedSoFar = getAccumulatedAmount(space.id)
     const amountCalc = kwhConsumed != null ? parseFloat((kwhConsumed * priceWithVat + accumulatedSoFar).toFixed(2)) : null
-    const charged = charge && amountCalc != null && amountCalc >= minCharge
+    const charged = destino === 'cobrar' && amountCalc != null && amountCalc >= minCharge
+    const oferta = destino === 'oferta'
 
     const { data: inserted, error: readingError } = await supabase.from('electricity_readings').insert({
       space_id: space.id,
@@ -569,8 +589,12 @@ export default function QuadrosEspacosPage() {
       previous_value: prevValue,
       kwh_consumed: kwhConsumed,
       amount_calculated: amountCalc,
+      // A oferta não fica acumulada: se ficasse, o valor transitava para a
+      // leitura seguinte e acabava por ser cobrado à mesma.
       charged: false,
-      accumulated: true,
+      accumulated: !oferta,
+      waived: oferta,
+      waived_reason: oferta ? (readingForm.waived_reason?.trim() || null) : null,
       notes: readingForm.notes || null,
     }).select('id').single()
 
@@ -591,6 +615,7 @@ export default function QuadrosEspacosPage() {
       if (lease) {
         const { error: chargeError } = await supabase.from('electricity_charges').insert({
           lease_id: lease.id,
+          reading_id: inserted.id,
           charge_date: readingForm.reading_date,
           reference_month: readingForm.reading_date.slice(0, 7) + '-01',
           units: kwhConsumed,
@@ -611,6 +636,91 @@ export default function QuadrosEspacosPage() {
 
     setSaving(false)
     setReadingModal(null)
+    fetchAll()
+  }
+
+  /**
+   * Converte uma leitura já registada em oferta.
+   *
+   * Se já tinha gerado cobrança, essa cobrança é apagada da conta corrente do
+   * inquilino — exceto se já tiver sido paga, caso em que a operação é
+   * recusada para não fazer desaparecer dinheiro que entrou.
+   */
+  async function marcarComoOferta(reading: Reading, spaceRef: string) {
+    // Procura a cobrança correspondente: primeiro pela ligação direta,
+    // e só depois pela data (leituras antigas não têm reading_id).
+    let cobranca: any = null
+
+    const { data: porLigacao } = await supabase
+      .from('electricity_charges').select('id, amount, paid, payment_date')
+      .eq('reading_id', reading.id).maybeSingle()
+    cobranca = porLigacao
+
+    if (!cobranca) {
+      const { data: lease } = await supabase
+        .from('leases').select('id').eq('space_id', reading.space_id).eq('status', 'ativo').maybeSingle()
+      if (lease) {
+        const { data: porData } = await supabase
+          .from('electricity_charges').select('id, amount, paid, payment_date')
+          .eq('lease_id', lease.id).eq('charge_date', reading.reading_date).maybeSingle()
+        cobranca = porData
+      }
+    }
+
+    if (cobranca?.paid) {
+      alert(
+        `⚠️ Esta cobrança de ${formatCurrency(cobranca.amount)} já foi paga pelo inquilino` +
+        `${cobranca.payment_date ? ` em ${formatDate(cobranca.payment_date)}` : ''}.\n\n` +
+        `Não é possível transformá-la em oferta, porque isso faria desaparecer dinheiro ` +
+        `que entrou e as contas deixavam de bater certo.\n\n` +
+        `Se queres mesmo devolver o valor, regista um adiantamento a favor do inquilino.`
+      )
+      return
+    }
+
+    const motivo = window.prompt(
+      `Marcar a leitura de ${formatDate(reading.reading_date)} (${spaceRef}) como oferta.\n\n` +
+      (cobranca
+        ? `A cobrança de ${formatCurrency(cobranca.amount)} vai ser APAGADA da conta corrente do inquilino.\n\n`
+        : `O valor deixa de ser cobrado e não transita para a leitura seguinte.\n\n`) +
+      `Motivo (opcional):`,
+      reading.waived_reason ?? ''
+    )
+    if (motivo === null) return
+
+    if (cobranca) {
+      const { error } = await supabase.from('electricity_charges').delete().eq('id', cobranca.id)
+      if (error) { alert(`Erro ao apagar a cobrança: ${error.message}`); return }
+    }
+
+    const { error: updateError } = await supabase.from('electricity_readings').update({
+      waived: true,
+      waived_reason: motivo.trim() || null,
+      charged: false,
+      accumulated: false,
+      amount_calculated: reading.amount_calculated,
+    }).eq('id', reading.id)
+
+    if (updateError) { alert(`Erro ao marcar como oferta: ${updateError.message}`); return }
+
+    await logAccess({
+      action: 'editar',
+      page: '/eletricidade/espacos',
+      details: `Leitura de ${formatDate(reading.reading_date)} (${spaceRef}) marcada como oferta` +
+        (cobranca ? ` — cobrança de ${formatCurrency(cobranca.amount)} apagada` : '') +
+        (motivo.trim() ? ` · ${motivo.trim()}` : ''),
+    })
+
+    fetchAll()
+  }
+
+  /** Desfaz a oferta: a leitura volta a acumular para a leitura seguinte. */
+  async function anularOferta(reading: Reading) {
+    if (!window.confirm('Anular a oferta? O valor volta a acumular para a próxima leitura.')) return
+    const { error } = await supabase.from('electricity_readings').update({
+      waived: false, waived_reason: null, accumulated: true, charged: false,
+    }).eq('id', reading.id)
+    if (error) { alert(error.message); return }
     fetchAll()
   }
 
@@ -670,6 +780,9 @@ export default function QuadrosEspacosPage() {
     .filter(r => r.charged)
     .reduce((s, r) => s + (r.amount_calculated ?? 0), 0)
   const totalAcumulado = spaces.reduce((s, sp) => s + getAccumulatedAmount(sp.id), 0)
+  const totalOferecido = Object.values(readings).flat()
+    .filter(r => r.waived)
+    .reduce((s, r) => s + (r.amount_calculated ?? 0), 0)
 
   const filteredSpaces = spaces.filter(space => {
     const matchesTenant = !filterTenant || getTenantName(space.tenant).toLowerCase().includes(filterTenant.toLowerCase())
@@ -739,7 +852,7 @@ export default function QuadrosEspacosPage() {
           </div>
         )}
 
-        <div className="grid grid-cols-3 gap-3 mb-4">
+        <div className={`grid gap-3 mb-4 ${totalOferecido > 0 ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-3'}`}>
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-3">
             <p className="text-xs text-gray-500 mb-0.5">Espaços com contador</p>
             <p className="text-lg font-bold text-gray-900">{spaces.length}</p>
@@ -753,6 +866,12 @@ export default function QuadrosEspacosPage() {
             <p className="text-xs text-gray-500 mb-0.5">Por acumular</p>
             <p className="text-lg font-bold text-yellow-600">{formatCurrency(totalAcumulado)}</p>
           </div>
+          {totalOferecido > 0 && (
+            <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-3">
+              <p className="text-xs text-gray-500 mb-0.5">Oferecido</p>
+              <p className="text-lg font-bold text-blue-600">{formatCurrency(totalOferecido)}</p>
+            </div>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center gap-3 mb-4">
@@ -918,15 +1037,39 @@ export default function QuadrosEspacosPage() {
                                   {r.amount_calculated != null ? formatCurrency(r.amount_calculated) : '—'}
                                 </td>
                                 <td className="py-2">
-                                  {r.charged ? (
+                                  {r.waived ? (
+                                    <span
+                                      className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium"
+                                      title={r.waived_reason ?? 'Não cobrado'}>
+                                      🎁 Oferta
+                                    </span>
+                                  ) : r.charged ? (
                                     <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-medium">Cobrado</span>
                                   ) : (
                                     <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full font-medium">Acumulado</span>
+                                  )}
+                                  {r.waived && r.waived_reason && (
+                                    <p className="text-[11px] text-gray-400 mt-0.5">{r.waived_reason}</p>
                                   )}
                                 </td>
                                 {canEdit && (
                                   <td className="py-2">
                                     <div className="flex items-center gap-2">
+                                      {r.waived ? (
+                                        <button onClick={() => anularOferta(r)}
+                                          className="text-xs text-gray-400 hover:text-yellow-600 transition-colors whitespace-nowrap"
+                                          title="Voltar a acumular este valor">
+                                          anular oferta
+                                        </button>
+                                      ) : (isAdmin || isCoAdmin) && (
+                                        <button onClick={() => marcarComoOferta(r, space.ref)}
+                                          className="text-xs text-gray-400 hover:text-blue-600 transition-colors whitespace-nowrap"
+                                          title={r.charged
+                                            ? 'Não cobrar — apaga a cobrança da conta corrente do inquilino'
+                                            : 'Não cobrar — o valor deixa de transitar para a próxima leitura'}>
+                                          não cobrar
+                                        </button>
+                                      )}
                                       {index === 0 && (
                                         <button onClick={() => openEditModal(r)}
                                           className="text-gray-300 hover:text-blue-500 transition-colors"
@@ -1163,22 +1306,38 @@ export default function QuadrosEspacosPage() {
                 <textarea className="input" rows={2} value={readingForm.notes}
                   onChange={e => setReadingForm(f => ({ ...f, notes: e.target.value }))} />
               </div>
+
+              <div>
+                <label className="label">
+                  Motivo da oferta <span className="font-normal text-gray-400">(só se escolheres &quot;não cobrar&quot;)</span>
+                </label>
+                <input className="input text-sm" placeholder="ex: avaria no contador, oferta de boas-vindas"
+                  value={readingForm.waived_reason}
+                  onChange={e => setReadingForm(f => ({ ...f, waived_reason: e.target.value }))} />
+              </div>
             </div>
 
             <div className="mt-6 space-y-2">
               {readingModal.space.tenant_id ? (
                 <>
-                  <button onClick={() => saveReading(true)} disabled={saving || !readingForm.reading_value}
+                  <button onClick={() => saveReading('cobrar')} disabled={saving || !readingForm.reading_value}
                     className="w-full py-2.5 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50">
                     {saving ? 'A guardar...' : '✓ Cobrar ao inquilino'}
                   </button>
-                  <button onClick={() => saveReading(false)} disabled={saving || !readingForm.reading_value}
+                  <button onClick={() => saveReading('acumular')} disabled={saving || !readingForm.reading_value}
                     className="w-full py-2.5 rounded-lg bg-yellow-500 text-white text-sm font-medium hover:bg-yellow-600 disabled:opacity-50">
                     {saving ? 'A guardar...' : 'Acumular para próxima leitura'}
                   </button>
+                  <button onClick={() => saveReading('oferta')} disabled={saving || !readingForm.reading_value}
+                    className="w-full py-2.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+                    {saving ? 'A guardar...' : '🎁 Não cobrar — oferta'}
+                  </button>
+                  <p className="text-xs text-gray-400 text-center">
+                    A oferta regista o consumo mas não gera cobrança, nem transita para a leitura seguinte.
+                  </p>
                 </>
               ) : (
-                <button onClick={() => saveReading(false)} disabled={saving || !readingForm.reading_value}
+                <button onClick={() => saveReading('acumular')} disabled={saving || !readingForm.reading_value}
                   className="w-full py-2.5 rounded-lg bg-gray-600 text-white text-sm font-medium hover:bg-gray-700 disabled:opacity-50">
                   {saving ? 'A guardar...' : 'Guardar leitura (sem inquilino)'}
                 </button>
