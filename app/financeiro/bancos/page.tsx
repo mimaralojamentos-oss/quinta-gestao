@@ -3,7 +3,7 @@
 import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState, useRef, Fragment } from 'react'
 import { createClient } from '@/lib/supabase-client'
-import { formatCurrency } from '@/lib/utils'
+import { formatCurrency, formatDate } from '@/lib/utils'
 import { Plus, Building, CreditCard, ArrowUpRight, ArrowDownRight, Upload, Eye, X, Loader2, FileText, CheckCircle } from 'lucide-react'
 import { useFileDrop } from '@/lib/useFileDrop'
 import { useAuth } from '@/lib/auth-context'
@@ -195,6 +195,7 @@ export default function BancosPage() {
   async function saveManualMatch(
     tx: any, type: string, tenantId: string, expenseId: string, notes: string,
     documentId?: string, referenceMonth?: string, incomeId?: string, skipProcessing?: boolean,
+    cashMovementId?: string,
   ) {
     const lease = tenantId ? leases.find(l => (l.tenant as any)?.id === tenantId) : null
 
@@ -216,6 +217,22 @@ export default function BancosPage() {
     }
 
     setMatchModal(null)
+
+    // Fecha a transferência do fundo de maneio: o dinheiro que saiu da caixa
+    // aparece confirmado no banco e deixa de estar pendente.
+    if (type === 'transferencia_interna' && cashMovementId) {
+      const { error: cashError } = await supabase.from('cash_fund_movements').update({
+        transfer_status: 'confirmado',
+        bank_transaction_id: tx.id,
+        notes: `Confirmada no extrato bancário em ${formatDate(tx.transaction_date)}`,
+      }).eq('id', cashMovementId)
+
+      if (cashError?.code === '23505') {
+        alert('⚠️ Esta transferência já tinha sido confirmada por outro movimento bancário.')
+      } else if (cashError) {
+        alert(`⚠️ Não foi possível confirmar a transferência: ${cashError.message}`)
+      }
+    }
 
     // Marcada como histórico: fica identificada e mais nada acontece.
     if (skipProcessing) {

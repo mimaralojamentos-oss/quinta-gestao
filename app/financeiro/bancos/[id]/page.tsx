@@ -545,7 +545,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     fetchData()
   }
 
-  async function saveManualMatch(tx: Transaction, type: string, tenantId: string, expenseId: string, notes: string, documentId?: string, referenceMonth?: string, incomeId?: string, skipProcessing?: boolean) {
+  async function saveManualMatch(tx: Transaction, type: string, tenantId: string, expenseId: string, notes: string, documentId?: string, referenceMonth?: string, incomeId?: string, skipProcessing?: boolean, cashMovementId?: string) {
     const confirmedLeaseId = tenantId ? (leases.find(l => (l.tenant as any)?.id === tenantId)?.id ?? null) : null
 
     const { error } = await supabase.from('bank_transactions').update({
@@ -569,6 +569,21 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     }
 
     setMatchModal(null)
+
+    // Fecha a transferência do fundo de maneio correspondente.
+    if (type === 'transferencia_interna' && cashMovementId) {
+      const { error: cashError } = await supabase.from('cash_fund_movements').update({
+        transfer_status: 'confirmado',
+        bank_transaction_id: tx.id,
+        notes: `Confirmada no extrato bancário em ${formatDate(tx.transaction_date)}`,
+      }).eq('id', cashMovementId)
+
+      if (cashError?.code === '23505') {
+        alert('⚠️ Esta transferência já tinha sido confirmada por outro movimento bancário.')
+      } else if (cashError) {
+        alert(`⚠️ Não foi possível confirmar a transferência: ${cashError.message}`)
+      }
+    }
 
     // Marcada como histórico: identificada, mas sem gerar movimentos.
     if (skipProcessing) { fetchData(); return }

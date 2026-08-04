@@ -43,7 +43,7 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
   documents: any[]
   autoMatches: any[]
   bankId: string
-  onSave: (tx: BankTransaction, type: string, tenantId: string, expenseId: string, notes: string, documentId?: string, referenceMonth?: string, incomeId?: string, skipProcessing?: boolean) => void
+  onSave: (tx: BankTransaction, type: string, tenantId: string, expenseId: string, notes: string, documentId?: string, referenceMonth?: string, incomeId?: string, skipProcessing?: boolean, cashMovementId?: string) => void
   onSaveRule: () => void
   onClose: () => void
 }) {
@@ -64,6 +64,9 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
   const [incomeCategoryInput, setIncomeCategoryInput] = useState('')
   const [creatingIncome, setCreatingIncome] = useState(false)
   const [wideSearch, setWideSearch] = useState(false)
+  // Transferências do fundo de maneio ainda por confirmar no extrato
+  const [cashTransfers, setCashTransfers] = useState<any[]>([])
+  const [cashMovementId, setCashMovementId] = useState('')
   const supabase = createClient()
 
   // Origens conhecidas + as que já foram usadas antes, para a lista crescer sozinha
@@ -71,6 +74,26 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
 
   useEffect(() => {
     supabase.from('income_records').select('id, description, amount, income_date, category').order('income_date', { ascending: false }).then(({ data }) => setIncomeRecords(data ?? []))
+
+    supabase
+      .from('cash_fund_movements')
+      .select('id, movement_date, description, amount, bank_id')
+      .eq('transfer_status', 'pendente')
+      .order('movement_date', { ascending: false })
+      .then(({ data }) => {
+        const lista = data ?? []
+        setCashTransfers(lista)
+
+        // Pré-seleciona a transferência com o mesmo valor e data próxima —
+        // é quase sempre a certa, e evita ter de a procurar na lista.
+        const provavel = lista.find(m => {
+          const dias = Math.abs(
+            (new Date(tx.transaction_date).getTime() - new Date(m.movement_date).getTime()) / 86400000
+          )
+          return Math.abs(Math.abs(m.amount) - Math.abs(tx.amount)) <= 0.02 && dias <= 10
+        })
+        if (provavel) setCashMovementId(provavel.id)
+      })
   }, [])
 
   const txDate = new Date(tx.transaction_date)
@@ -384,6 +407,40 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
             </div>
           )}
 
+          {/* Transferência interna: fechar a ponta que saiu do fundo de maneio */}
+          {type === 'transferencia_interna' && (
+            <div>
+              <label className="label">Transferência do fundo de maneio</label>
+              {cashTransfers.length === 0 ? (
+                <p className="text-sm text-gray-400 bg-gray-50 rounded-lg px-3 py-2">
+                  Não há transferências de caixa por confirmar. Podes guardar na mesma —
+                  serve para movimentos entre contas próprias.
+                </p>
+              ) : (
+                <>
+                  <select className="input" value={cashMovementId} onChange={e => setCashMovementId(e.target.value)}>
+                    <option value="">— Nenhuma —</option>
+                    {cashTransfers.map(m => (
+                      <option key={m.id} value={m.id}>
+                        {formatDate(m.movement_date)} · {m.description} · {formatCurrency(Math.abs(m.amount))}
+                      </option>
+                    ))}
+                  </select>
+                  {cashMovementId ? (
+                    <p className="text-xs text-emerald-600 mt-1">
+                      Ao guardar, esta transferência deixa de estar pendente — o dinheiro passa a estar
+                      confirmado como tendo saído da caixa e entrado no banco.
+                    </p>
+                  ) : (
+                    <p className="text-xs text-gray-400 mt-1">
+                      Escolhe a transferência correspondente para fechar as duas pontas.
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
           {tiposComNotes.includes(type) && (
             <div>
               <label className="label">Descrição</label>
@@ -458,6 +515,7 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
               type === 'renda' ? referenceMonth : undefined,
               type === 'receita_extraordinaria' ? (finalIncomeId || undefined) : undefined,
               skipProcessing,
+              type === 'transferencia_interna' ? (cashMovementId || undefined) : undefined,
             )
           }}>{creatingIncome ? 'A guardar...' : 'Guardar'}</button>
         </div>
