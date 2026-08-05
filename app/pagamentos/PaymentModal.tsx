@@ -427,7 +427,7 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
         for (const charge of plan.electricityCharges) {
           await supabase.from('cash_fund_movements').insert({
             movement_date: form.payment_date,
-            description: `⚡ Eletricidade ${charge.chargeDate?.slice(0, 7) ?? ''} — ${lease.space?.ref} (${lease.tenant?.name})`,
+            description: `⚡ Eletricidade ${charge.chargeDate?.slice(0, 7) ?? ''}${charge.isPartial ? ' (parcial)' : ''} — ${lease.space?.ref} (${lease.tenant?.name})`,
             amount: charge.amount,
             type: 'entrada',
             source: 'eletricidade',

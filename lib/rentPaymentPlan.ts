@@ -12,8 +12,17 @@ function formatReferenceMonthPT(referenceMonth: string): string {
 
 export interface ElectricityChargePlan {
   id: string
+  /** Valor a aplicar agora — pode ser inferior ao que falta (pagamento parcial). */
   amount: number
   chargeDate: string | null
+  /** Valor total da fatura. */
+  totalAmount: number
+  /** Quanto já estava pago antes deste pagamento. */
+  alreadyPaid: number
+  /** Quanto continua por pagar depois de aplicar este valor. */
+  remainingAfter: number
+  /** true quando este pagamento não liquida a fatura por completo. */
+  isPartial: boolean
 }
 
 export interface DebtPaymentPlan {
@@ -67,20 +76,44 @@ export async function buildRentPaymentPlan(supabase: any, params: BuildPlanParam
   if (remaining > 0) {
     const { data: charges } = await supabase
       .from('electricity_charges')
-      .select('id, amount, charge_date')
+      .select('id, amount, amount_paid, charge_date')
       .eq('lease_id', leaseId)
       .eq('paid', false)
       .order('charge_date', { ascending: true })
 
     for (const charge of charges ?? []) {
       if (remaining <= 0) break
-      if (charge.amount <= remaining) {
-        electricityCharges.push({ id: charge.id, amount: charge.amount, chargeDate: charge.charge_date })
-        electricityTotal = parseFloat((electricityTotal + charge.amount).toFixed(2))
-        remaining = parseFloat((remaining - charge.amount).toFixed(2))
-      }
+
+      const alreadyPaid = charge.amount_paid ?? 0
+      const emFalta = parseFloat((charge.amount - alreadyPaid).toFixed(2))
+      if (emFalta <= 0) continue
+
+      // Aplica o que houver, mesmo que não chegue para liquidar a fatura.
+      // Antes só liquidava faturas que coubessem por inteiro e o resto ia
+      // para adiantamento, ao contrário do registo manual de pagamentos.
+      const aplicar = parseFloat(Math.min(emFalta, remaining).toFixed(2))
+      const remainingAfter = parseFloat((emFalta - aplicar).toFixed(2))
+
+      electricityCharges.push({
+        id: charge.id,
+        amount: aplicar,
+        chargeDate: charge.charge_date,
+        totalAmount: charge.amount,
+        alreadyPaid,
+        remainingAfter,
+        isPartial: remainingAfter > 0,
+      })
+
+      electricityTotal = parseFloat((electricityTotal + aplicar).toFixed(2))
+      remaining = parseFloat((remaining - aplicar).toFixed(2))
     }
-    if (electricityTotal > 0) lines.push(`Luz: ${formatCurrency(electricityTotal)} ✅`)
+
+    if (electricityTotal > 0) {
+      const parciais = electricityCharges.filter(c => c.isPartial)
+      lines.push(parciais.length > 0
+        ? `Luz: ${formatCurrency(electricityTotal)} (parcial — falta ${formatCurrency(parciais.reduce((s, c) => s + c.remainingAfter, 0))})`
+        : `Luz: ${formatCurrency(electricityTotal)} ✅`)
+    }
   }
 
   const debtPayments: DebtPaymentPlan[] = []
@@ -152,9 +185,20 @@ export async function applyRentPaymentPlan(supabase: any, plan: RentPaymentPlan,
   }).select().single()
 
   for (const charge of plan.electricityCharges) {
-    await supabase.from('electricity_charges').update({
-      paid: true, payment_date: paymentDate, payment_method: paymentMethod,
-    }).eq('id', charge.id)
+    if (charge.isPartial) {
+      // Parcial: acumula o que foi pago e a fatura continua em aberto.
+      // Mesmo tratamento do registo manual de pagamentos.
+      await supabase.from('electricity_charges').update({
+        amount_paid: parseFloat((charge.alreadyPaid + charge.amount).toFixed(2)),
+      }).eq('id', charge.id)
+    } else {
+      await supabase.from('electricity_charges').update({
+        paid: true,
+        amount_paid: charge.totalAmount,
+        payment_date: paymentDate,
+        payment_method: paymentMethod,
+      }).eq('id', charge.id)
+    }
   }
 
   for (const dp of plan.debtPayments) {

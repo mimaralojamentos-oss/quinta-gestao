@@ -354,8 +354,15 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
                         <span className="text-gray-700">
                           ⚡ Eletricidade
                           {c.chargeDate && <span className="text-xs text-gray-400 ml-1">{formatDate(c.chargeDate)}</span>}
+                          {c.isPartial && (
+                            <span className="text-xs text-amber-600 ml-1">
+                              parcial — fica {formatCurrency(c.remainingAfter)} por pagar
+                            </span>
+                          )}
                         </span>
-                        <span className="font-medium text-gray-900">{formatCurrency(c.amount)}</span>
+                        <span className={`font-medium ${c.isPartial ? 'text-amber-700' : 'text-gray-900'}`}>
+                          {formatCurrency(c.amount)}
+                        </span>
                       </div>
                     ))}
 
@@ -386,8 +393,8 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
 
                   {plan.adiantamento > 0 && (
                     <p className="text-xs text-gray-500 mt-2 pt-2 border-t border-emerald-100">
-                      Sobrou valor porque nenhuma fatura de eletricidade ou dívida cabia por inteiro no
-                      restante — a app não liquida faturas em parte. Fica como crédito para a próxima.
+                      Não havia mais nada em dívida — o valor que sobrou fica como crédito do inquilino
+                      e é usado no próximo pagamento.
                     </p>
                   )}
                 </div>
