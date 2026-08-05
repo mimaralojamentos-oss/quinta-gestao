@@ -354,7 +354,6 @@ export default function BancosPage() {
         <td>${(c.description ?? '').replace(/</g, '&lt;')}</td>
         <td>${identificacaoLabel(c).replace(/[^\x20-\x7EÀ-ÿ]/g, '').trim() || '—'}</td>
         <td class="num ${c.amount >= 0 ? 'pos' : 'neg'}">${formatCurrency(c.amount)}</td>
-        <td class="num saldo">${c.balance != null ? formatCurrency(c.balance) : '—'}</td>
         <td class="estado">${c.status === 'validado' ? 'Validado' : c.status === 'ignorado' ? 'Ignorado' : 'Por validar'}</td>
       </tr>`
     }).join('')
@@ -380,7 +379,6 @@ export default function BancosPage() {
   .nowrap { white-space: nowrap; }
   .pos { color: #059669; font-weight: bold; }
   .neg { color: #dc2626; font-weight: bold; }
-  .saldo { color: #6b7280; }
   .estado { font-size: 9px; color: #6b7280; }
   .total { margin-top: 12px; background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 4px;
            padding: 8px 12px; display: flex; justify-content: space-between; align-items: center; }
@@ -400,7 +398,7 @@ export default function BancosPage() {
     <thead>
       <tr>
         <th>Conta</th><th>Data</th><th>Descrição</th><th>Identificação</th>
-        <th class="num">Valor</th><th class="num">Saldo</th><th>Estado</th>
+        <th class="num">Valor</th><th>Estado</th>
       </tr>
     </thead>
     <tbody>${linhas}</tbody>
