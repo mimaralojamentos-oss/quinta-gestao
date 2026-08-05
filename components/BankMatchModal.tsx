@@ -13,6 +13,7 @@ import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { Search, X, Sparkles, FileText, CheckCircle } from 'lucide-react'
 import { mergeCategories, normalizeCategory } from '@/lib/incomeCategories'
+import { buildRentPaymentPlan, type RentPaymentPlan } from '@/lib/rentPaymentPlan'
 
 export interface BankTransaction {
   id: string
@@ -67,6 +68,9 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
   // Transferências do fundo de maneio ainda por confirmar no extrato
   const [cashTransfers, setCashTransfers] = useState<any[]>([])
   const [cashMovementId, setCashMovementId] = useState('')
+  // Pré-visualização da distribuição do valor recebido
+  const [plan, setPlan] = useState<RentPaymentPlan | null>(null)
+  const [planLoading, setPlanLoading] = useState(false)
   const supabase = createClient()
 
   // Origens conhecidas + as que já foram usadas antes, para a lista crescer sozinha
@@ -97,6 +101,46 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
   }, [])
 
   const txDate = new Date(tx.transaction_date)
+
+  // Calcula a distribuição enquanto o utilizador escolhe, para o valor
+  // deixar de ser uma caixa preta até ao momento de gravar.
+  useEffect(() => {
+    let cancelado = false
+
+    async function calcular() {
+      const lease = tenantId ? leases.find(l => (l.tenant as any)?.id === tenantId) : null
+      if (type !== 'renda' || !lease || tx.amount <= 0) { setPlan(null); return }
+
+      setPlanLoading(true)
+      try {
+        const mes = `${referenceMonth || tx.transaction_date.slice(0, 7)}-01`
+
+        const { data: existentes } = await supabase
+          .from('rent_payments').select('amount, tipo')
+          .eq('lease_id', lease.id).eq('reference_month', mes)
+
+        const jaPago = (existentes ?? [])
+          .filter((p: any) => p.tipo === 'renda' || !p.tipo)
+          .reduce((s: number, p: any) => s + (p.amount || 0), 0)
+
+        const resultado = await buildRentPaymentPlan(supabase, {
+          leaseId: lease.id,
+          tenantId,
+          monthlyRent: lease.monthly_rent,
+          amount: tx.amount,
+          referenceMonth: mes,
+          alreadyPaidRenda: jaPago,
+        })
+
+        if (!cancelado) setPlan(resultado)
+      } finally {
+        if (!cancelado) setPlanLoading(false)
+      }
+    }
+
+    calcular()
+    return () => { cancelado = true }
+  }, [type, tenantId, referenceMonth, tx.amount])
 
   const sortedExpenses = [...expenses].sort((a, b) => {
     const diffA = Math.abs(new Date(a.expense_date).getTime() - txDate.getTime())
@@ -280,6 +324,74 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
                   <p className="text-xs text-amber-600 mt-1">Diferente do mes da transacao ({tx.transaction_date.slice(0, 7)})</p>
                 )}
               </div>
+
+              {/* Como o valor vai ser distribuído */}
+              {planLoading && (
+                <p className="text-xs text-gray-400">A calcular a distribuição...</p>
+              )}
+
+              {plan && !planLoading && (
+                <div className="border border-emerald-200 bg-emerald-50/60 rounded-lg p-3">
+                  <p className="text-xs font-medium text-emerald-800 mb-2">
+                    Distribuição de {formatCurrency(tx.amount)}
+                  </p>
+
+                  <div className="space-y-1 text-sm">
+                    <div className="flex justify-between items-baseline gap-2">
+                      <span className="text-gray-700">
+                        🏠 Renda
+                        <span className="text-xs text-gray-400 ml-1">
+                          {plan.rendaFullyPaid ? 'liquidada' : `de ${formatCurrency(plan.monthlyRent)}`}
+                        </span>
+                      </span>
+                      <span className={`font-medium ${plan.rendaFullyPaid ? 'text-gray-900' : 'text-amber-700'}`}>
+                        {formatCurrency(plan.rendaAmount)}
+                      </span>
+                    </div>
+
+                    {plan.electricityCharges.map(c => (
+                      <div key={c.id} className="flex justify-between items-baseline gap-2">
+                        <span className="text-gray-700">
+                          ⚡ Eletricidade
+                          {c.chargeDate && <span className="text-xs text-gray-400 ml-1">{formatDate(c.chargeDate)}</span>}
+                        </span>
+                        <span className="font-medium text-gray-900">{formatCurrency(c.amount)}</span>
+                      </div>
+                    ))}
+
+                    {plan.debtPayments.map(d => (
+                      <div key={d.debtId} className="flex justify-between items-baseline gap-2">
+                        <span className="text-gray-700">
+                          💰 {d.description}
+                          {d.remainingAfter > 0 && (
+                            <span className="text-xs text-amber-600 ml-1">
+                              fica {formatCurrency(d.remainingAfter)} por pagar
+                            </span>
+                          )}
+                        </span>
+                        <span className="font-medium text-gray-900">{formatCurrency(d.amount)}</span>
+                      </div>
+                    ))}
+
+                    {plan.adiantamento > 0 && (
+                      <div className="flex justify-between items-baseline gap-2">
+                        <span className="text-gray-700">
+                          🪙 Adiantamento
+                          <span className="text-xs text-gray-400 ml-1">crédito do inquilino</span>
+                        </span>
+                        <span className="font-medium text-purple-700">{formatCurrency(plan.adiantamento)}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {plan.adiantamento > 0 && (
+                    <p className="text-xs text-gray-500 mt-2 pt-2 border-t border-emerald-100">
+                      Sobrou valor porque nenhuma fatura de eletricidade ou dívida cabia por inteiro no
+                      restante — a app não liquida faturas em parte. Fica como crédito para a próxima.
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
