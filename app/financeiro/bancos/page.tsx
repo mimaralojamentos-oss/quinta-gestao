@@ -4,7 +4,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState, useRef, Fragment } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Plus, Building, CreditCard, ArrowUpRight, ArrowDownRight, Upload, Eye, X, Loader2, FileText, CheckCircle } from 'lucide-react'
+import { Plus, Building, CreditCard, ArrowUpRight, ArrowDownRight, Upload, Eye, X, Loader2, FileText, CheckCircle, Printer } from 'lucide-react'
 import { useFileDrop } from '@/lib/useFileDrop'
 import { useAuth } from '@/lib/auth-context'
 import { buildRentPaymentPlan, applyRentPaymentPlan } from '@/lib/rentPaymentPlan'
@@ -157,11 +157,35 @@ export default function BancosPage() {
     new Set(credits.map(c => c.transaction_date?.slice(0, 4)).filter(Boolean))
   ).sort((a, b) => b.localeCompare(a))
 
+  /**
+   * O seletor de período aceita um ano ("2026") ou os últimos N meses
+   * ("ultimos:6"). Devolve a data mínima a considerar, ou null para tudo.
+   */
+  function inicioDoPeriodo(valor: string): string | null {
+    if (valor === 'all') return null
+    if (valor.startsWith('ultimos:')) {
+      const meses = Number(valor.split(':')[1])
+      const d = new Date()
+      d.setMonth(d.getMonth() - meses)
+      d.setDate(1)
+      return d.toISOString().slice(0, 10)
+    }
+    return null
+  }
+
+  function dentroDoPeriodo(data: string | null | undefined): boolean {
+    if (creditYear === 'all') return true
+    if (!data) return false
+    const inicio = inicioDoPeriodo(creditYear)
+    if (inicio) return data >= inicio
+    return data.startsWith(creditYear)
+  }
+
   const creditosFiltrados = credits.filter(c => {
     if (direcao === 'entradas' ? c.amount <= 0 : c.amount >= 0) return false
     if (creditBank !== 'all' && c.bank_id !== creditBank) return false
     if (creditStatus !== 'all' && c.status !== creditStatus) return false
-    if (creditYear !== 'all' && !c.transaction_date?.startsWith(creditYear)) return false
+    if (!dentroDoPeriodo(c.transaction_date)) return false
     if (creditSearch) {
       const q = creditSearch.toLowerCase()
       const banco = bankById[c.bank_id] ? shortBankLabel(bankById[c.bank_id]).toLowerCase() : ''
@@ -177,7 +201,7 @@ export default function BancosPage() {
   const creditsBase = credits.filter(c => {
     if (direcao === 'entradas' ? c.amount <= 0 : c.amount >= 0) return false
     if (creditBank !== 'all' && c.bank_id !== creditBank) return false
-    if (creditYear !== 'all' && !c.transaction_date?.startsWith(creditYear)) return false
+    if (!dentroDoPeriodo(c.transaction_date)) return false
     if (creditSearch) {
       const q = creditSearch.toLowerCase()
       const banco = bankById[c.bank_id] ? shortBankLabel(bankById[c.bank_id]).toLowerCase() : ''
@@ -289,6 +313,111 @@ export default function BancosPage() {
     const { error } = await supabase.from('bank_transactions').update({ status: 'ignorado' }).eq('id', c.id)
     if (error) { alert(`⚠️ ${error.message}`); return }
     fetchBanks()
+  }
+
+  /** Descrição legível do período escolhido, para o cabeçalho da impressão. */
+  function periodoLegivel(): string {
+    if (creditYear === 'all') return 'Todo o período'
+    if (creditYear.startsWith('ultimos:')) return `Últimos ${creditYear.split(':')[1]} meses`
+    return `Ano de ${creditYear}`
+  }
+
+  /**
+   * Folha A4 (deitada) com os movimentos visíveis.
+   * Imprime exatamente o que está filtrado no ecrã — mesmas linhas, mesmo total.
+   */
+  function imprimirMovimentos() {
+    if (creditosFiltrados.length === 0) {
+      alert('Não há movimentos para imprimir com os filtros atuais.')
+      return
+    }
+
+    const propriedade = process.env.NEXT_PUBLIC_APP_NAME ?? 'Gestão de Alojamentos'
+    const local = process.env.NEXT_PUBLIC_APP_LOCATION ?? 'Évora'
+    const titulo = direcao === 'entradas' ? 'Entradas' : 'Saídas'
+
+    const filtros = [
+      periodoLegivel(),
+      creditBank !== 'all' ? shortBankLabel(bankById[creditBank] ?? { name: '—' }) : 'Todas as contas',
+      creditStatus === 'all' ? 'Todos os estados'
+        : creditStatus === 'por_validar' ? 'Por validar'
+        : creditStatus === 'validado' ? 'Validadas' : 'Ignoradas',
+      creditSearch ? `pesquisa: "${creditSearch}"` : null,
+    ].filter(Boolean).join(' · ')
+
+    const linhas = creditosFiltrados.map(c => {
+      const banco = bankById[c.bank_id]
+      return `
+      <tr>
+        <td>${banco ? shortBankLabel(banco) : '—'}</td>
+        <td class="nowrap">${formatDate(c.transaction_date)}</td>
+        <td>${(c.description ?? '').replace(/</g, '&lt;')}</td>
+        <td>${identificacaoLabel(c).replace(/[^\x20-\x7EÀ-ÿ]/g, '').trim() || '—'}</td>
+        <td class="num ${c.amount >= 0 ? 'pos' : 'neg'}">${formatCurrency(c.amount)}</td>
+        <td class="num saldo">${c.balance != null ? formatCurrency(c.balance) : '—'}</td>
+        <td class="estado">${c.status === 'validado' ? 'Validado' : c.status === 'ignorado' ? 'Ignorado' : 'Por validar'}</td>
+      </tr>`
+    }).join('')
+
+    const html = `<!DOCTYPE html>
+<html lang="pt"><head><meta charset="UTF-8"><title>${titulo} - ${periodoLegivel()}</title>
+<style>
+  @page { size: A4 landscape; margin: 12mm; }
+  * { box-sizing: border-box; }
+  body { font-family: Arial, Helvetica, sans-serif; color: #1f2937; font-size: 10px; margin: 0; }
+  .cabecalho { border-bottom: 2px solid #059669; padding-bottom: 8px; margin-bottom: 12px;
+               display: flex; justify-content: space-between; align-items: flex-end; }
+  .cabecalho h1 { margin: 0; font-size: 16px; color: #059669; }
+  .cabecalho .sub { color: #6b7280; font-size: 10px; margin-top: 2px; }
+  .cabecalho .data { text-align: right; color: #6b7280; font-size: 10px; }
+  table { width: 100%; border-collapse: collapse; }
+  thead { display: table-header-group; }
+  th { text-align: left; font-size: 9px; text-transform: uppercase; letter-spacing: .03em;
+       color: #6b7280; border-bottom: 1px solid #d1d5db; padding: 5px 4px; }
+  td { padding: 4px; border-bottom: 1px solid #f3f4f6; vertical-align: top; }
+  tr { page-break-inside: avoid; }
+  .num { text-align: right; white-space: nowrap; }
+  .nowrap { white-space: nowrap; }
+  .pos { color: #059669; font-weight: bold; }
+  .neg { color: #dc2626; font-weight: bold; }
+  .saldo { color: #6b7280; }
+  .estado { font-size: 9px; color: #6b7280; }
+  .total { margin-top: 12px; background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 4px;
+           padding: 8px 12px; display: flex; justify-content: space-between; align-items: center; }
+  .total .rotulo { font-weight: bold; font-size: 11px; }
+  .total .montante { font-size: 16px; font-weight: bold; color: #059669; }
+</style></head><body>
+  <div class="cabecalho">
+    <div>
+      <h1>${titulo} — movimentos bancários</h1>
+      <div class="sub">${propriedade} · ${local}</div>
+      <div class="sub">${filtros}</div>
+    </div>
+    <div class="data">Emitido em ${formatDate(new Date())}<br>${creditosFiltrados.length} movimento(s)</div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Conta</th><th>Data</th><th>Descrição</th><th>Identificação</th>
+        <th class="num">Valor</th><th class="num">Saldo</th><th>Estado</th>
+      </tr>
+    </thead>
+    <tbody>${linhas}</tbody>
+  </table>
+
+  <div class="total">
+    <span class="rotulo">Total de ${titulo.toLowerCase()} no período</span>
+    <span class="montante">${formatCurrency(Math.abs(totalCreditos))}</span>
+  </div>
+
+  <script>window.onload = function(){ window.print(); }</script>
+</body></html>`
+
+    const janela = window.open('', '_blank', 'width=1100,height=800')
+    if (!janela) { alert('O navegador bloqueou a janela de impressão. Permite pop-ups para este site.'); return }
+    janela.document.write(html)
+    janela.document.close()
   }
 
   function identificacaoLabel(c: any): string {
@@ -484,10 +613,17 @@ export default function BancosPage() {
                       <option key={b.id} value={b.id}>{shortBankLabel(b)}</option>
                     ))}
                   </select>
-                  <select className="input w-28 text-sm" value={creditYear} onChange={e => setCreditYear(e.target.value)}>
-                    <option value="all">Todos</option>
-                    {anosDisponiveis.map(a => <option key={a} value={a}>{a}</option>)}
+                  <select className="input w-44 text-sm" value={creditYear} onChange={e => setCreditYear(e.target.value)}>
+                    <option value="all">Todo o período</option>
+                    <option value="ultimos:3">Últimos 3 meses</option>
+                    <option value="ultimos:6">Últimos 6 meses</option>
+                    <option value="ultimos:12">Últimos 12 meses</option>
+                    {anosDisponiveis.map(a => <option key={a} value={a}>Ano de {a}</option>)}
                   </select>
+                  <button onClick={imprimirMovimentos} className="btn-secondary text-sm py-1.5 px-3"
+                    title="Imprimir os movimentos visíveis em folha A4">
+                    <Printer className="w-4 h-4" /> Imprimir
+                  </button>
                 </div>
 
                 {/* Estado — atalho para o caso mais frequente: o que falta tratar */}
