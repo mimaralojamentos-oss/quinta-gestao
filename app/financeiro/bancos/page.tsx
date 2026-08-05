@@ -10,6 +10,7 @@ import { useAuth } from '@/lib/auth-context'
 import { buildRentPaymentPlan, applyRentPaymentPlan } from '@/lib/rentPaymentPlan'
 import { ensureExpenseForTransaction } from '@/lib/bankExpense'
 import BankMatchModal from '@/components/BankMatchModal'
+import BankImportModal from '@/components/BankImportModal'
 import Link from 'next/link'
 
 interface Bank {
@@ -64,6 +65,8 @@ export default function BancosPage() {
   const [documents, setDocuments] = useState<any[]>([])
   // Transação a identificar — abre o mesmo ecrã completo do extrato individual
   const [matchModal, setMatchModal] = useState<any | null>(null)
+  // Banco cujo extrato está a ser importado, a partir do próprio cartão
+  const [importBank, setImportBank] = useState<Bank | null>(null)
   const [showCredits, setShowCredits] = useState(true)
   const [creditSearch, setCreditSearch] = useState('')
   const [creditYear, setCreditYear] = useState('all')
@@ -381,8 +384,15 @@ export default function BancosPage() {
                       <span className="badge-amarelo">{bank._stats.pending} por validar</span>
                     )}
                     {canWrite && (
-                      <button onClick={() => { setEditBank(bank); setShowModal(true) }}
-                        className="btn-secondary text-xs py-1.5 px-3">Editar</button>
+                      <>
+                        <button onClick={() => setImportBank(bank)}
+                          className="btn-secondary text-xs py-1.5 px-3"
+                          title="Importar extrato sem sair desta página">
+                          <Upload className="w-3 h-3" /> Importar
+                        </button>
+                        <button onClick={() => { setEditBank(bank); setShowModal(true) }}
+                          className="btn-secondary text-xs py-1.5 px-3">Editar</button>
+                      </>
                     )}
                     <Link href={`/financeiro/bancos/${bank.id}`} className="btn-primary text-xs py-1.5 px-3">
                       <Eye className="w-3 h-3" /> Ver extrato
@@ -628,6 +638,16 @@ export default function BancosPage() {
           bank={editBank}
           onClose={() => setShowModal(false)}
           onSaved={() => { setShowModal(false); fetchBanks() }}
+        />
+      )}
+
+      {importBank && (
+        <BankImportModal
+          bankId={importBank.id}
+          bankName={importBank.name}
+          columnMapping={(importBank as any).column_mapping}
+          onImported={fetchBanks}
+          onClose={() => setImportBank(null)}
         />
       )}
 
