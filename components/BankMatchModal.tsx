@@ -126,6 +126,9 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
   // Por omissão só aparecem despesas/faturas com o valor exato da transação.
   const [expenseScope, setExpenseScope] = useState<Scope>('valor')
   const [docScope, setDocScope] = useState<Scope>('valor')
+  // Despesas/faturas já associadas a outra transação bancária.
+  const [usedExpenseIds, setUsedExpenseIds] = useState<Set<string>>(new Set())
+  const [usedDocumentIds, setUsedDocumentIds] = useState<Set<string>>(new Set())
   const [searchTenant, setSearchTenant] = useState('')
   const [documentId, setDocumentId] = useState(tx.confirmed_document_id ?? '')
   const [searchDoc, setSearchDoc] = useState('')
@@ -172,7 +175,33 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
       })
   }, [])
 
+  // Que despesas e faturas já foram usadas noutras reconciliações.
+  // Serve só para avisar o operador — continua a poder escolhê-las.
+  useEffect(() => {
+    supabase
+      .from('bank_transactions')
+      .select('id, confirmed_expense_id, confirmed_document_id')
+      .or('confirmed_expense_id.not.is.null,confirmed_document_id.not.is.null')
+      .then(({ data }) => {
+        const despesas = new Set<string>()
+        const faturas = new Set<string>()
+        for (const t of data ?? []) {
+          if (t.id === tx.id) continue // a própria transação não conta
+          if (t.confirmed_expense_id) despesas.add(t.confirmed_expense_id)
+          if (t.confirmed_document_id) faturas.add(t.confirmed_document_id)
+        }
+        setUsedExpenseIds(despesas)
+        setUsedDocumentIds(faturas)
+      })
+  }, [])
+
   const txDate = new Date(tx.transaction_date)
+
+  /** Uma despesa conta como usada se outra transação a reclamou. */
+  function despesaJaUsada(e: any): boolean {
+    if (usedExpenseIds.has(e.id)) return true
+    return !!e.bank_transaction_id && e.bank_transaction_id !== tx.id
+  }
 
   // Calcula a distribuição enquanto o utilizador escolhe, para o valor
   // deixar de ser uma caixa preta até ao momento de gravar.
@@ -562,13 +591,21 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
                   filteredExpenses.slice(0, 200).map(e => {
                     const diffDays = Math.round(Math.abs(new Date(e.expense_date).getTime() - txDate.getTime()) / (1000 * 60 * 60 * 24))
                     const isNearby = diffDays <= 15
+                    const jaUsada = despesaJaUsada(e)
                     return (
                       <div key={e.id} onClick={() => setExpenseId(e.id)}
-                        className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors ${expenseId === e.id ? 'bg-emerald-50 border-l-4 border-l-emerald-500' : ''}`}>
-                        <span className="text-xs text-gray-400 whitespace-nowrap flex-shrink-0 w-20">{formatDate(e.expense_date)}</span>
-                        <span className="text-sm font-semibold text-red-600 whitespace-nowrap flex-shrink-0 w-20">{formatCurrency(e.amount)}</span>
-                        <span className="text-xs text-gray-700 truncate flex-1">{e.description}</span>
-                        {isNearby && (
+                        className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors ${
+                          expenseId === e.id ? 'bg-emerald-50 border-l-4 border-l-emerald-500' : jaUsada ? 'bg-gray-100' : ''
+                        }`}>
+                        <span className={`text-xs whitespace-nowrap flex-shrink-0 w-20 ${jaUsada ? 'text-gray-400' : 'text-gray-400'}`}>{formatDate(e.expense_date)}</span>
+                        <span className={`text-sm font-semibold whitespace-nowrap flex-shrink-0 w-20 ${jaUsada ? 'text-gray-400' : 'text-red-600'}`}>{formatCurrency(e.amount)}</span>
+                        <span className={`text-xs truncate flex-1 ${jaUsada ? 'text-gray-400' : 'text-gray-700'}`}>{e.description}</span>
+                        {jaUsada && (
+                          <span className="text-xs px-1.5 py-0.5 rounded-full bg-gray-200 text-gray-500 flex-shrink-0 font-medium whitespace-nowrap" title="Esta despesa já está associada a outra transação bancária">
+                            já usada
+                          </span>
+                        )}
+                        {isNearby && !jaUsada && (
                           <span className="text-xs px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 flex-shrink-0 font-medium">
                             {diffDays === 0 ? 'hoje' : `${diffDays}d`}
                           </span>
@@ -618,15 +655,25 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
                 )}
                 {filteredDocuments
                   .slice(0, 50)
-                  .map(d => (
-                    <div key={d.id} onClick={() => setDocumentId(d.id)}
-                      className={`flex items-center gap-3 px-3 py-2 cursor-pointer border-b border-gray-50 hover:bg-gray-50 ${documentId === d.id ? 'bg-emerald-50 border-l-4 border-l-emerald-500' : ''}`}>
-                      <span className="text-xs text-gray-400 whitespace-nowrap flex-shrink-0 w-20">{d.doc_date ? formatDate(d.doc_date) : '—'}</span>
-                      <span className="text-sm font-semibold text-red-600 whitespace-nowrap flex-shrink-0 w-20">{d.amount ? formatCurrency(d.amount) : '—'}</span>
-                      <span className="text-xs text-gray-700 truncate flex-1">{d.supplier_name ?? d.original_name ?? '—'}</span>
-                      {documentId === d.id && <CheckCircle className="w-4 h-4 text-emerald-500 flex-shrink-0" />}
-                    </div>
-                  ))}
+                  .map(d => {
+                    const jaUsada = usedDocumentIds.has(d.id)
+                    return (
+                      <div key={d.id} onClick={() => setDocumentId(d.id)}
+                        className={`flex items-center gap-3 px-3 py-2 cursor-pointer border-b border-gray-50 hover:bg-gray-50 ${
+                          documentId === d.id ? 'bg-emerald-50 border-l-4 border-l-emerald-500' : jaUsada ? 'bg-gray-100' : ''
+                        }`}>
+                        <span className="text-xs text-gray-400 whitespace-nowrap flex-shrink-0 w-20">{d.doc_date ? formatDate(d.doc_date) : '—'}</span>
+                        <span className={`text-sm font-semibold whitespace-nowrap flex-shrink-0 w-20 ${jaUsada ? 'text-gray-400' : 'text-red-600'}`}>{d.amount ? formatCurrency(d.amount) : '—'}</span>
+                        <span className={`text-xs truncate flex-1 ${jaUsada ? 'text-gray-400' : 'text-gray-700'}`}>{d.supplier_name ?? d.original_name ?? '—'}</span>
+                        {jaUsada && (
+                          <span className="text-xs px-1.5 py-0.5 rounded-full bg-gray-200 text-gray-500 flex-shrink-0 font-medium whitespace-nowrap" title="Esta fatura já está associada a outra transação bancária">
+                            já usada
+                          </span>
+                        )}
+                        {documentId === d.id && <CheckCircle className="w-4 h-4 text-emerald-500 flex-shrink-0" />}
+                      </div>
+                    )
+                  })}
               </div>
               {filteredDocuments.length > 0 && (
                 <p className="text-xs text-gray-400 mt-1">
