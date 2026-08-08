@@ -10,8 +10,21 @@ import {
   normalizeSupplier, buildAliasMap, groupSuppliers,
   type SupplierAlias, type SupplierGroup,
 } from '@/lib/suppliers'
-import { Truck, Search, ChevronLeft, ChevronDown, ChevronRight, X, Link2, Undo2 } from 'lucide-react'
+import { Truck, Search, ChevronLeft, ChevronDown, ChevronRight, X, Link2, Undo2, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react'
 import Link from 'next/link'
+
+type Ordem = 'nome' | 'faturas' | 'total'
+
+/**
+ * Seta de ordenação. Fora do componente para não ser recriada em cada
+ * render — se fosse dentro, a tabela perdia o estado a cada clique.
+ */
+function SetaOrdem({ ativo, dir }: { ativo: boolean; dir: 'asc' | 'desc' }) {
+  if (!ativo) return <ArrowUpDown className="w-3 h-3 text-gray-300 ml-1 inline" />
+  return dir === 'asc'
+    ? <ArrowUp className="w-3 h-3 text-emerald-600 ml-1 inline" />
+    : <ArrowDown className="w-3 h-3 text-emerald-600 ml-1 inline" />
+}
 
 export default function FornecedoresPage() {
   const supabase = createClient()
@@ -24,6 +37,8 @@ export default function FornecedoresPage() {
   const [erro, setErro] = useState('')
   const [pesquisa, setPesquisa] = useState('')
   const [expandido, setExpandido] = useState<string | null>(null)
+  const [ordem, setOrdem] = useState<Ordem>('total')
+  const [ordemDir, setOrdemDir] = useState<'asc' | 'desc'>('desc')
 
   // Janela de equivalência
   const [editar, setEditar] = useState<{ raw: string; atual: string } | null>(null)
@@ -53,9 +68,24 @@ export default function FornecedoresPage() {
   const grupos = groupSuppliers(docs, aliasMap)
 
   const q = pesquisa.trim().toLowerCase()
-  const visiveis: SupplierGroup[] = grupos.filter(g =>
-    !q || g.name.toLowerCase().includes(q) || g.variants.some(v => v.raw.toLowerCase().includes(q))
-  )
+  const visiveis: SupplierGroup[] = grupos
+    .filter(g => !q || g.name.toLowerCase().includes(q) || g.variants.some(v => v.raw.toLowerCase().includes(q)))
+    .sort((a, b) => {
+      const sinal = ordemDir === 'asc' ? 1 : -1
+      if (ordem === 'nome') return sinal * a.name.localeCompare(b.name, 'pt', { sensitivity: 'base' })
+      if (ordem === 'faturas') return sinal * (a.docs - b.docs)
+      return sinal * (a.total - b.total)
+    })
+
+  function ordenarPor(campo: Ordem) {
+    if (ordem === campo) {
+      setOrdemDir(d => (d === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setOrdem(campo)
+      // O nome lê-se melhor de A a Z; números, do maior para o menor.
+      setOrdemDir(campo === 'nome' ? 'asc' : 'desc')
+    }
+  }
 
   const totalGeral = visiveis.reduce((s, g) => s + g.total, 0)
   const porAgrupar = grupos.filter(g => g.variants.length > 1).length
@@ -170,9 +200,18 @@ export default function FornecedoresPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 text-left text-gray-500 text-xs uppercase">
-                <th className="px-4 py-2.5">Fornecedor</th>
-                <th className="px-4 py-2.5 text-right whitespace-nowrap">Faturas</th>
-                <th className="px-4 py-2.5 text-right whitespace-nowrap">Total</th>
+                <th className="px-4 py-2.5 cursor-pointer select-none hover:text-gray-700"
+                  onClick={() => ordenarPor('nome')} title="Ordenar por nome">
+                  Fornecedor <SetaOrdem ativo={ordem === 'nome'} dir={ordemDir} />
+                </th>
+                <th className="px-4 py-2.5 text-right whitespace-nowrap cursor-pointer select-none hover:text-gray-700"
+                  onClick={() => ordenarPor('faturas')} title="Ordenar por número de faturas">
+                  Faturas <SetaOrdem ativo={ordem === 'faturas'} dir={ordemDir} />
+                </th>
+                <th className="px-4 py-2.5 text-right whitespace-nowrap cursor-pointer select-none hover:text-gray-700"
+                  onClick={() => ordenarPor('total')} title="Ordenar por total faturado">
+                  Total <SetaOrdem ativo={ordem === 'total'} dir={ordemDir} />
+                </th>
                 <th className="px-4 py-2.5 whitespace-nowrap">Primeira</th>
                 <th className="px-4 py-2.5 whitespace-nowrap">Última</th>
               </tr>
