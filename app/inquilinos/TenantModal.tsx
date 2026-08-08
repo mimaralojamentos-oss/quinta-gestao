@@ -7,6 +7,7 @@ import EmailComposer from '@/components/EmailComposer'
 import { formatCurrency, formatDate, getCurrentMonth } from '@/lib/utils'
 import { logAccess } from '@/lib/logAccess'
 import { useFileDrop } from '@/lib/useFileDrop'
+import { consumeAdvances, describeAdvanceTarget, buildAppliedAdvanceMap, appliedAdvanceFor } from '@/lib/advanceCredit'
 
 interface Props {
   tenant: Tenant | null
@@ -41,6 +42,16 @@ interface PaymentRow {
   isElecCharge?: boolean
   isPartialElec?: boolean
   remainingAmount?: number
+  /** Destino de um adiantamento já consumido ('renda' | 'eletricidade'). */
+  applied_to_type?: string | null
+  /** Mês da renda a que o adiantamento foi aplicado. */
+  applied_to_month?: string | null
+  /** Adiantamento que ajudou a pagar esta renda (só para efeitos de apresentação). */
+  advanceApplied?: number
+  /** Valor a mostrar na linha — dinheiro + adiantamento. Não entra nos totais. */
+  displayAmount?: number
+  /** Linha de renda coberta apenas por adiantamento (não existe pagamento em dinheiro). */
+  isAdvanceOnly?: boolean
 }
 
 export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Props) {
@@ -99,6 +110,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
     method: 'dinheiro',
   })
   const [savingRecebimento, setSavingRecebimento] = useState(false)
+  const [applyingAdvanceKey, setApplyingAdvanceKey] = useState<string | null>(null)
 
   useEffect(() => {
     async function loadSpaces() {
@@ -152,6 +164,11 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
       ...p, lease: (leasesData ?? []).find(l => l.id === p.lease_id), isMissing: false, isManualDebt: false, isElecCharge: false
     }))
 
+    // Adiantamentos que já foram formalmente aplicados a rendas.
+    // Contam como pagamento do mês, mas o valor continua na linha do adiantamento
+    // (por isso NÃO são somados a p.amount — os totais mantêm-se inalterados).
+    const advanceByRentMonth = buildAppliedAdvanceMap(pays)
+
     // Rendas em falta
     const missingRows: PaymentRow[] = []
     const mayStart = new Date('2026-05-01')
@@ -165,15 +182,38 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
         const monthStr = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`
         const monthPayments = enriched.filter(p => p.lease_id === lease.id && p.reference_month?.slice(0, 7) === monthStr && (p.tipo === 'renda' || !p.tipo))
         const totalPaidThisMonth = monthPayments.reduce((s, p) => s + (p.amount ?? 0), 0)
-        const hasPayment = monthPayments.length > 0
+        // Adiantamento formalmente aplicado a esta renda — conta como pago.
+        const advanceThisMonth = appliedAdvanceFor(advanceByRentMonth, lease.id, monthStr)
+        const totalCovered = parseFloat((totalPaidThisMonth + advanceThisMonth).toFixed(2))
+        const hasPayment = monthPayments.length > 0 || advanceThisMonth > 0
         const rentForMonth = getRentForMonth(lease.id, monthStr, lease.monthly_rent)
+
+        // A renda foi paga só com crédito, sem nenhum pagamento em dinheiro:
+        // é preciso uma linha para o mês não ficar em branco.
+        if (advanceThisMonth > 0 && monthPayments.length === 0) {
+          missingRows.push({
+            reference_month: monthStr + '-01', amount: 0,
+            displayAmount: advanceThisMonth, advanceApplied: advanceThisMonth, isAdvanceOnly: true,
+            payment_date: null, payment_method: null, tipo: 'renda', lease,
+            isMissing: false, isManualDebt: false, isElecCharge: false,
+          })
+        } else if (advanceThisMonth > 0) {
+          // Junta o adiantamento à última renda paga do mês, para aparecer numa só linha.
+          const paidRows = monthPayments.filter(p => !!p.payment_date)
+          const target = paidRows.sort((a, b) => (a.payment_date ?? '').localeCompare(b.payment_date ?? '')).at(-1)
+          if (target) {
+            target.advanceApplied = advanceThisMonth
+            target.displayAmount = parseFloat(((target.amount ?? 0) + advanceThisMonth).toFixed(2))
+          }
+        }
+
         if (!hasPayment) {
           missingRows.push({
             reference_month: monthStr + '-01', amount: rentForMonth,
             payment_date: null, payment_method: null, tipo: 'renda', lease, isMissing: true, isManualDebt: false, isElecCharge: false
           })
-        } else if (totalPaidThisMonth < rentForMonth - 0.01) {
-          const shortfall = parseFloat((rentForMonth - totalPaidThisMonth).toFixed(2))
+        } else if (totalCovered < rentForMonth - 0.01) {
+          const shortfall = parseFloat((rentForMonth - totalCovered).toFixed(2))
           missingRows.push({
             reference_month: monthStr + '-01', amount: shortfall,
             payment_date: null, payment_method: null, tipo: 'renda', lease, isMissing: true, isManualDebt: false, isElecCharge: false,
@@ -389,6 +429,56 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
     await fetchPayments()
   }
 
+  /** Crédito ainda disponível num determinado contrato. */
+  function availableAdvanceForLease(leaseId: string | undefined): number {
+    if (!leaseId) return 0
+    return parseFloat(payments
+      .filter(p => p.tipo === 'adiantamento' && !p.used && p.lease_id === leaseId)
+      .reduce((s, p) => s + (p.amount ?? 0), 0)
+      .toFixed(2))
+  }
+
+  // Aplica o crédito do inquilino a uma renda que ficou por cobrir.
+  // O dinheiro não volta a entrar — apenas se regista que aqueles euros
+  // saíram do crédito e foram para esta renda.
+  async function handleApplyAdvanceToRent(row: PaymentRow) {
+    const leaseId = row.lease_id ?? row.lease?.id
+    if (!leaseId) { alert('Esta renda não tem contrato associado.'); return }
+
+    const monthLabel = row.reference_month.slice(0, 7)
+    const disponivel = availableAdvanceForLease(leaseId)
+    const aplicar = parseFloat(Math.min(disponivel, row.amount).toFixed(2))
+    if (aplicar <= 0) return
+
+    const sobra = parseFloat((row.amount - aplicar).toFixed(2))
+    const aviso = sobra > 0.01
+      ? `\n\nDepois disto continuam em falta ${formatCurrency(sobra)} nesta renda.`
+      : '\n\nA renda deste mês fica completa.'
+
+    if (!confirm(
+      `Usar ${formatCurrency(aplicar)} do adiantamento do inquilino para pagar a renda de ${monthLabel}?` +
+      `\n\nCrédito disponível: ${formatCurrency(disponivel)}` + aviso
+    )) return
+
+    setApplyingAdvanceKey(`${leaseId}__${monthLabel}`)
+    const { applied, error } = await consumeAdvances(supabase, {
+      leaseId,
+      amountNeeded: aplicar,
+      target: { type: 'renda', leaseId, month: monthLabel },
+    })
+    setApplyingAdvanceKey(null)
+
+    if (error) { alert(`Não foi possível aplicar o adiantamento: ${error}`); return }
+    if (applied <= 0) { alert('Não havia crédito disponível para aplicar.'); return }
+
+    await logAccess({
+      action: 'editar',
+      page: '/inquilinos',
+      details: `Aplicou adiantamento (${formatCurrency(applied)}) à renda de ${monthLabel} de "${tenant?.name}"`,
+    })
+    await fetchPayments()
+  }
+
   // totalDebt inclui: rendas em falta + dívidas manuais + eletricidade por pagar, deduzindo adiantamentos disponíveis (crédito do inquilino)
   const totalAdvance = payments
     .filter(p => p.tipo === 'adiantamento' && !p.used)
@@ -587,15 +677,21 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
 
     const rows = payments.map((p: PaymentRow) => {
       const isLiquidada = p.isManualDebt && p.payment_date === 'liquidada'
-      const isPago = !p.isManualDebt && !!p.payment_date && p.payment_date !== 'liquidada'
+      const isPago = !p.isManualDebt && ((!!p.payment_date && p.payment_date !== 'liquidada') || !!p.isAdvanceOnly)
       const estado = isLiquidada ? 'Liquidada' : isPago ? 'Pago' : p.isMissing ? 'Em falta' : 'Por pagar'
       const estadoColor = isPago || isLiquidada ? '#16a34a' : '#dc2626'
       const amount = p.isManualDebt ? (p.remainingAmount ?? p.amount) : p.amount
       const periodo = p.reference_month?.slice(0, 7) ?? '—'
       const tipo = tipoLabel[p.tipo] ?? p.tipo
+      // Deixa rasto de que parte do valor entrou por crédito e não em dinheiro.
+      const detalheCredito = p.advanceApplied
+        ? ` — inclui ${formatCurrency(p.advanceApplied)} de adiantamento`
+        : p.tipo === 'adiantamento' && p.used
+          ? ` — ${describeAdvanceTarget(p).replace('✓ ', '')}`
+          : ''
       return `<tr>
         <td>${periodo}</td>
-        <td>${tipo}${p.notes ? ` — ${p.notes}` : ''}</td>
+        <td>${tipo}${p.notes ? ` — ${p.notes}` : ''}${detalheCredito}</td>
         <td>${p.payment_date && p.payment_date !== 'liquidada' ? p.payment_date : '—'}</td>
         <td style="color:${estadoColor};font-weight:600">${estado}</td>
         <td style="text-align:right;font-weight:600">${formatCurrency(amount)}</td>
@@ -1215,7 +1311,13 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                 <div className="space-y-2">
                   {payments.map((p, i) => {
                     const isLiquidada = p.isManualDebt && p.payment_date === 'liquidada'
-                    const isPago = !p.isManualDebt && !!p.payment_date && p.payment_date !== 'liquidada'
+                    const isPago = !p.isManualDebt && ((!!p.payment_date && p.payment_date !== 'liquidada') || !!p.isAdvanceOnly)
+                    // Crédito disponível para cobrir esta renda em falta
+                    const creditoDisponivel = p.isMissing && !p.isManualDebt && !p.isElecCharge
+                      ? availableAdvanceForLease(p.lease_id ?? p.lease?.id)
+                      : 0
+                    const creditoAplicavel = parseFloat(Math.min(creditoDisponivel, p.amount).toFixed(2))
+                    const aAplicar = applyingAdvanceKey === `${p.lease_id ?? p.lease?.id}__${p.reference_month.slice(0, 7)}`
                     return (
                       <div key={p.id ?? `row-${i}`}
                         className={`flex items-center justify-between p-3 rounded-lg border ${
@@ -1243,7 +1345,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                           </p>
                           {p.tipo === 'adiantamento' ? (
                             p.used ? (
-                              <p className="text-xs text-gray-400 font-medium">✓ Aplicado a uma fatura de eletricidade</p>
+                              <p className="text-xs text-gray-400 font-medium">{describeAdvanceTarget(p)}</p>
                             ) : (
                               <p className="text-xs text-purple-600 font-medium">💰 Crédito do inquilino · pago em {formatDate(p.payment_date!)} · {p.payment_method}</p>
                             )
@@ -1258,7 +1360,13 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                               <p className="text-xs text-red-600 font-medium">⚡ Eletricidade por pagar</p>
                             )
                           ) : p.payment_date ? (
-                            <p className="text-xs text-gray-500">Pago em {formatDate(p.payment_date)} · {p.payment_method}</p>
+                            <p className="text-xs text-gray-500">
+                              Pago em {formatDate(p.payment_date)} · {p.advanceApplied
+                                ? `${formatCurrency(p.amount)} ${p.payment_method} + ${formatCurrency(p.advanceApplied)} adiantamento`
+                                : p.payment_method}
+                            </p>
+                          ) : p.isAdvanceOnly ? (
+                            <p className="text-xs text-gray-500">Pago com adiantamento · {formatCurrency(p.advanceApplied ?? 0)}</p>
                           ) : p.isMissing ? (
                             <p className="text-xs text-orange-600 font-medium">⚠ Sem registo de pagamento</p>
                           ) : (
@@ -1269,6 +1377,13 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                               {isLiquidada ? '✓ Liquidada' : `Em dívida: ${formatCurrency(p.remainingAmount ?? p.amount)}`}
                             </p>
                           )}
+                          {creditoAplicavel > 0 && (
+                            <button onClick={() => handleApplyAdvanceToRent(p)} disabled={aAplicar}
+                              className="mt-1.5 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-purple-300 bg-purple-50 text-purple-700 text-xs font-medium hover:bg-purple-100 disabled:opacity-50 transition-colors">
+                              {aAplicar ? <Loader2 className="w-3 h-3 animate-spin" /> : <Banknote className="w-3 h-3" />}
+                              {aAplicar ? 'A aplicar...' : `Usar adiantamento (${formatCurrency(creditoAplicavel)})`}
+                            </button>
+                          )}
                         </div>
                         <div className="flex items-center gap-2">
                           <span className={`font-semibold text-sm ${
@@ -1276,7 +1391,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                             : isPago || isLiquidada ? 'text-gray-900'
                             : 'text-red-600'
                           }`}>
-                            {p.tipo === 'adiantamento' && !p.used ? '+' : ''}{formatCurrency(p.amount)}
+                            {p.tipo === 'adiantamento' && !p.used ? '+' : ''}{formatCurrency(p.displayAmount ?? p.amount)}
                           </span>
                           {!p.isMissing && !p.isManualDebt && !p.isElecCharge && p.id && (
                             <>

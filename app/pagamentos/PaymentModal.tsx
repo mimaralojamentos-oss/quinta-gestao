@@ -6,6 +6,7 @@ import { formatCurrency, formatDate, getMonthLabel } from '@/lib/utils'
 import { buildRentPaymentPlan, applyRentPaymentPlan } from '@/lib/rentPaymentPlan'
 import { X, Pencil, Trash2, AlertTriangle } from 'lucide-react'
 import { logAccess } from '@/lib/logAccess'
+import { consumeAdvances } from '@/lib/advanceCredit'
 
 interface Props {
   lease: any
@@ -46,7 +47,6 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
   const [mode, setMode] = useState<'debts' | 'new'>('debts')
   const [editingPayment, setEditingPayment] = useState<any | null>(null)
   const [debtItems, setDebtItems] = useState<DebtItem[]>([])
-  const [adiantamentosToUse, setAdiantamentosToUse] = useState<{ id: string; amount: number }[]>([])
   const [singleAmount, setSingleAmount] = useState('')
   const [singleDate, setSingleDate] = useState(new Date().toISOString().slice(0, 10))
   const [singleMethod, setSingleMethod] = useState('dinheiro')
@@ -161,7 +161,6 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
       return { ...item, remainingAmount: parseFloat((item.remainingAmount - credit).toFixed(2)), creditApplied: credit }
     })
 
-    setAdiantamentosToUse(advData ?? [])
     setDebtItems(adjustedItems)
     setLoadingDebts(false)
   }
@@ -285,35 +284,22 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
       }
     }
 
-    // Registar rent_payments para créditos de adiantamento aplicados (preenche o gap na conta corrente)
+    // Aplicar o crédito do inquilino às rendas.
+    // Antes criava-se uma renda "fantasma" com a nota "Crédito de adiantamento
+    // aplicado" e o adiantamento ficava apenas marcado como usado, sem se saber
+    // onde tinha sido gasto. Agora cada adiantamento assina o mês que pagou.
     for (const item of debtItems) {
       const credit = item.creditApplied ?? 0
-      if (credit > 0 && item.type === 'renda') {
-        await supabase.from('rent_payments').insert({
-          lease_id: lease.id,
-          reference_month: (item.referenceMonth ?? '') + '-01',
-          payment_date: singleDate,
-          amount: credit,
-          payment_method: singleMethod,
-          tipo: 'renda',
-          notes: 'Crédito de adiantamento aplicado',
-        })
-      }
-    }
-
-    // Marcar adiantamentos consumidos como usados
-    if (adiantamentosToUse.length > 0) {
-      const totalCreditUsed = debtItems.filter(d => d.type === 'renda').reduce((s, d) => s + (d.creditApplied ?? 0), 0)
-      let toConsume = totalCreditUsed
-      for (const adv of adiantamentosToUse) {
-        if (toConsume <= 0) break
-        if (adv.amount <= toConsume) {
-          await supabase.from('rent_payments').update({ used: true }).eq('id', adv.id)
-          toConsume = parseFloat((toConsume - adv.amount).toFixed(2))
-        } else {
-          await supabase.from('rent_payments').update({ amount: parseFloat((adv.amount - toConsume).toFixed(2)), used: false }).eq('id', adv.id)
-          toConsume = 0
-        }
+      if (credit <= 0 || item.type !== 'renda') continue
+      const { error: advError } = await consumeAdvances(supabase, {
+        leaseId: lease.id,
+        amountNeeded: credit,
+        target: { type: 'renda', leaseId: lease.id, month: item.referenceMonth ?? '' },
+      })
+      if (advError) {
+        alert(`Erro ao aplicar o adiantamento: ${advError}`)
+        setSaving(false)
+        return
       }
     }
 

@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase-client'
 import { formatDate } from '@/lib/utils'
 import { BarChart3, TrendingUp, Home, FileText, Calendar, ChevronDown, ChevronUp, Edit2, X, Save, ClipboardList, Download, Loader2, Receipt, Mail, AlertTriangle, Printer } from 'lucide-react'
 import EmailComposer from '@/components/EmailComposer'
+import { buildAppliedAdvanceMap, appliedAdvanceFor } from '@/lib/advanceCredit'
 
 interface MonthOption { label: string; value: string }
 
@@ -199,7 +200,7 @@ export default function RelatoriosPage() {
       const [tenantsRes, leasesRes, paymentsRes, debtsRes, debtPaymentsRes, elecRes] = await Promise.all([
         supabase.from('tenants').select('id, name, email'),
         supabase.from('leases').select('id, tenant_id, monthly_rent, start_date, status, space_id, space:spaces(ref)'),
-        supabase.from('rent_payments').select('id, lease_id, reference_month, payment_date, amount, tipo, used'),
+        supabase.from('rent_payments').select('id, lease_id, reference_month, payment_date, amount, tipo, used, applied_to_type, applied_to_month, applied_to_lease_id'),
         supabase.from('debts').select('id, tenant_id, description, original_amount, reference_date'),
         supabase.from('debt_payments').select('debt_id, amount'),
         supabase.from('electricity_charges').select('id, lease_id, reference_month, charge_date, units, amount, amount_paid').eq('paid', false),
@@ -254,6 +255,9 @@ export default function RelatoriosPage() {
       const hoje = new Date()
       hoje.setDate(1)
 
+      // Adiantamentos já aplicados a rendas — contam como pagamento desse mês.
+      const adiantamentosAplicados = buildAppliedAdvanceMap(payments)
+
       const linhas = tenants.map(t => {
         const tLeases = leases.filter(l => l.tenant_id === t.id)
         const leaseIds = tLeases.map(l => l.id)
@@ -290,13 +294,15 @@ export default function RelatoriosPage() {
               p.reference_month?.slice(0, 7) === mes &&
               (p.tipo === 'renda' || !p.tipo)
             )
-            const registado = doMes.reduce((s, p) => s + (p.amount ?? 0), 0)
+            // O crédito já formalmente aplicado a esta renda também conta como pago.
+            const credito = appliedAdvanceFor(adiantamentosAplicados, lease.id, mes)
+            const registado = doMes.reduce((s, p) => s + (p.amount ?? 0), 0) + credito
             const emFalta = parseFloat((rendaMes - registado).toFixed(2))
 
             if (rendaMes > 0 && emFalta >= 0.01) {
               parcelas.push({
                 grupo: 'Renda',
-                descricao: doMes.length > 0
+                descricao: doMes.length > 0 || credito > 0
                   ? `Renda de ${mesLegivel(mes)}${espacoRef ? ` · ${espacoRef}` : ''} — falta parte (${fmt(registado)} de ${fmt(rendaMes)})`
                   : `Renda de ${mesLegivel(mes)}${espacoRef ? ` · ${espacoRef}` : ''}`,
                 valor: emFalta,

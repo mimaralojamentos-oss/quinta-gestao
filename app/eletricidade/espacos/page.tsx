@@ -7,6 +7,7 @@ import { formatCurrency, formatDate } from '@/lib/utils'
 import { Zap, Trash2, X, ChevronDown, ChevronRight, Settings, Save, Pencil, Search, Printer } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import { logAccess } from '@/lib/logAccess'
+import { consumeAdvances, linkAdvancesToCharge } from '@/lib/advanceCredit'
 
 interface ElectricityConfig {
   id: number
@@ -548,41 +549,22 @@ export default function QuadrosEspacosPage() {
 
     setSaving(true)
 
-    const { data: advances } = await supabase
-      .from('rent_payments')
-      .select('*')
-      .eq('lease_id', editLeaseId)
-      .eq('tipo', 'adiantamento')
-      .eq('used', false)
-      .order('payment_date', { ascending: true })
+    // Consome o crédito do inquilino e regista que foi para eletricidade.
+    const { applied: totalApplied, consumedIds, error: advError } = await consumeAdvances(supabase, {
+      leaseId: editLeaseId,
+      amountNeeded: amountDue,
+      target: { type: 'eletricidade' },
+    })
 
-    let remaining = amountDue
-    let totalApplied = 0
-
-    for (const adv of advances ?? []) {
-      if (remaining <= 0) break
-      if (adv.amount <= remaining) {
-        await supabase.from('rent_payments').update({ used: true }).eq('id', adv.id)
-        totalApplied += adv.amount
-        remaining = parseFloat((remaining - adv.amount).toFixed(2))
-      } else {
-        await supabase.from('rent_payments').update({ amount: remaining, used: true }).eq('id', adv.id)
-        await supabase.from('rent_payments').insert({
-          lease_id: adv.lease_id,
-          reference_month: adv.reference_month,
-          amount: parseFloat((adv.amount - remaining).toFixed(2)),
-          payment_date: adv.payment_date,
-          payment_method: adv.payment_method,
-          tipo: 'adiantamento',
-          notes: adv.notes,
-          used: false,
-        })
-        totalApplied += remaining
-        remaining = 0
-      }
+    if (advError) {
+      alert(`Erro ao aplicar o adiantamento: ${advError}`)
+      setSaving(false)
+      return
     }
 
-    const { error: chargeError } = await supabase.from('electricity_charges').insert({
+    const remaining = parseFloat((amountDue - totalApplied).toFixed(2))
+
+    const { data: newCharge, error: chargeError } = await supabase.from('electricity_charges').insert({
       lease_id: editLeaseId,
       charge_date: new Date().toISOString().slice(0, 10),
       reference_month: editReadingModal.reading_date.slice(0, 7) + '-01',
@@ -592,13 +574,16 @@ export default function QuadrosEspacosPage() {
       payment_date: remaining === 0 ? new Date().toISOString().slice(0, 10) : null,
       payment_method: null,
       notes: totalApplied > 0 ? `Adiantamento de ${formatCurrency(totalApplied)} aplicado` : null,
-    })
+    }).select().single()
 
     if (chargeError) {
       alert(`Erro ao criar a cobrança de eletricidade: ${chargeError.message}`)
       setSaving(false)
       return
     }
+
+    // A cobrança só existe agora — liga-lhe os adiantamentos consumidos.
+    if (newCharge?.id) await linkAdvancesToCharge(supabase, consumedIds, newCharge.id)
 
     await supabase.from('electricity_readings').update({
       charged: true,

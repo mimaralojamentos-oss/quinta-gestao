@@ -11,6 +11,7 @@ import LeaseModal from './LeaseModal'
 import { useAuth } from '@/lib/auth-context'
 import EmailComposer from '@/components/EmailComposer'
 import { logAccess } from '@/lib/logAccess'
+import { buildAppliedAdvanceMap, appliedAdvanceFor } from '@/lib/advanceCredit'
 import Link from 'next/link'
 
 interface TenantWithLease extends Tenant {
@@ -89,7 +90,7 @@ export default function InquilinosPage() {
     const { data: tenantsData } = await supabase.from('tenants').select('*').order('name')
     const { data: leasesData } = await supabase.from('leases').select('*, space:spaces(*)')
     const { data: spacesData } = await supabase.from('spaces').select('ref, type, tenant_id').not('tenant_id', 'is', null)
-    const { data: paymentsData } = await supabase.from('rent_payments').select('amount, lease_id, payment_date, reference_month, tipo, used')
+    const { data: paymentsData } = await supabase.from('rent_payments').select('amount, lease_id, payment_date, reference_month, tipo, used, applied_to_type, applied_to_month, applied_to_lease_id')
     const { data: debtsData } = await supabase.from('debts').select('id, tenant_id, original_amount')
     const { data: debtPaymentsData } = await supabase.from('debt_payments').select('debt_id, amount')
 
@@ -110,6 +111,9 @@ export default function InquilinosPage() {
         .sort((a: any, b: any) => b.effective_date.localeCompare(a.effective_date))
       return aplicaveis[0]?.monthly_rent ?? fallback
     }
+
+    // Adiantamentos já aplicados a rendas — contam como pagamento desse mês.
+    const appliedAdvances = buildAppliedAdvanceMap(paymentsData)
 
     const mayStart = new Date('2026-05-01')
     const today = new Date()
@@ -147,7 +151,8 @@ export default function InquilinosPage() {
             )
             .reduce((s, p) => s + (p.amount ?? 0), 0)
 
-          const shortfall = parseFloat((rentForMonth - registered).toFixed(2))
+          const credito = appliedAdvanceFor(appliedAdvances, lease.id, monthStr)
+          const shortfall = parseFloat((rentForMonth - registered - credito).toFixed(2))
           if (shortfall >= 0.01) missingDebt += shortfall
           cursor.setMonth(cursor.getMonth() + 1)
         }
