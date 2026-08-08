@@ -4,6 +4,7 @@ import { requireRole } from '@/lib/require-role'
 import { getAdminEmails } from '@/lib/adminEmails'
 import { applySubjectPrefix } from '@/lib/emailConfig'
 import { getEmailSettings } from '@/lib/emailSettings'
+import { recordSentEmail } from '@/lib/sentEmails'
 
 export async function POST(request: NextRequest) {
   // Só quem tem sessão e permissão pode enviar e-mails em nome da empresa.
@@ -13,8 +14,14 @@ export async function POST(request: NextRequest) {
   const auth = await requireRole(['admin', 'coadmin'])
   if (auth.error) return auth.error
 
+  // Fora do try, para o bloco de erro conseguir registar a tentativa falhada.
+  let payload: any = {}
+  let finalSubject = ''
+  let cc: string[] = []
+
   try {
-    const { to, subject, body, replyTo, senderName, footerNote, skipAdminCc } = await request.json()
+    payload = await request.json()
+    const { to, subject, body, replyTo, senderName, footerNote, skipAdminCc } = payload
 
     if (!to || !subject || !body) {
       return NextResponse.json({ error: 'Campos obrigatórios: to, subject, body' }, { status: 400 })
@@ -30,10 +37,9 @@ export async function POST(request: NextRequest) {
 
     // Prefixo obrigatório do assunto, aplicado no servidor para que nenhum
     // e-mail saia sem ele, independentemente de onde foi pedido.
-    const finalSubject = applySubjectPrefix(subject, settings.subjectPrefix)
+    finalSubject = applySubjectPrefix(subject, settings.subjectPrefix)
 
     // Todos os administradores vão em CC.
-    let cc: string[] = []
     if (!skipAdminCc) {
       const admins = await getAdminEmails()
       const toList = String(to).split(/[,;]/).map(s => s.trim().toLowerCase())
@@ -81,9 +87,40 @@ export async function POST(request: NextRequest) {
       replyTo: replyTo ?? settings.replyTo ?? settings.fromEmail,
     })
 
+    // Histórico completo, incluindo o corpo do e-mail.
+    await recordSentEmail({
+      toEmail: String(to),
+      toName: payload.recipientName ?? null,
+      ccEmails: cc,
+      subject: finalSubject,
+      body: String(body),
+      context: payload.context ?? null,
+      sentById: auth.user?.id ?? null,
+      sentByEmail: auth.user?.email ?? null,
+      status: 'enviado',
+    })
+
     return NextResponse.json({ success: true, subject: finalSubject, cc })
   } catch (e: any) {
     console.error('[send-email]', e)
+
+    // As falhas também ficam registadas — é o que permite perceber
+    // mais tarde porque é que um inquilino nunca recebeu o e-mail.
+    if (payload?.to && payload?.subject) {
+      await recordSentEmail({
+        toEmail: String(payload.to),
+        toName: payload.recipientName ?? null,
+        ccEmails: cc,
+        subject: finalSubject || String(payload.subject),
+        body: String(payload.body ?? ''),
+        context: payload.context ?? null,
+        sentById: auth.user?.id ?? null,
+        sentByEmail: auth.user?.email ?? null,
+        status: 'erro',
+        errorMessage: e.message ?? 'Erro desconhecido',
+      })
+    }
+
     return NextResponse.json({ error: e.message ?? 'Erro ao enviar e-mail' }, { status: 500 })
   }
 }

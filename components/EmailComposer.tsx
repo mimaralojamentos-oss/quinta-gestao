@@ -241,6 +241,9 @@ export default function EmailComposer({
           subject,               // o prefixo é aplicado no servidor
           body: `${body}\n\nCom os melhores cumprimentos,\n${senderName}`,
           senderName,
+          // Guardados no histórico de e-mails enviados (/extras/emails)
+          recipientName: recipientName || null,
+          context: context ?? null,
         }),
       })
       const data = await res.json()

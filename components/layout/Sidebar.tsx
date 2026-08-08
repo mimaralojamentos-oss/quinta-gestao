@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, Building2, Users, CreditCard,
   Receipt, Wallet, Bell, Zap, LogOut, ShieldCheck,
-  TrendingUp, Landmark, ChevronDown, ChevronRight, FolderOpen, HardHat, NotebookPen, BarChart3, UserCircle, DoorOpen, ScrollText, Mail,
+  TrendingUp, Landmark, ChevronDown, ChevronRight, FolderOpen, HardHat, NotebookPen, BarChart3, UserCircle, DoorOpen, ScrollText, Mail, Boxes,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/lib/auth-context'
@@ -22,6 +22,7 @@ const navItems = [
   { href: '/alertas', label: 'Alertas', icon: Bell },
   { href: '/relatorios', label: 'Relatórios', icon: BarChart3 },
   { href: '/portao', label: 'Portão', icon: DoorOpen },
+  { href: '/extras', label: 'Extras', icon: Boxes },
 ]
 
 // Páginas com acesso restrito — só aparecem a quem as pode usar.
