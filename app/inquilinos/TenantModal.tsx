@@ -1198,11 +1198,20 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                               const label = a.item.isElecCharge ? `Eletricidade ${a.item.reference_month?.slice(0, 7)}`
                                 : a.item.isManualDebt ? (a.item.notes ?? `Dívida ${a.item.reference_month?.slice(0, 7)}`)
                                 : `Renda ${a.item.reference_month?.slice(0, 7)}`
+                              // Quanto estava em dívida antes deste recebimento e quanto sobra depois.
+                              const emDivida = a.item.remainingAmount ?? a.item.amount
+                              const fica = parseFloat((emDivida - a.paying).toFixed(2))
                               return (
-                                <div key={i} className="flex justify-between items-center px-3 py-2">
+                                <div key={i} className="flex justify-between items-start px-3 py-2">
                                   <span className="text-xs text-gray-700">
                                     {icon} {label}
                                     {a.paying < a.item.amount && <span className="text-orange-500 ml-1">(parcial)</span>}
+                                    <span className="block text-[11px] text-gray-500 mt-0.5">
+                                      Em dívida {formatCurrency(emDivida)}
+                                      {fica > 0.01
+                                        ? <span className="text-orange-600 font-medium"> · ficam {formatCurrency(fica)}</span>
+                                        : <span className="text-emerald-600 font-medium"> · fica liquidada</span>}
+                                    </span>
                                   </span>
                                   <span className="text-xs font-semibold">{formatCurrency(a.paying)}</span>
                                 </div>
