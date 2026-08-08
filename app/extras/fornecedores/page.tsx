@@ -10,7 +10,7 @@ import {
   normalizeSupplier, buildAliasMap, groupSuppliers,
   type SupplierAlias, type SupplierGroup,
 } from '@/lib/suppliers'
-import { Truck, Search, ChevronLeft, ChevronDown, ChevronRight, X, Link2, Undo2, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react'
+import { Truck, Search, ChevronLeft, ChevronDown, ChevronRight, X, Link2, Undo2, ArrowUpDown, ArrowUp, ArrowDown, FileText } from 'lucide-react'
 import Link from 'next/link'
 
 type Ordem = 'nome' | 'faturas' | 'total'
@@ -52,7 +52,7 @@ export default function FornecedoresPage() {
     setLoading(true)
     const [docsRes, aliasRes] = await Promise.all([
       supabase.from('documents')
-        .select('id, supplier_name, amount, doc_date, tipo, status')
+        .select('id, supplier_name, amount, doc_date, tipo, status, original_name, doc_number, items_summary, file_path')
         .eq('status', 'ativo')
         .not('supplier_name', 'is', null),
       supabase.from('supplier_aliases').select('*'),
@@ -89,6 +89,21 @@ export default function FornecedoresPage() {
 
   const totalGeral = visiveis.reduce((s, g) => s + g.total, 0)
   const porAgrupar = grupos.filter(g => g.variants.length > 1).length
+
+  /** As faturas que compõem um grupo, da mais recente para a mais antiga. */
+  function docsDoGrupo(g: SupplierGroup) {
+    const variantes = new Set(g.variants.map(v => v.raw))
+    return docs
+      .filter(d => variantes.has(String(d.supplier_name ?? '').trim()))
+      .sort((a, b) => String(b.doc_date ?? '').localeCompare(String(a.doc_date ?? '')))
+  }
+
+  /** Abre o ficheiro original numa janela nova, com link temporário. */
+  async function abrirDocumento(filePath: string) {
+    const { data, error } = await supabase.storage.from('documents').createSignedUrl(filePath, 60)
+    if (error || !data?.signedUrl) { alert('Não foi possível abrir o documento.'); return }
+    window.open(data.signedUrl, '_blank')
+  }
 
   function abrirEquivalencia(raw: string, nomeAtual: string) {
     setEditar({ raw, atual: nomeAtual })
@@ -282,6 +297,33 @@ export default function FornecedoresPage() {
                               Só administradores podem alterar as equivalências.
                             </p>
                           )}
+
+                          {/* Faturas deste fornecedor — para perceber de onde vêm os valores */}
+                          <p className="text-xs text-gray-500 mb-2 mt-4">Faturas ({g.docs}):</p>
+                          <div className="space-y-1.5">
+                            {docsDoGrupo(g).map(d => (
+                              <div key={d.id}
+                                className="flex items-center gap-3 bg-white border border-gray-100 rounded-lg px-3 py-2">
+                                <span className="text-xs text-gray-400 whitespace-nowrap flex-shrink-0 w-20">
+                                  {d.doc_date ? formatDate(d.doc_date) : '—'}
+                                </span>
+                                <span className="text-xs font-semibold text-gray-700 whitespace-nowrap flex-shrink-0 w-24 text-right">
+                                  {d.amount != null ? formatCurrency(d.amount) : '—'}
+                                </span>
+                                <span className="text-xs text-gray-600 truncate flex-1"
+                                  title={d.items_summary ?? d.original_name ?? ''}>
+                                  {d.items_summary ?? d.original_name ?? '—'}
+                                  {d.doc_number ? ` · nº ${d.doc_number}` : ''}
+                                </span>
+                                {d.file_path && (
+                                  <button onClick={() => abrirDocumento(d.file_path)}
+                                    className="text-xs text-emerald-700 hover:underline inline-flex items-center gap-1 flex-shrink-0">
+                                    <FileText className="w-3 h-3" /> Abrir
+                                  </button>
+                                )}
+                              </div>
+                            ))}
+                          </div>
                         </td>
                       </tr>
                     )}
