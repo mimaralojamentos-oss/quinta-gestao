@@ -14,6 +14,7 @@ import { formatCurrency, formatDate } from '@/lib/utils'
 import { Search, X, Sparkles, FileText, CheckCircle } from 'lucide-react'
 import { mergeCategories, normalizeCategory } from '@/lib/incomeCategories'
 import { buildRentPaymentPlan, type RentPaymentPlan } from '@/lib/rentPaymentPlan'
+import { logAccess } from '@/lib/logAccess'
 
 /**
  * Âmbito da procura de despesas e faturas ao reconciliar o banco.
@@ -129,6 +130,19 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
   // Despesas/faturas já associadas a outra transação bancária.
   const [usedExpenseIds, setUsedExpenseIds] = useState<Set<string>>(new Set())
   const [usedDocumentIds, setUsedDocumentIds] = useState<Set<string>>(new Set())
+  // Criação rápida de despesa sem sair desta janela (compras sem fatura).
+  const [showNewExpense, setShowNewExpense] = useState(false)
+  const [savingNewExpense, setSavingNewExpense] = useState(false)
+  const [newExpenseError, setNewExpenseError] = useState('')
+  const [localExpenses, setLocalExpenses] = useState<any[]>([])
+  const [newExpense, setNewExpense] = useState({
+    expense_date: tx.transaction_date.slice(0, 10),
+    amount: Math.abs(tx.amount).toFixed(2),
+    description: tx.description.replace(/\s+/g, ' ').trim().slice(0, 120),
+    category: 'outros',
+    supplier: '',
+    notes: '',
+  })
   const [searchTenant, setSearchTenant] = useState('')
   const [documentId, setDocumentId] = useState(tx.confirmed_document_id ?? '')
   const [searchDoc, setSearchDoc] = useState('')
@@ -196,6 +210,8 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
   }, [])
 
   const txDate = new Date(tx.transaction_date)
+  // Valor absoluto da transação — as saídas do banco vêm negativas.
+  const txAmountAbs = parseFloat(Math.abs(tx.amount).toFixed(2))
 
   /** Uma despesa conta como usada se outra transação a reclamou. */
   function despesaJaUsada(e: any): boolean {
@@ -243,14 +259,53 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
     return () => { cancelado = true }
   }, [type, tenantId, referenceMonth, tx.amount])
 
-  const sortedExpenses = [...expenses].sort((a, b) => {
+  /**
+   * Cria uma despesa a partir dos dados do movimento bancário, sem sair
+   * da janela. Serve para compras de que não há fatura nem documento.
+   * Não grava bank_transaction_id — quem faz a ligação é o fluxo normal
+   * de gravação, para não ficar uma despesa presa se o operador mudar de ideias.
+   */
+  async function handleCreateExpense() {
+    const valor = parseFloat(newExpense.amount)
+    if (!newExpense.description.trim()) { setNewExpenseError('A descrição é obrigatória'); return }
+    if (!valor || valor <= 0) { setNewExpenseError('Indica um valor válido'); return }
+
+    setSavingNewExpense(true); setNewExpenseError('')
+
+    const { data, error } = await supabase.from('expenses').insert({
+      expense_date: newExpense.expense_date,
+      category: newExpense.category,
+      type: 'pontual',
+      description: newExpense.description.trim(),
+      amount: parseFloat(valor.toFixed(2)),
+      // Saiu do banco, por isso nunca mexe no fundo de maneio.
+      payment_method: 'banco',
+      supplier: newExpense.supplier.trim() || null,
+      notes: [newExpense.notes.trim(), `Registo manual criado na reconciliação bancária de ${formatDate(tx.transaction_date)} — sem documento de compra`]
+        .filter(Boolean).join(' · '),
+    }).select().single()
+
+    setSavingNewExpense(false)
+    if (error) { setNewExpenseError(error.message); return }
+
+    await logAccess({
+      action: 'criar',
+      page: '/financeiro/bancos',
+      details: `Criou despesa manual (${formatCurrency(valor)}) na reconciliação bancária — ${newExpense.description.trim()}`,
+    })
+
+    // Fica logo na lista e selecionada, para o operador não ter de a procurar.
+    setLocalExpenses(prev => [data, ...prev])
+    setExpenseId(data.id)
+    if (Math.abs(data.amount - txAmountAbs) > 0.02) setExpenseScope('90')
+    setShowNewExpense(false)
+  }
+
+  const sortedExpenses = [...expenses, ...localExpenses].sort((a, b) => {
     const diffA = Math.abs(new Date(a.expense_date).getTime() - txDate.getTime())
     const diffB = Math.abs(new Date(b.expense_date).getTime() - txDate.getTime())
     return diffA - diffB
   })
-
-  // Valor absoluto da transação — as saídas do banco vêm negativas.
-  const txAmountAbs = parseFloat(Math.abs(tx.amount).toFixed(2))
 
   const filteredExpenses = sortedExpenses
     .filter(e => dentroDoAmbito(expenseScope, e.amount, e.expense_date, txAmountAbs, txDate))
@@ -563,7 +618,92 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
 
           {type === 'despesa' && (
             <div>
-              <label className="label">Despesa associada</label>
+              <div className="flex items-center justify-between gap-2">
+                <label className="label">Despesa associada</label>
+                {!showNewExpense && (
+                  <button type="button" onClick={() => { setShowNewExpense(true); setNewExpenseError('') }}
+                    className="text-xs font-medium text-emerald-700 hover:text-emerald-800 hover:underline whitespace-nowrap">
+                    ➕ Criar despesa manual
+                  </button>
+                )}
+              </div>
+
+              {showNewExpense && (
+                <div className="border border-emerald-300 bg-emerald-50/70 rounded-lg p-3 mb-3 space-y-2.5">
+                  <p className="text-xs font-medium text-emerald-800">
+                    Nova despesa — para compras sem fatura nem documento
+                  </p>
+
+                  <div>
+                    <label className="label text-xs">Descrição *</label>
+                    <input className="input text-sm" value={newExpense.description}
+                      onChange={e => setNewExpense(f => ({ ...f, description: e.target.value }))}
+                      placeholder="ex: Portagem Ponte Vasco da Gama" />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="label text-xs">Data</label>
+                      <input className="input text-sm" type="date" value={newExpense.expense_date}
+                        onChange={e => setNewExpense(f => ({ ...f, expense_date: e.target.value }))} />
+                    </div>
+                    <div>
+                      <label className="label text-xs">Valor (€) *</label>
+                      <input className="input text-sm" type="number" step="0.01" value={newExpense.amount}
+                        onChange={e => setNewExpense(f => ({ ...f, amount: e.target.value }))} />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="label text-xs">Categoria</label>
+                      <select className="input text-sm" value={newExpense.category}
+                        onChange={e => setNewExpense(f => ({ ...f, category: e.target.value }))}>
+                        <option value="administracao">Administração</option>
+                        <option value="obras">Obras</option>
+                        <option value="edp">Eletricidade (EDP)</option>
+                        <option value="pessoal">Pessoal</option>
+                        <option value="contabilidade">Contabilidade</option>
+                        <option value="manutencao">Manutenção</option>
+                        <option value="outros">Outros</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="label text-xs">Fornecedor</label>
+                      <input className="input text-sm" value={newExpense.supplier}
+                        onChange={e => setNewExpense(f => ({ ...f, supplier: e.target.value }))}
+                        placeholder="opcional" />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="label text-xs">Notas</label>
+                    <input className="input text-sm" value={newExpense.notes}
+                      onChange={e => setNewExpense(f => ({ ...f, notes: e.target.value }))}
+                      placeholder="opcional" />
+                  </div>
+
+                  <p className="text-xs text-gray-500">
+                    Fica registada como paga por banco, por isso não mexe no fundo de maneio.
+                  </p>
+
+                  {newExpenseError && (
+                    <p className="text-xs text-red-600 bg-red-100 px-2.5 py-1.5 rounded-md">{newExpenseError}</p>
+                  )}
+
+                  <div className="flex gap-2">
+                    <button type="button" className="btn-secondary flex-1 justify-center text-sm py-1.5"
+                      onClick={() => { setShowNewExpense(false); setNewExpenseError('') }}>
+                      Cancelar
+                    </button>
+                    <button type="button" onClick={handleCreateExpense} disabled={savingNewExpense}
+                      className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium disabled:opacity-50 transition-colors">
+                      {savingNewExpense ? 'A guardar...' : 'Criar e selecionar'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <p className="text-xs text-gray-500 mb-1.5">
                 {expenseScope === 'valor'
                   ? <>A mostrar só despesas de <strong className="text-gray-700">{formatCurrency(txAmountAbs)}</strong>. Não encontra? Alargue a procura:</>
@@ -582,11 +722,19 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
               </div>
               <div className="border border-gray-200 rounded-lg overflow-hidden max-h-56 overflow-y-auto">
                 {filteredExpenses.length === 0 ? (
-                  <p className="text-sm text-gray-400 text-center py-4">
-                    {expenseScope === 'valor'
-                      ? `Nenhuma despesa de ${formatCurrency(txAmountAbs)}. Carregue em 30/60/90 dias para ver as outras.`
-                      : 'Nenhuma despesa encontrada'}
-                  </p>
+                  <div className="text-center py-4 px-3">
+                    <p className="text-sm text-gray-400">
+                      {expenseScope === 'valor'
+                        ? `Nenhuma despesa de ${formatCurrency(txAmountAbs)}. Carregue em 30/60/90 dias para ver as outras.`
+                        : 'Nenhuma despesa encontrada'}
+                    </p>
+                    {!showNewExpense && (
+                      <button type="button" onClick={() => { setShowNewExpense(true); setNewExpenseError('') }}
+                        className="mt-2 text-xs font-medium text-emerald-700 hover:underline">
+                        ➕ Não há documento desta compra? Criar despesa manual
+                      </button>
+                    )}
+                  </div>
                 ) : (
                   filteredExpenses.slice(0, 200).map(e => {
                     const diffDays = Math.round(Math.abs(new Date(e.expense_date).getTime() - txDate.getTime()) / (1000 * 60 * 60 * 24))
