@@ -16,6 +16,58 @@ import { mergeCategories, normalizeCategory } from '@/lib/incomeCategories'
 import { buildRentPaymentPlan, type RentPaymentPlan } from '@/lib/rentPaymentPlan'
 
 /**
+ * Âmbito da procura de despesas e faturas ao reconciliar o banco.
+ * Por omissão só mostra o que tem exatamente o mesmo valor da transação —
+ * é o caso normal e evita percorrer centenas de linhas. Os botões alargam
+ * a procura a uma janela de dias, aí já sem filtro de valor.
+ */
+type Scope = 'valor' | '30' | '60' | '90'
+
+const SCOPES: { key: Scope; label: string }[] = [
+  { key: 'valor', label: 'Valor igual' },
+  { key: '30', label: '30 dias' },
+  { key: '60', label: '60 dias' },
+  { key: '90', label: '90 dias' },
+]
+
+/** Diferença em dias entre uma data e a data da transação. */
+function diasDeDiferenca(data: string | null | undefined, referencia: Date): number {
+  if (!data) return Infinity
+  const d = new Date(data)
+  if (isNaN(d.getTime())) return Infinity
+  return Math.abs(d.getTime() - referencia.getTime()) / 86400000
+}
+
+/** Decide se uma despesa/fatura entra na lista, conforme o âmbito escolhido. */
+function dentroDoAmbito(
+  scope: Scope,
+  valorItem: number | null | undefined,
+  dataItem: string | null | undefined,
+  valorTransacao: number,
+  txDate: Date,
+): boolean {
+  if (scope === 'valor') return Math.abs((valorItem ?? 0) - valorTransacao) <= 0.02
+  return diasDeDiferenca(dataItem, txDate) <= Number(scope)
+}
+
+function ScopePicker({ value, onChange }: { value: Scope; onChange: (s: Scope) => void }) {
+  return (
+    <div className="flex gap-1.5 mb-2 flex-wrap">
+      {SCOPES.map(s => (
+        <button key={s.key} type="button" onClick={() => onChange(s.key)}
+          className={`px-2.5 py-1 rounded-md border text-xs font-medium transition-colors ${
+            value === s.key
+              ? 'bg-emerald-600 text-white border-emerald-600'
+              : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+          }`}>
+          {s.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/**
  * Linha de apoio ao operador: quanto estava em dívida antes deste pagamento
  * e quanto continua por pagar depois. Fica fora do componente principal
  * para não ser recriada em cada render.
@@ -71,6 +123,9 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
   const [notes, setNotes] = useState(tx.notes ?? '')
   const [referenceMonth, setReferenceMonth] = useState(tx.transaction_date.slice(0, 7))
   const [searchExpense, setSearchExpense] = useState('')
+  // Por omissão só aparecem despesas/faturas com o valor exato da transação.
+  const [expenseScope, setExpenseScope] = useState<Scope>('valor')
+  const [docScope, setDocScope] = useState<Scope>('valor')
   const [searchTenant, setSearchTenant] = useState('')
   const [documentId, setDocumentId] = useState(tx.confirmed_document_id ?? '')
   const [searchDoc, setSearchDoc] = useState('')
@@ -165,12 +220,31 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
     return diffA - diffB
   })
 
-  const filteredExpenses = sortedExpenses.filter(e =>
-    !searchExpense ||
-    e.description.toLowerCase().includes(searchExpense.toLowerCase()) ||
-    e.supplier?.toLowerCase().includes(searchExpense.toLowerCase()) ||
-    String(e.amount).includes(searchExpense)
-  )
+  // Valor absoluto da transação — as saídas do banco vêm negativas.
+  const txAmountAbs = parseFloat(Math.abs(tx.amount).toFixed(2))
+
+  const filteredExpenses = sortedExpenses
+    .filter(e => dentroDoAmbito(expenseScope, e.amount, e.expense_date, txAmountAbs, txDate))
+    .filter(e =>
+      !searchExpense ||
+      e.description.toLowerCase().includes(searchExpense.toLowerCase()) ||
+      e.supplier?.toLowerCase().includes(searchExpense.toLowerCase()) ||
+      String(e.amount).includes(searchExpense)
+    )
+
+  const filteredDocuments = [...documents]
+    .filter(d => dentroDoAmbito(docScope, d.amount, d.doc_date, txAmountAbs, txDate))
+    .filter(d =>
+      !searchDoc ||
+      (d.supplier_name ?? d.original_name ?? '').toLowerCase().includes(searchDoc.toLowerCase()) ||
+      String(d.amount).includes(searchDoc)
+    )
+    .sort((a, b) => {
+      const diffA = diasDeDiferenca(a.doc_date, txDate)
+      const diffB = diasDeDiferenca(b.doc_date, txDate)
+      if (diffA !== diffB) return diffA - diffB
+      return Math.abs((a.amount ?? 0) - txAmountAbs) - Math.abs((b.amount ?? 0) - txAmountAbs)
+    })
 
   const filteredTenants = tenants.filter(t =>
     !searchTenant || t.name.toLowerCase().includes(searchTenant.toLowerCase())
@@ -461,7 +535,13 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
           {type === 'despesa' && (
             <div>
               <label className="label">Despesa associada</label>
-              {expensesNearby > 0 && (
+              <p className="text-xs text-gray-500 mb-1.5">
+                {expenseScope === 'valor'
+                  ? <>A mostrar só despesas de <strong className="text-gray-700">{formatCurrency(txAmountAbs)}</strong>. Não encontra? Alargue a procura:</>
+                  : <>A mostrar despesas dos últimos {expenseScope} dias, com qualquer valor:</>}
+              </p>
+              <ScopePicker value={expenseScope} onChange={setExpenseScope} />
+              {expenseScope === 'valor' && expensesNearby > 0 && (
                 <p className="text-xs text-emerald-600 mb-2">
                   📅 {expensesNearby} despesa(s) dentro de ±15 dias aparecem primeiro
                 </p>
@@ -473,7 +553,11 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
               </div>
               <div className="border border-gray-200 rounded-lg overflow-hidden max-h-56 overflow-y-auto">
                 {filteredExpenses.length === 0 ? (
-                  <p className="text-sm text-gray-400 text-center py-4">Nenhuma despesa encontrada</p>
+                  <p className="text-sm text-gray-400 text-center py-4">
+                    {expenseScope === 'valor'
+                      ? `Nenhuma despesa de ${formatCurrency(txAmountAbs)}. Carregue em 30/60/90 dias para ver as outras.`
+                      : 'Nenhuma despesa encontrada'}
+                  </p>
                 ) : (
                   filteredExpenses.slice(0, 200).map(e => {
                     const diffDays = Math.round(Math.abs(new Date(e.expense_date).getTime() - txDate.getTime()) / (1000 * 60 * 60 * 24))
@@ -497,7 +581,10 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
               </div>
               {filteredExpenses.length > 200 && <p className="text-xs text-gray-400 mt-1">A mostrar 200 de {filteredExpenses.length} — pesquisa para filtrar</p>}
               {filteredExpenses.length > 0 && filteredExpenses.length <= 200 && (
-                <p className="text-xs text-gray-400 mt-1">A mostrar {filteredExpenses.length} despesa(s) — ordenadas por proximidade de data</p>
+                <p className="text-xs text-gray-400 mt-1">
+                  A mostrar {filteredExpenses.length} despesa(s)
+                  {expenseScope === 'valor' ? ` com o valor de ${formatCurrency(txAmountAbs)}` : ''} — ordenadas por proximidade de data
+                </p>
               )}
             </div>
           )}
@@ -505,6 +592,12 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
           {type !== 'renda' && (
             <div className="mt-3">
               <label className="label">Fatura associada (opcional)</label>
+              <p className="text-xs text-gray-500 mb-1.5">
+                {docScope === 'valor'
+                  ? <>A mostrar só faturas de <strong className="text-gray-700">{formatCurrency(txAmountAbs)}</strong>. Não encontra? Alargue a procura:</>
+                  : <>A mostrar faturas dos últimos {docScope} dias, com qualquer valor:</>}
+              </p>
+              <ScopePicker value={docScope} onChange={setDocScope} />
               <div className="relative mb-2">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
                 <input className="input pl-8 text-sm" placeholder="Pesquisar fatura..." value={searchDoc} onChange={e => setSearchDoc(e.target.value)} />
@@ -516,16 +609,14 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
                 >
                   <span className="text-xs text-gray-400">— Nenhuma —</span>
                 </div>
-                {[...documents]
-                  .sort((a, b) => {
-                    const diffA = a.doc_date ? Math.abs(new Date(a.doc_date).getTime() - txDate.getTime()) : Infinity
-                    const diffB = b.doc_date ? Math.abs(new Date(b.doc_date).getTime() - txDate.getTime()) : Infinity
-                    if (diffA !== diffB) return diffA - diffB
-                    const amtA = Math.abs((a.amount ?? 0) - Math.abs(tx.amount))
-                    const amtB = Math.abs((b.amount ?? 0) - Math.abs(tx.amount))
-                    return amtA - amtB
-                  })
-                  .filter(d => !searchDoc || (d.supplier_name ?? d.original_name ?? '').toLowerCase().includes(searchDoc.toLowerCase()) || String(d.amount).includes(searchDoc))
+                {filteredDocuments.length === 0 && (
+                  <p className="text-sm text-gray-400 text-center py-3">
+                    {docScope === 'valor'
+                      ? `Nenhuma fatura de ${formatCurrency(txAmountAbs)}. Carregue em 30/60/90 dias para ver as outras.`
+                      : 'Nenhuma fatura encontrada'}
+                  </p>
+                )}
+                {filteredDocuments
                   .slice(0, 50)
                   .map(d => (
                     <div key={d.id} onClick={() => setDocumentId(d.id)}
@@ -537,6 +628,13 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
                     </div>
                   ))}
               </div>
+              {filteredDocuments.length > 0 && (
+                <p className="text-xs text-gray-400 mt-1">
+                  {filteredDocuments.length > 50
+                    ? `A mostrar 50 de ${filteredDocuments.length} fatura(s) — pesquisa para filtrar`
+                    : `A mostrar ${filteredDocuments.length} fatura(s)${docScope === 'valor' ? ` com o valor de ${formatCurrency(txAmountAbs)}` : ''}`}
+                </p>
+              )}
             </div>
           )}
 
