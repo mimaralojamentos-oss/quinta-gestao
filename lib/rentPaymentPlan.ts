@@ -37,6 +37,10 @@ export interface RentPaymentPlan {
   monthlyRent: number
   rendaAmount: number
   rendaFullyPaid: boolean
+  /** Quanto faltava da renda deste mês antes deste pagamento. */
+  rendaOwedBefore: number
+  /** Quanto continua por pagar da renda depois deste pagamento. */
+  rendaRemainingAfter: number
   electricityCharges: ElectricityChargePlan[]
   electricityTotal: number
   debtPayments: DebtPaymentPlan[]
@@ -150,6 +154,8 @@ export async function buildRentPaymentPlan(supabase: any, params: BuildPlanParam
 
   return {
     monthlyRent, rendaAmount, rendaFullyPaid,
+    rendaOwedBefore: parseFloat(remainingRent.toFixed(2)),
+    rendaRemainingAfter: parseFloat(Math.max(0, remainingRent - rendaAmount).toFixed(2)),
     electricityCharges, electricityTotal,
     debtPayments, adiantamento, underpaymentDebt: 0,
     summary: lines.join(', '),

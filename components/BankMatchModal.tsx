@@ -15,6 +15,23 @@ import { Search, X, Sparkles, FileText, CheckCircle } from 'lucide-react'
 import { mergeCategories, normalizeCategory } from '@/lib/incomeCategories'
 import { buildRentPaymentPlan, type RentPaymentPlan } from '@/lib/rentPaymentPlan'
 
+/**
+ * Linha de apoio ao operador: quanto estava em dívida antes deste pagamento
+ * e quanto continua por pagar depois. Fica fora do componente principal
+ * para não ser recriada em cada render.
+ */
+function SaldoLinha({ emDivida, fica }: { emDivida: number; fica: number }) {
+  if (emDivida <= 0.01) return null
+  return (
+    <span className="block text-[11px] text-gray-500 mt-0.5">
+      Em dívida {formatCurrency(emDivida)}
+      {fica > 0.01
+        ? <span className="text-amber-600 font-medium"> · ficam {formatCurrency(fica)}</span>
+        : <span className="text-emerald-600 font-medium"> · fica liquidada</span>}
+    </span>
+  )
+}
+
 export interface BankTransaction {
   id: string
   transaction_date: string
@@ -336,13 +353,14 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
                     Distribuição de {formatCurrency(tx.amount)}
                   </p>
 
-                  <div className="space-y-1 text-sm">
-                    <div className="flex justify-between items-baseline gap-2">
+                  <div className="space-y-1.5 text-sm">
+                    <div className="flex justify-between items-start gap-2">
                       <span className="text-gray-700">
                         🏠 Renda
                         <span className="text-xs text-gray-400 ml-1">
                           {plan.rendaFullyPaid ? 'liquidada' : `de ${formatCurrency(plan.monthlyRent)}`}
                         </span>
+                        <SaldoLinha emDivida={plan.rendaOwedBefore} fica={plan.rendaRemainingAfter} />
                       </span>
                       <span className={`font-medium ${plan.rendaFullyPaid ? 'text-gray-900' : 'text-amber-700'}`}>
                         {formatCurrency(plan.rendaAmount)}
@@ -350,15 +368,15 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
                     </div>
 
                     {plan.electricityCharges.map(c => (
-                      <div key={c.id} className="flex justify-between items-baseline gap-2">
+                      <div key={c.id} className="flex justify-between items-start gap-2">
                         <span className="text-gray-700">
                           ⚡ Eletricidade
                           {c.chargeDate && <span className="text-xs text-gray-400 ml-1">{formatDate(c.chargeDate)}</span>}
-                          {c.isPartial && (
-                            <span className="text-xs text-amber-600 ml-1">
-                              parcial — fica {formatCurrency(c.remainingAfter)} por pagar
-                            </span>
-                          )}
+                          {c.isPartial && <span className="text-xs text-amber-600 ml-1">parcial</span>}
+                          <SaldoLinha
+                            emDivida={parseFloat((c.totalAmount - c.alreadyPaid).toFixed(2))}
+                            fica={c.remainingAfter}
+                          />
                         </span>
                         <span className={`font-medium ${c.isPartial ? 'text-amber-700' : 'text-gray-900'}`}>
                           {formatCurrency(c.amount)}
@@ -367,14 +385,10 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
                     ))}
 
                     {plan.debtPayments.map(d => (
-                      <div key={d.debtId} className="flex justify-between items-baseline gap-2">
+                      <div key={d.debtId} className="flex justify-between items-start gap-2">
                         <span className="text-gray-700">
                           💰 {d.description}
-                          {d.remainingAfter > 0 && (
-                            <span className="text-xs text-amber-600 ml-1">
-                              fica {formatCurrency(d.remainingAfter)} por pagar
-                            </span>
-                          )}
+                          <SaldoLinha emDivida={d.remainingBefore} fica={d.remainingAfter} />
                         </span>
                         <span className="font-medium text-gray-900">{formatCurrency(d.amount)}</span>
                       </div>
