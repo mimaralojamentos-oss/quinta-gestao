@@ -6,8 +6,9 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { Expense } from '@/lib/types'
 import { formatCurrency, formatDate, categoryLabel } from '@/lib/utils'
-import { Plus, Search, Trash2, X, SlidersHorizontal, ChevronUp, ChevronDown, ChevronsUpDown, Eye, ChevronDown as ChevronDownIcon } from 'lucide-react'
+import { Plus, Search, Trash2, X, SlidersHorizontal, ChevronUp, ChevronDown, ChevronsUpDown, Eye, ChevronDown as ChevronDownIcon, Copy, CopyPlus } from 'lucide-react'
 import ExpenseModal from './ExpenseModal'
+import CopiarDespesasModal from './CopiarDespesasModal'
 import { useAuth } from '@/lib/auth-context'
 import { logAccess } from '@/lib/logAccess'
 
@@ -57,6 +58,9 @@ function DespesasContent() {
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [editExpense, setEditExpense] = useState<Expense | null>(null)
+  // Despesa a duplicar para o mês seguinte (abre o ExpenseModal pré-preenchido)
+  const [duplicateExpense, setDuplicateExpense] = useState<Expense | null>(null)
+  const [showCopiarModal, setShowCopiarModal] = useState(false)
   const [summary, setSummary] = useState({ total: 0, cash: 0, bank: 0 })
   const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirm | null>(null)
   const [deleting, setDeleting] = useState(false)
@@ -277,9 +281,14 @@ function DespesasContent() {
             <h1 className="text-2xl font-bold text-gray-900">Despesas</h1>
           </div>
           {(isAdmin || isCoAdmin) && (
-            <button className="btn-primary" onClick={() => { setEditExpense(null); setShowModal(true) }}>
-              <Plus className="w-4 h-4" /> Nova Despesa
-            </button>
+            <div className="flex items-center gap-2">
+              <button className="btn-secondary" onClick={() => setShowCopiarModal(true)}>
+                <Copy className="w-4 h-4" /> Copiar de outro mês
+              </button>
+              <button className="btn-primary" onClick={() => { setEditExpense(null); setDuplicateExpense(null); setShowModal(true) }}>
+                <Plus className="w-4 h-4" /> Nova Despesa
+              </button>
+            </div>
           )}
         </div>
 
@@ -527,7 +536,11 @@ function DespesasContent() {
                       {(isAdmin || isCoAdmin) && (
                         <td className="table-cell">
                           <div className="flex items-center gap-2">
-                            <button onClick={() => { setEditExpense(expense); setShowModal(true) }} className="text-xs text-emerald-600 hover:underline font-medium">Editar</button>
+                            <button onClick={() => { setEditExpense(expense); setDuplicateExpense(null); setShowModal(true) }} className="text-xs text-emerald-600 hover:underline font-medium">Editar</button>
+                            <button onClick={() => { setEditExpense(null); setDuplicateExpense(expense); setShowModal(true) }}
+                              className="text-gray-300 hover:text-emerald-600 transition-colors" title="Duplicar para o mês seguinte">
+                              <CopyPlus className="w-3.5 h-3.5" />
+                            </button>
                             <button onClick={() => handleDeleteClick(expense)} className="text-gray-300 hover:text-red-500 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
                           </div>
                         </td>
@@ -576,7 +589,20 @@ function DespesasContent() {
       )}
 
       {showModal && (isAdmin || isCoAdmin) && (
-        <ExpenseModal expense={editExpense} onClose={() => setShowModal(false)} onSaved={() => { setShowModal(false); fetchAll() }} />
+        <ExpenseModal
+          expense={editExpense}
+          duplicateFrom={duplicateExpense}
+          onClose={() => { setShowModal(false); setDuplicateExpense(null) }}
+          onSaved={() => { setShowModal(false); setDuplicateExpense(null); fetchAll() }}
+        />
+      )}
+
+      {showCopiarModal && (isAdmin || isCoAdmin) && (
+        <CopiarDespesasModal
+          defaultTarget={selectedPeriod}
+          onClose={() => setShowCopiarModal(false)}
+          onCopied={() => { setShowCopiarModal(false); fetchAll() }}
+        />
       )}
     </AppLayout>
   )

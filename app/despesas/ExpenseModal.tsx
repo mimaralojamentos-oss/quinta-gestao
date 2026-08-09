@@ -10,22 +10,46 @@ import { useFileDrop } from '@/lib/useFileDrop'
 
 interface Props {
   expense: Expense | null
+  /**
+   * Despesa a duplicar. Quando vem preenchida e `expense` é null, o ecrã
+   * comporta-se como "nova despesa" — cria um registo novo — mas já com os
+   * campos preenchidos e a data avançada um mês.
+   */
+  duplicateFrom?: Expense | null
   onClose: () => void
   onSaved: () => void
 }
 
-export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
+/**
+ * Mesma data, um mês à frente. Se o dia não existir no mês seguinte
+ * (ex.: 31 de Janeiro), usa o último dia desse mês.
+ */
+function avancarUmMes(data: string): string {
+  const [ano, mes, dia] = String(data).slice(0, 10).split('-').map(Number)
+  const alvo = new Date(ano, mes, 1)           // mês seguinte (mes é 1-based)
+  const ultimoDia = new Date(alvo.getFullYear(), alvo.getMonth() + 1, 0).getDate()
+  const diaFinal = Math.min(dia || 1, ultimoDia)
+  return `${alvo.getFullYear()}-${String(alvo.getMonth() + 1).padStart(2, '0')}-${String(diaFinal).padStart(2, '0')}`
+}
+
+export default function ExpenseModal({ expense, duplicateFrom, onClose, onSaved }: Props) {
   const supabase = createClient()
+  // Ao duplicar não há despesa a editar — só os valores de partida.
+  const base = expense ?? duplicateFrom ?? null
+  const modoDuplicar = !expense && !!duplicateFrom
+
   const [form, setForm] = useState({
-    expense_date: expense?.expense_date ?? new Date().toISOString().slice(0, 10),
-    category: expense?.category ?? 'outros',
-    type: expense?.type ?? 'pontual',
-    description: expense?.description ?? '',
-    amount: expense ? String(expense.amount) : '',
-    payment_method: expense?.payment_method ?? 'dinheiro',
-    supplier: expense?.supplier ?? '',
-    notes: expense?.notes ?? '',
-    project_id: (expense as any)?.project_id ?? '',
+    expense_date: modoDuplicar && base?.expense_date
+      ? avancarUmMes(base.expense_date)
+      : base?.expense_date ?? new Date().toISOString().slice(0, 10),
+    category: base?.category ?? 'outros',
+    type: base?.type ?? 'pontual',
+    description: base?.description ?? '',
+    amount: base ? String(base.amount) : '',
+    payment_method: base?.payment_method ?? 'dinheiro',
+    supplier: base?.supplier ?? '',
+    notes: base?.notes ?? '',
+    project_id: (base as any)?.project_id ?? '',
   })
   const [projects, setProjects] = useState<any[]>([])
   const [invoiceFile, setInvoiceFile] = useState<File | null>(null)
@@ -198,7 +222,11 @@ export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
         await supabase.from('documents').update({ expense_id: newExpense.id }).eq('id', selectedDocId)
       }
 
-      await logAccess({ action: 'criar', page: '/despesas', details: `Criou despesa "${form.description}" (${formatCurrency(parseFloat(form.amount))})` })
+      await logAccess({
+        action: 'criar',
+        page: '/despesas',
+        details: `${modoDuplicar ? 'Duplicou' : 'Criou'} despesa "${form.description}" (${formatCurrency(parseFloat(form.amount))})`,
+      })
     }
 
     setSaving(false)
@@ -209,7 +237,9 @@ export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-5">
-          <h2 className="font-semibold text-lg text-gray-900">{expense ? 'Editar Despesa' : 'Nova Despesa'}</h2>
+          <h2 className="font-semibold text-lg text-gray-900">
+            {expense ? 'Editar Despesa' : modoDuplicar ? 'Duplicar Despesa' : 'Nova Despesa'}
+          </h2>
           <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
         </div>
 
