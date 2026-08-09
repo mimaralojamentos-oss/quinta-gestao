@@ -7,7 +7,7 @@ import EmailComposer from '@/components/EmailComposer'
 import { formatCurrency, formatDate, getCurrentMonth } from '@/lib/utils'
 import { logAccess } from '@/lib/logAccess'
 import { useFileDrop } from '@/lib/useFileDrop'
-import { consumeAdvances, describeAdvanceTarget, buildAppliedAdvanceMap, appliedAdvanceFor } from '@/lib/advanceCredit'
+import { consumeAdvances, releaseAdvance, describeAdvanceTarget, buildAppliedAdvanceMap, appliedAdvanceFor } from '@/lib/advanceCredit'
 
 interface Props {
   tenant: Tenant | null
@@ -111,6 +111,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
   })
   const [savingRecebimento, setSavingRecebimento] = useState(false)
   const [applyingAdvanceKey, setApplyingAdvanceKey] = useState<string | null>(null)
+  const [releasingAdvanceId, setReleasingAdvanceId] = useState<string | null>(null)
 
   useEffect(() => {
     async function loadSpaces() {
@@ -475,6 +476,37 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
       action: 'editar',
       page: '/inquilinos',
       details: `Aplicou adiantamento (${formatCurrency(applied)}) à renda de ${monthLabel} de "${tenant?.name}"`,
+    })
+    await fetchPayments()
+  }
+
+  // Devolve um adiantamento já aplicado ao crédito disponível do inquilino.
+  // O total em dívida não muda: o valor sai da renda e volta ao crédito.
+  async function handleReleaseAdvance(p: PaymentRow) {
+    if (!p.id) return
+
+    const destino = p.applied_to_type === 'renda' && p.applied_to_month
+      ? `à renda de ${String(p.applied_to_month).slice(0, 7)}`
+      : p.applied_to_type === 'eletricidade'
+        ? 'a uma fatura de eletricidade'
+        : 'ao que estava aplicado'
+
+    if (!confirm(
+      `Desfazer a aplicação de ${formatCurrency(p.amount)} ${destino}?` +
+      `\n\nO valor volta a ficar como crédito disponível do inquilino e o que estava coberto passa outra vez a aparecer em falta.` +
+      `\n\nO total em dívida não se altera.`
+    )) return
+
+    setReleasingAdvanceId(p.id)
+    const { error } = await releaseAdvance(supabase, p.id)
+    setReleasingAdvanceId(null)
+
+    if (error) { alert(`Não foi possível desfazer: ${error}`); return }
+
+    await logAccess({
+      action: 'editar',
+      page: '/inquilinos',
+      details: `Desfez a aplicação de adiantamento (${formatCurrency(p.amount)}) de "${tenant?.name}" — voltou a crédito disponível`,
     })
     await fetchPayments()
   }
@@ -1354,7 +1386,14 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                           </p>
                           {p.tipo === 'adiantamento' ? (
                             p.used ? (
-                              <p className="text-xs text-gray-400 font-medium">{describeAdvanceTarget(p)}</p>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <p className="text-xs text-gray-400 font-medium">{describeAdvanceTarget(p)}</p>
+                                <button onClick={() => handleReleaseAdvance(p)} disabled={releasingAdvanceId === p.id}
+                                  className="text-xs text-gray-400 hover:text-purple-600 hover:underline disabled:opacity-50 transition-colors"
+                                  title="Devolver este valor ao crédito disponível do inquilino">
+                                  {releasingAdvanceId === p.id ? 'a desfazer...' : '↩ desfazer'}
+                                </button>
+                              </div>
                             ) : (
                               <p className="text-xs text-purple-600 font-medium">💰 Crédito do inquilino · pago em {formatDate(p.payment_date!)} · {p.payment_method}</p>
                             )

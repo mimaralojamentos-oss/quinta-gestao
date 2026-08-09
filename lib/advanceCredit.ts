@@ -136,6 +136,36 @@ export async function linkAdvancesToCharge(
 }
 
 /**
+ * Devolve um adiantamento ao crédito disponível do inquilino.
+ *
+ * Serve para corrigir enganos: o valor volta a ficar por usar e a renda (ou
+ * a fatura) a que tinha sido aplicado volta a mostrar o que falta.
+ *
+ * Não junta de novo o troco que tenha sido separado numa linha à parte —
+ * ficam duas linhas de crédito em vez de uma, o que dá o mesmo total
+ * disponível e mantém o histórico legível.
+ */
+export async function releaseAdvance(
+  supabase: any,
+  advanceId: string,
+): Promise<{ error?: string }> {
+  const { error } = await supabase
+    .from('rent_payments')
+    .update({
+      used: false,
+      applied_to_type: null,
+      applied_to_id: null,
+      applied_to_lease_id: null,
+      applied_to_month: null,
+      applied_at: null,
+    })
+    .eq('id', advanceId)
+    .eq('tipo', 'adiantamento')   // salvaguarda: nunca tocar noutro tipo de registo
+
+  return error ? { error: error.message } : {}
+}
+
+/**
  * Constrói o mapa "contrato + mês → adiantamento já aplicado a essa renda".
  * Serve para os vários ecrãs contarem o crédito como pagamento do mês,
  * em vez de mostrarem a renda como parcialmente em falta.
