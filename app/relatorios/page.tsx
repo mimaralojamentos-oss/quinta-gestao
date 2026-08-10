@@ -78,6 +78,7 @@ export default function RelatoriosPage() {
 
   // Pagamentos dos Inquilinos
   const [pagamentos, setPagamentos] = useState<any>(null)
+  const [pagamentosErro, setPagamentosErro] = useState('')
   const [allSpaces, setAllSpaces] = useState<any[]>([])
   const [pagamentosEspacos, setPagamentosEspacos] = useState<string[]>([])
   const [showPagamentosSpaceDropdown, setShowPagamentosSpaceDropdown] = useState(false)
@@ -647,7 +648,10 @@ export default function RelatoriosPage() {
         rpQuery = rpQuery.in('lease_id', leaseIdFilter.length ? leaseIdFilter : noResults)
       }
 
-      const { data: paymentsDataRaw } = await rpQuery
+      const { data: paymentsDataRaw, error: rpError } = await rpQuery
+      // Um erro aqui fazia o relatório mostrar-se sem rendas nenhumas, como se
+      // não existissem. Agora fica à vista em vez de desaparecer em silêncio.
+      if (rpError) throw new Error(`Não foi possível carregar as rendas: ${rpError.message}`)
       // Excluir registos internos de crédito (não representam dinheiro físico recebido)
       const paymentsData = (paymentsDataRaw ?? []).filter((p: any) => p.notes !== 'Crédito de adiantamento aplicado')
 
@@ -664,7 +668,8 @@ export default function RelatoriosPage() {
         ecQuery = ecQuery.in('lease_id', leaseIdFilter.length ? leaseIdFilter : noResults)
       }
 
-      const { data: elecData } = await ecQuery
+      const { data: elecData, error: ecError } = await ecQuery
+      if (ecError) throw new Error(`Não foi possível carregar a eletricidade: ${ecError.message}`)
 
       // Normalizar electricity_charges para o mesmo formato que rent_payments
       const elecNorm = (elecData ?? []).map((e: any) => {
@@ -687,7 +692,8 @@ export default function RelatoriosPage() {
         .gte('payment_date', startDate)
         .lt('payment_date', endDate)
 
-      const { data: debtPayData } = await dpQuery
+      const { data: debtPayData, error: dpError } = await dpQuery
+      if (dpError) throw new Error(`Não foi possível carregar as dívidas: ${dpError.message}`)
 
       // Filtrar por espaço se necessário e normalizar
       const debtPayNorm = (debtPayData ?? []).filter((dp: any) => {
@@ -720,8 +726,11 @@ export default function RelatoriosPage() {
       }
 
       setPagamentos({ payments: filtered, total, totalPorTipo })
-    } catch (e) {
+      setPagamentosErro('')
+    } catch (e: any) {
       console.error(e)
+      setPagamentosErro(e?.message ?? 'Erro ao carregar o relatório de pagamentos.')
+      setPagamentos({ payments: [], total: 0, totalPorTipo: {} })
     } finally {
       setLoading(false)
     }
@@ -1645,6 +1654,12 @@ export default function RelatoriosPage() {
             {/* PAGAMENTOS DOS INQUILINOS */}
             {activeReport === 'pagamentos' && (
               <div className="space-y-5">
+                {pagamentosErro && (
+                  <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+                    <p className="text-sm text-red-700 font-medium">⚠ O relatório está incompleto</p>
+                    <p className="text-sm text-red-600 mt-1">{pagamentosErro}</p>
+                  </div>
+                )}
                 {/* Filtros */}
                 <div className="bg-white border border-gray-200 rounded-xl p-4">
                   <div className="flex flex-wrap gap-4 items-end">
