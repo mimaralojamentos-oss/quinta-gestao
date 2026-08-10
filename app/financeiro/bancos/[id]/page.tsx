@@ -153,7 +153,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
         .order('expense_date', { ascending: false })
       setExpenses(expensesData ?? [])
       const { data: rentData } = await supabase
-        .from('rent_payments').select('id, reference_month, amount, payment_date, payment_method, lease_id, lease:leases(id, space:spaces(ref), tenant:tenants(name))')
+        .from('rent_payments').select('id, reference_month, amount, payment_date, payment_method, lease_id, lease:leases!rent_payments_lease_id_fkey(id, space:spaces(ref), tenant:tenants(name))')
         .eq('payment_method', 'banco')
         .order('payment_date', { ascending: false })
       setRentPayments(rentData ?? [])

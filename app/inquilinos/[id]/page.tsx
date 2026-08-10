@@ -99,7 +99,9 @@ export default function TenantDetailPage() {
     if (leaseIds.length > 0) {
       const { data: rp } = await supabase
         .from('rent_payments')
-        .select('*, lease:leases(space:spaces(ref))')
+        // Ligação explícita: rent_payments aponta duas vezes para leases
+        // (lease_id e applied_to_lease_id, dos adiantamentos).
+        .select('*, lease:leases!rent_payments_lease_id_fkey(space:spaces(ref))')
         .in('lease_id', leaseIds)
         .order('reference_month', { ascending: false })
         .limit(24)

@@ -177,7 +177,7 @@ export default function RelatoriosPage() {
     setLoadingCC(true)
     const { data } = await supabase
       .from('rent_payments')
-      .select('*, lease:leases(space:spaces(ref))')
+      .select('*, lease:leases!rent_payments_lease_id_fkey(space:spaces(ref))')
       .eq('lease_id', tenant.leaseId)
       .order('reference_month', { ascending: false })
     setContaCorrenteData(data ?? [])
@@ -638,7 +638,11 @@ export default function RelatoriosPage() {
       // --- rent_payments ---
       let rpQuery = supabase
         .from('rent_payments')
-        .select('*, lease:leases(id, space:spaces(id, ref), tenant:tenants(name))')
+        // `!rent_payments_lease_id_fkey` diz qual das ligações usar: a tabela
+        // rent_payments aponta duas vezes para leases (lease_id e
+        // applied_to_lease_id, dos adiantamentos), e sem isto a base de dados
+        // recusa juntar as tabelas — o relatório ficava sem rendas nenhumas.
+        .select('*, lease:leases!rent_payments_lease_id_fkey(id, space:spaces(id, ref), tenant:tenants(name))')
         .gte('reference_month', startDate)
         .lt('reference_month', endDate)
         .not('payment_date', 'is', null)
