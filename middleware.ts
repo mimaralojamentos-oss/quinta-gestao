@@ -27,7 +27,19 @@ export async function middleware(request: NextRequest) {
 
   const pathname = request.nextUrl.pathname
 
+  // Ficheiros que o telemóvel precisa de ler ANTES de haver sessão, para
+  // conseguir instalar a aplicação. Se forem reencaminhados para o login,
+  // o Chrome recebe HTML em vez do manifesto e recusa instalar — fica só
+  // um atalho com ícone genérico.
+  const isPwaAsset =
+    pathname === '/manifest.webmanifest' ||
+    pathname === '/manifest.json' ||
+    pathname === '/sw.js' ||
+    pathname === '/offline.html' ||
+    pathname.startsWith('/icons/')
+
   const isPublicPath =
+    isPwaAsset ||
     pathname.startsWith('/_next') ||
     pathname.startsWith('/favicon') ||
     pathname.match(/\.(jpg|jpeg|png|gif|svg|ico|webp|mp4|pdf)$/i) !== null

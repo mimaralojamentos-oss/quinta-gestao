@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
 import { AuthProvider } from '@/lib/auth-context'
+import RegisterServiceWorker from '@/components/RegisterServiceWorker'
 
 const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME || 'Gestão da Quinta'
 const PWA_ICON = process.env.NEXT_PUBLIC_PWA_ICON || 'quinta'
@@ -39,6 +40,7 @@ export default function RootLayout({
   return (
     <html lang="pt">
       <body>
+        <RegisterServiceWorker />
         <AuthProvider>
           {children}
         </AuthProvider>
