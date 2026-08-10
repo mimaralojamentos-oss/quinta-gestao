@@ -303,8 +303,10 @@ export default function RelatoriosPage() {
             if (rendaMes > 0 && emFalta >= 0.01) {
               parcelas.push({
                 grupo: 'Renda',
+                // O valor entre parênteses é o que FALTA, não o que já foi pago —
+                // assim bate certo com o número que aparece na coluna da direita.
                 descricao: doMes.length > 0 || credito > 0
-                  ? `Renda de ${mesLegivel(mes)}${espacoRef ? ` · ${espacoRef}` : ''} — falta parte (${fmt(registado)} de ${fmt(rendaMes)})`
+                  ? `Renda de ${mesLegivel(mes)}${espacoRef ? ` · ${espacoRef}` : ''} — falta parte (${fmt(emFalta)} de ${fmt(rendaMes)})`
                   : `Renda de ${mesLegivel(mes)}${espacoRef ? ` · ${espacoRef}` : ''}`,
                 valor: emFalta,
                 data: `${mes}-01`,
