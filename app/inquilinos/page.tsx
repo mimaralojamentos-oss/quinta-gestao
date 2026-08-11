@@ -85,8 +85,15 @@ export default function InquilinosPage() {
 
   useEffect(() => { fetchTenants() }, [])
 
-  async function fetchTenants() {
-    setLoading(true)
+  /**
+   * Recarrega a lista de inquilinos.
+   *
+   * `silencioso` serve para atualizar os valores depois de fechar a janela de
+   * um inquilino, sem mostrar o indicador de carregamento — a tabela e os
+   * filtros ficam no ecrã e só os números mudam.
+   */
+  async function fetchTenants(silencioso = false) {
+    if (!silencioso) setLoading(true)
     const { data: tenantsData } = await supabase.from('tenants').select('*').order('name')
     const { data: leasesData } = await supabase.from('leases').select('*, space:spaces(*)')
     const { data: spacesData } = await supabase.from('spaces').select('ref, type, tenant_id').not('tenant_id', 'is', null)
@@ -654,7 +661,7 @@ export default function InquilinosPage() {
                   className="flex items-center gap-2 bg-red-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-700">
                   <Plus className="w-4 h-4" /> Nova Dívida
                 </button>
-                <button onClick={() => setDebtTenant(null)}><X className="w-5 h-5 text-gray-400" /></button>
+                <button onClick={() => { setDebtTenant(null); fetchTenants(true) }}><X className="w-5 h-5 text-gray-400" /></button>
               </div>
             </div>
 
@@ -784,8 +791,12 @@ export default function InquilinosPage() {
       )}
 
       {showTenantModal && (isAdmin || isCoAdmin) && (
-        <TenantModal tenant={editTenant} onClose={() => { setShowTenantModal(false); setOpenTab('dados') }}
-          onSaved={() => { setShowTenantModal(false); fetchTenants(); setOpenTab('dados') }}
+        // Ao fechar recarrega os valores em silêncio: registar um pagamento
+        // dentro da janela alterava a dívida, mas a lista continuava a mostrar
+        // o valor antigo até se atualizar a página — e isso apagava os filtros.
+        <TenantModal tenant={editTenant}
+          onClose={() => { setShowTenantModal(false); setOpenTab('dados'); fetchTenants(true) }}
+          onSaved={() => { setShowTenantModal(false); fetchTenants(true); setOpenTab('dados') }}
           initialTab={openTab} />
       )}
 
