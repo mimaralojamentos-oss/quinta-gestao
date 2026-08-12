@@ -3,7 +3,7 @@
 import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase-client'
-import { formatCurrency, formatDate } from '@/lib/utils'
+import { formatCurrency, formatDate, matchesSearch } from '@/lib/utils'
 import { Zap, Trash2, X, ChevronDown, ChevronRight, Settings, Save, Pencil, Search, Printer } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import { logAccess } from '@/lib/logAccess'
@@ -822,7 +822,7 @@ export default function QuadrosEspacosPage() {
     .reduce((s, r) => s + (r.amount_calculated ?? 0), 0)
 
   const filteredSpaces = spaces.filter(space => {
-    const matchesTenant = !filterTenant || getTenantName(space.tenant).toLowerCase().includes(filterTenant.toLowerCase())
+    const matchesTenant = !filterTenant || matchesSearch(getTenantName(space.tenant), filterTenant)
     const matchesSpace = filterSpaces.length === 0 || filterSpaces.includes(space.ref)
     return matchesTenant && matchesSpace
   })

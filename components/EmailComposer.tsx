@@ -10,6 +10,7 @@ import {
   type EmailContext, type EmailContextData, type EmailItem, type EmailTone,
 } from '@/lib/emailConfig'
 import { logAccess } from '@/lib/logAccess'
+import { normalizeText } from '@/lib/utils'
 
 interface Correction {
   original: string
@@ -94,9 +95,9 @@ export default function EmailComposer({
 
   const sugestoes = contacts
     .filter(c => {
-      const q = freeTo.trim().toLowerCase()
+      const q = normalizeText(freeTo)
       if (!q) return true
-      return c.email.toLowerCase().includes(q) || c.name.toLowerCase().includes(q)
+      return normalizeText(c.email).includes(q) || normalizeText(c.name).includes(q)
     })
     .slice(0, 8)
 

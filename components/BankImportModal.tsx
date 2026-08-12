@@ -12,6 +12,7 @@ import { createClient } from '@/lib/supabase-client'
 import { Upload, X, Loader2, ArrowRight } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import { useFileDrop } from '@/lib/useFileDrop'
+import { matchesSearch } from '@/lib/utils'
 
 interface ColumnMapping {
   date: string
@@ -74,7 +75,7 @@ export default function BankImportModal({ bankId, bankName, columnMapping, onImp
       setParsedHeaders(headers)
       const suggest = (keywords: string[]) => {
         for (const kw of keywords) {
-          const match = headers.find(h => h.toLowerCase().includes(kw.toLowerCase()))
+          const match = headers.find(h => matchesSearch(h, kw))
           if (match) return match
         }
         return ''

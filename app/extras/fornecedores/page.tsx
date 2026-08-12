@@ -3,7 +3,7 @@
 import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState, Fragment } from 'react'
 import { createClient } from '@/lib/supabase-client'
-import { formatCurrency, formatDate } from '@/lib/utils'
+import { formatCurrency, formatDate, normalizeText } from '@/lib/utils'
 import { useAuth } from '@/lib/auth-context'
 import { logAccess } from '@/lib/logAccess'
 import {
@@ -67,9 +67,9 @@ export default function FornecedoresPage() {
   const aliasMap = buildAliasMap(aliases)
   const grupos = groupSuppliers(docs, aliasMap)
 
-  const q = pesquisa.trim().toLowerCase()
+  const q = normalizeText(pesquisa)
   const visiveis: SupplierGroup[] = grupos
-    .filter(g => !q || g.name.toLowerCase().includes(q) || g.variants.some(v => v.raw.toLowerCase().includes(q)))
+    .filter(g => !q || normalizeText(g.name).includes(q) || g.variants.some(v => normalizeText(v.raw).includes(q)))
     .sort((a, b) => {
       const sinal = ordemDir === 'asc' ? 1 : -1
       if (ordem === 'nome') return sinal * a.name.localeCompare(b.name, 'pt', { sensitivity: 'base' })

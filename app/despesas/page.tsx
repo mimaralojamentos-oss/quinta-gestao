@@ -5,7 +5,7 @@ import { Suspense, useEffect, useState, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { Expense } from '@/lib/types'
-import { formatCurrency, formatDate, categoryLabel } from '@/lib/utils'
+import { formatCurrency, formatDate, categoryLabel, matchesSearch } from '@/lib/utils'
 import { Plus, Search, Trash2, X, SlidersHorizontal, ChevronUp, ChevronDown, ChevronsUpDown, Eye, ChevronDown as ChevronDownIcon, Copy, CopyPlus } from 'lucide-react'
 import ExpenseModal from './ExpenseModal'
 import CopiarDespesasModal from './CopiarDespesasModal'
@@ -219,7 +219,7 @@ function DespesasContent() {
   const dateRange = filterPeriod !== 'all' ? getDateRange(filterPeriod) : null
 
   const filtered = expenses.filter(e => {
-    const matchSearch = !search || e.description.toLowerCase().includes(search.toLowerCase()) || (e.supplier && e.supplier.toLowerCase().includes(search.toLowerCase()))
+    const matchSearch = !search || matchesSearch(e.description, search) || (e.supplier && matchesSearch(e.supplier, search))
     const matchCat = filterCategory === 'all' || e.category === filterCategory
     const matchSupplier = filterSuppliers.length === 0 || filterSuppliers.includes(e.supplier)
     const matchProject = filterProject === 'all' || (filterProject === 'none' && !e.project_id) || e.project_id === filterProject

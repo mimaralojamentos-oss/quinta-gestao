@@ -4,7 +4,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Tenant, Lease } from '@/lib/types'
-import { formatCurrency, formatDate } from '@/lib/utils'
+import { formatCurrency, formatDate, matchesSearch } from '@/lib/utils'
 import { Plus, Search, FileText, Phone, Mail, X, AlertTriangle, ArrowUpDown, ArrowUp, ArrowDown, ChevronDown, Trash2 } from 'lucide-react'
 import TenantModal from './TenantModal'
 import LeaseModal from './LeaseModal'
@@ -303,7 +303,7 @@ export default function InquilinosPage() {
   const today = new Date()
 
   const filtered = tenants.filter(t => {
-    const matchSearch = !search || t.name.toLowerCase().includes(search.toLowerCase()) || t.phone?.includes(search) || t.email?.toLowerCase().includes(search.toLowerCase())
+    const matchSearch = !search || matchesSearch(t.name, search) || t.phone?.includes(search) || matchesSearch(t.email, search)
     const matchSpace = filterSpaces.length === 0 ||
       t.spaces?.some(s => filterSpaces.includes(s.ref)) ||
       t.leases?.some(l => l.status === 'ativo' && filterSpaces.includes(l.space?.ref))

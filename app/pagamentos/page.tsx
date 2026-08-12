@@ -3,7 +3,7 @@
 import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
-import { formatCurrency, getMonthLabel, getCurrentMonth } from '@/lib/utils'
+import { formatCurrency, getMonthLabel, getCurrentMonth, matchesSearch } from '@/lib/utils'
 import { Plus, ChevronLeft, ChevronRight, CheckCircle, Clock, Search, SlidersHorizontal, X, ArrowUpDown, ArrowUp, ArrowDown, ChevronDown } from 'lucide-react'
 import PaymentModal from './PaymentModal'
 import AdvancePaymentModal from './AdvancePaymentModal'
@@ -186,8 +186,8 @@ export default function PagamentosPage() {
     const isPaid = paid >= l.monthly_rent
     const isPartial = paid > 0 && !isPaid
 
-    if (filterTenant && !l.tenant?.name?.toLowerCase().includes(filterTenant.toLowerCase())) return false
-    if (filterDescription && !l.tenant?.name?.toLowerCase().includes(filterDescription.toLowerCase()) && !l.space?.ref?.toLowerCase().includes(filterDescription.toLowerCase())) return false
+    if (filterTenant && !matchesSearch(l.tenant?.name, filterTenant)) return false
+    if (filterDescription && !matchesSearch(l.tenant?.name, filterDescription) && !matchesSearch(l.space?.ref, filterDescription)) return false
     if (filterSpaces.length > 0 && !filterSpaces.includes(l.space?.ref)) return false
     if (filterState === 'pago' && !isPaid) return false
     if (filterState === 'parcial' && !isPartial) return false

@@ -3,7 +3,7 @@
 import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { formatCurrency, formatDate } from '@/lib/utils'
+import { formatCurrency, formatDate, matchesSearch } from '@/lib/utils'
 import { Plus, Search, FolderOpen, X, FileText, Eye, FolderInput } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import ProjectModal from './ProjectModal'
@@ -153,10 +153,9 @@ export default function ProjetosPage() {
   }
 
   const filtered = projects.filter(p => {
-    const matchSearch = !search ||
-      p.name.toLowerCase().includes(search.toLowerCase()) ||
-      p.description?.toLowerCase().includes(search.toLowerCase()) ||
-      p.space?.ref?.toLowerCase().includes(search.toLowerCase())
+    const matchSearch = !search || matchesSearch(p.name, search) ||
+      matchesSearch(p.description, search) ||
+      matchesSearch(p.space?.ref, search)
     const matchStatus = filterStatus === 'all' || p.status === filterStatus
     const matchType = filterType === 'all' || p.type === filterType
     return matchSearch && matchStatus && matchType

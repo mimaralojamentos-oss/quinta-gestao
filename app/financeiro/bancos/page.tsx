@@ -3,7 +3,7 @@
 import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState, useRef, Fragment } from 'react'
 import { createClient } from '@/lib/supabase-client'
-import { formatCurrency, formatDate } from '@/lib/utils'
+import { formatCurrency, formatDate, normalizeText } from '@/lib/utils'
 import { Plus, Building, CreditCard, ArrowUpRight, ArrowDownRight, Upload, Eye, X, Loader2, FileText, CheckCircle, Printer } from 'lucide-react'
 import { useFileDrop } from '@/lib/useFileDrop'
 import { useAuth } from '@/lib/auth-context'
@@ -187,9 +187,9 @@ export default function BancosPage() {
     if (creditStatus !== 'all' && c.status !== creditStatus) return false
     if (!dentroDoPeriodo(c.transaction_date)) return false
     if (creditSearch) {
-      const q = creditSearch.toLowerCase()
-      const banco = bankById[c.bank_id] ? shortBankLabel(bankById[c.bank_id]).toLowerCase() : ''
-      if (!c.description?.toLowerCase().includes(q) && !banco.includes(q)) return false
+      const q = normalizeText(creditSearch)
+      const banco = bankById[c.bank_id] ? normalizeText(shortBankLabel(bankById[c.bank_id])) : ''
+      if (!normalizeText(c.description).includes(q) && !banco.includes(q)) return false
     }
     return true
   })
@@ -203,9 +203,9 @@ export default function BancosPage() {
     if (creditBank !== 'all' && c.bank_id !== creditBank) return false
     if (!dentroDoPeriodo(c.transaction_date)) return false
     if (creditSearch) {
-      const q = creditSearch.toLowerCase()
-      const banco = bankById[c.bank_id] ? shortBankLabel(bankById[c.bank_id]).toLowerCase() : ''
-      if (!c.description?.toLowerCase().includes(q) && !banco.includes(q)) return false
+      const q = normalizeText(creditSearch)
+      const banco = bankById[c.bank_id] ? normalizeText(shortBankLabel(bankById[c.bank_id])) : ''
+      if (!normalizeText(c.description).includes(q) && !banco.includes(q)) return false
     }
     return true
   })

@@ -3,7 +3,7 @@
 import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
-import { formatCurrency, formatDate } from '@/lib/utils'
+import { formatCurrency, formatDate, matchesSearch, normalizeText } from '@/lib/utils'
 import { buildRentPaymentPlan, applyRentPaymentPlan } from '@/lib/rentPaymentPlan'
 import { ensureExpenseForTransaction, emptySummary, addToSummary, describeSummary } from '@/lib/bankExpense'
 import { useFileDrop } from '@/lib/useFileDrop'
@@ -224,7 +224,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
 
     // Regras personalizadas (máxima prioridade)
     for (const rule of rulesData) {
-      if (tx.description.toLowerCase().includes(rule.keyword.toLowerCase())) {
+      if (matchesSearch(tx.description, rule.keyword)) {
         if (rule.confirmed_type === 'renda' && rule.tenant_id) {
           const tenant = tenantsData.find(t => t.id === rule.tenant_id)
           const lease = leasesData.find(l => (l.tenant as any)?.id === rule.tenant_id)
@@ -237,7 +237,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
 
     if (tx.amount > 0) {
       for (const tenant of tenantsData) {
-        if (tenant.bank_reference && tx.description.toLowerCase().includes(tenant.bank_reference.toLowerCase())) {
+        if (tenant.bank_reference && matchesSearch(tx.description, tenant.bank_reference)) {
           const lease = leasesData.find(l => (l.tenant as any)?.id === tenant.id)
           results.push({ type: 'renda', confidence: 'high', reason: `Referência bancária "${tenant.bank_reference}" encontrada`, tenant, lease })
         }
@@ -245,7 +245,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
       for (const tenant of tenantsData) {
         const nameParts = tenant.name.split(' ')
         const lastName = nameParts[nameParts.length - 1]
-        if (lastName.length > 3 && tx.description.toLowerCase().includes(lastName.toLowerCase())) {
+        if (lastName.length > 3 && matchesSearch(tx.description, lastName)) {
           const lease = leasesData.find(l => (l.tenant as any)?.id === tenant.id)
           if (!results.find(r => r.tenant?.id === tenant.id)) {
             results.push({ type: 'renda', confidence: 'medium', reason: `Nome "${lastName}" encontrado na descrição`, tenant, lease })
@@ -274,7 +274,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
       const supplierMatches = expensesData.filter(e => {
         if (!e.supplier) return false
         const supplierWords = e.supplier.split(' ').filter((w: string) => w.length >= 2)
-        return supplierWords.some((w: string) => tx.description.toLowerCase().includes(w.toLowerCase()))
+        return supplierWords.some((w: string) =>matchesSearch(tx.description, w))
       })
       for (const exp of supplierMatches.slice(0, 2)) {
         if (!results.find(r => r.expense?.id === exp.id)) {
@@ -303,7 +303,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
           : []
         const fileKeywords = (doc.file_path || '').toLowerCase().split(/[\/_\-\s]+/).filter((w: string) => w.length >= 3)
         const allMatchWords = [...supplierWords2, ...fileKeywords]
-        const supplierMatch = allMatchWords.some((w: string) => tx.description.toLowerCase().includes(w))
+        const supplierMatch = allMatchWords.some((w: string) => normalizeText(tx.description).includes(normalizeText(w)))
 
         if (amountExact && dateOk) {
           if (!results.find(r => r.document?.id === doc.id)) {
@@ -763,7 +763,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     if (filterIdentification === 'nao_identificadas' && (t.confirmed_type || (autoMatches && autoMatches.length > 0))) return false
     if (filterCustosBancarios && t.confirmed_type !== 'custos_bancarios') return false
 
-    if (search && !t.description.toLowerCase().includes(search.toLowerCase())) return false
+    if (search && !matchesSearch(t.description, search)) return false
     if (filterDateFrom && t.transaction_date < filterDateFrom) return false
     if (filterDateTo && t.transaction_date > filterDateTo) return false
     if (filterAmountMin && t.amount < parseFloat(filterAmountMin)) return false

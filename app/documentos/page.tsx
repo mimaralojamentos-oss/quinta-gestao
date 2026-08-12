@@ -4,7 +4,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import Link from 'next/link'
 import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
-import { formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
+import { formatCurrency, formatDate, formatDateTime, normalizeText } from '@/lib/utils'
 import { Search, FileText, Eye, FolderOpen, Trash2, X, Plus, Upload, Loader2, CheckCircle, AlertCircle, Edit2, Filter, ChevronDown, ChevronUp, ArrowUpDown, ArrowUp, ArrowDown, Zap } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import { logAccess } from '@/lib/logAccess'
@@ -475,8 +475,8 @@ async function handleSaveEdit() {
 
   const filtered = allDocs.filter(d => {
     if (search) {
-      const s = search.toLowerCase()
-      if (!d._nome.toLowerCase().includes(s) && !d._associado.toLowerCase().includes(s) && !d._descricao.toLowerCase().includes(s)) return false
+      const s = normalizeText(search)
+      if (!normalizeText(d._nome).includes(s) && !normalizeText(d._associado).includes(s) && !normalizeText(d._descricao).includes(s)) return false
     }
     if (filterTipo !== 'all' && d._tipo !== filterTipo) return false
     if (filterDateStart && d._data && d._data < filterDateStart) return false

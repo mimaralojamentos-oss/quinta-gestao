@@ -3,7 +3,7 @@
 import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
-import { formatCurrency, formatDate } from '@/lib/utils'
+import { formatCurrency, formatDate, matchesSearch } from '@/lib/utils'
 import {
   ScrollText, Download, AlertTriangle, CheckCircle,
   Clock, Search, Filter, ExternalLink,
@@ -128,9 +128,7 @@ export default function ContratosPage() {
   const filtered = rows.filter(r => {
     const days = daysUntilRenewal(r.start_date, r.end_date)
     const matchSearch =
-      !search ||
-      r.tenant_name.toLowerCase().includes(search.toLowerCase()) ||
-      r.space_ref.toLowerCase().includes(search.toLowerCase())
+      !search || matchesSearch(r.tenant_name, search) || matchesSearch(r.space_ref, search)
     const matchFilter =
       filter === 'todos' ||
       (filter === 'a_expirar' && days !== null && days <= 180) ||

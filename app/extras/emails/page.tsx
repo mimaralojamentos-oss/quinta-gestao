@@ -3,7 +3,7 @@
 import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
-import { formatDateTime } from '@/lib/utils'
+import { formatDateTime, normalizeText } from '@/lib/utils'
 import { useAuth } from '@/lib/auth-context'
 import { Mail, Search, X, ChevronLeft, AlertTriangle, CheckCircle } from 'lucide-react'
 import Link from 'next/link'
@@ -51,14 +51,14 @@ export default function EmailsEnviadosPage() {
     carregar()
   }, [podeVer])
 
-  const q = pesquisa.trim().toLowerCase()
+  const q = normalizeText(pesquisa)
   const visiveis = emails
     .filter(e => filtro === 'todos' || e.status === filtro)
     .filter(e => !q ||
-      e.subject.toLowerCase().includes(q) ||
-      e.to_email.toLowerCase().includes(q) ||
-      (e.to_name ?? '').toLowerCase().includes(q) ||
-      e.body.toLowerCase().includes(q))
+      normalizeText(e.subject).includes(q) ||
+      normalizeText(e.to_email).includes(q) ||
+      normalizeText(e.to_name).includes(q) ||
+      normalizeText(e.body).includes(q))
 
   const totalErros = emails.filter(e => e.status === 'erro').length
 

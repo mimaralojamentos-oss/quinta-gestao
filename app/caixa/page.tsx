@@ -4,7 +4,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState, useMemo } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { CashFundMovement } from '@/lib/types'
-import { formatCurrency, formatDate } from '@/lib/utils'
+import { formatCurrency, formatDate, matchesSearch } from '@/lib/utils'
 import { Plus, TrendingUp, TrendingDown, Wallet, Trash2, Search, X, Calendar, ChevronUp, ChevronDown, ChevronsUpDown, ArrowRightLeft } from 'lucide-react'
 import CashModal from './CashModal'
 import TransferModal from './TransferModal'
@@ -100,7 +100,7 @@ export default function CaixaPage() {
   const filtered = useMemo(() => {
     const list = movements.filter(m => {
       if (sourceFilter !== 'all' && (m as any).source !== sourceFilter) return false
-      if (search && !m.description?.toLowerCase().includes(search.toLowerCase())) return false
+      if (search && !matchesSearch(m.description, search)) return false
       if (selectedMonth !== 'all' && m.movement_date?.slice(0, 7) !== selectedMonth) return false
       return true
     })

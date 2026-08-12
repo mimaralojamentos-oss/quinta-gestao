@@ -10,7 +10,7 @@
 
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
-import { formatCurrency, formatDate } from '@/lib/utils'
+import { formatCurrency, formatDate, matchesSearch } from '@/lib/utils'
 import { Search, X, Sparkles, FileText, CheckCircle } from 'lucide-react'
 import { mergeCategories, normalizeCategory } from '@/lib/incomeCategories'
 import { buildRentPaymentPlan, type RentPaymentPlan } from '@/lib/rentPaymentPlan'
@@ -310,9 +310,8 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
   const filteredExpenses = sortedExpenses
     .filter(e => dentroDoAmbito(expenseScope, e.amount, e.expense_date, txAmountAbs, txDate))
     .filter(e =>
-      !searchExpense ||
-      e.description.toLowerCase().includes(searchExpense.toLowerCase()) ||
-      e.supplier?.toLowerCase().includes(searchExpense.toLowerCase()) ||
+      !searchExpense || matchesSearch(e.description, searchExpense) ||
+      matchesSearch(e.supplier, searchExpense) ||
       String(e.amount).includes(searchExpense)
     )
 
@@ -320,7 +319,7 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
     .filter(d => dentroDoAmbito(docScope, d.amount, d.doc_date, txAmountAbs, txDate))
     .filter(d =>
       !searchDoc ||
-      (d.supplier_name ?? d.original_name ?? '').toLowerCase().includes(searchDoc.toLowerCase()) ||
+      matchesSearch(d.supplier_name ?? d.original_name, searchDoc) ||
       String(d.amount).includes(searchDoc)
     )
     .sort((a, b) => {
@@ -331,7 +330,7 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
     })
 
   const filteredTenants = tenants.filter(t =>
-    !searchTenant || t.name.toLowerCase().includes(searchTenant.toLowerCase())
+    !searchTenant || matchesSearch(t.name, searchTenant)
   )
 
   const expensesNearby = sortedExpenses.filter(e => {

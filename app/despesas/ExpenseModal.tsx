@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { Expense } from '@/lib/types'
 import { X, Upload, FileText, Loader2, Sparkles, Search, Link } from 'lucide-react'
-import { formatCurrency, formatDate } from '@/lib/utils'
+import { formatCurrency, formatDate, matchesSearch } from '@/lib/utils'
 import { logAccess } from '@/lib/logAccess'
 import { useFileDrop } from '@/lib/useFileDrop'
 
@@ -295,7 +295,7 @@ export default function ExpenseModal({ expense, duplicateFrom, onClose, onSaved 
                 </div>
                 <div className="max-h-48 overflow-y-auto">
                   {existingDocs
-                    .filter(d => !docSearch || (d.original_name ?? '').toLowerCase().includes(docSearch.toLowerCase()) || (d.supplier_name ?? '').toLowerCase().includes(docSearch.toLowerCase()))
+                    .filter(d => !docSearch || matchesSearch(d.original_name ?? '', docSearch) || matchesSearch(d.supplier_name ?? '', docSearch))
                     .slice(0, 30)
                     .map(d => (
                       <button key={d.id} onClick={() => setSelectedDocId(d.id === selectedDocId ? null : d.id)}
@@ -308,7 +308,7 @@ export default function ExpenseModal({ expense, duplicateFrom, onClose, onSaved 
                         {selectedDocId === d.id && <span className="text-xs text-emerald-600 font-medium flex-shrink-0">✓</span>}
                       </button>
                     ))}
-                  {existingDocs.filter(d => !docSearch || (d.original_name ?? '').toLowerCase().includes(docSearch.toLowerCase()) || (d.supplier_name ?? '').toLowerCase().includes(docSearch.toLowerCase())).length === 0 && (
+                  {existingDocs.filter(d => !docSearch || matchesSearch(d.original_name ?? '', docSearch) || matchesSearch(d.supplier_name ?? '', docSearch)).length === 0 && (
                     <p className="text-sm text-gray-400 text-center py-6">Nenhum documento encontrado</p>
                   )}
                 </div>

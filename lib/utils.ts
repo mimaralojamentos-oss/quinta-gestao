@@ -88,3 +88,29 @@ export function categoryLabel(cat: string): string {
   }
   return map[cat] ?? cat
 }
+
+/**
+ * Versão comparável de um texto para pesquisas: sem acentos e em minúsculas.
+ *
+ * Serve para "rogerio" encontrar "Rogério", "joao" encontrar "João" e
+ * "eletricidade" encontrar "Eletricidade". Sem isto, quem escreve sem acentos
+ * — que é a maioria das pessoas a escrever depressa — não encontrava nada.
+ */
+export function normalizeText(texto: string | null | undefined): string {
+  if (!texto) return ''
+  return String(texto)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')  // remove os sinais de acentuação
+    .toLowerCase()
+    .trim()
+}
+
+/**
+ * True se `texto` contém `pesquisa`, ignorando acentos e maiúsculas.
+ * Uma pesquisa vazia dá sempre true, para não esconder nada.
+ */
+export function matchesSearch(texto: string | null | undefined, pesquisa: string | null | undefined): boolean {
+  const alvo = normalizeText(pesquisa)
+  if (!alvo) return true
+  return normalizeText(texto).includes(alvo)
+}

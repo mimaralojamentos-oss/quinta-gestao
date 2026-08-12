@@ -3,7 +3,7 @@
 import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
-import { formatCurrency, formatDate } from '@/lib/utils'
+import { formatCurrency, formatDate, normalizeText } from '@/lib/utils'
 import { Plus, Zap, Trash2, X, ChevronDown, ChevronRight, Upload, Loader2, RefreshCw, CheckCircle, AlertCircle, BarChart2, Eye, Search } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import { useFileDrop, mergeUniqueFiles } from '@/lib/useFileDrop'
@@ -205,10 +205,10 @@ export default function QuadrosPage() {
 
   const filteredDocs = documents.filter(d => {
     if (!associateSearch) return true
-    const s = associateSearch.toLowerCase()
+    const s = normalizeText(associateSearch)
     return (
-      (d.original_name ?? '').toLowerCase().includes(s) ||
-      (d.doc_number ?? '').toLowerCase().includes(s)
+      normalizeText(d.original_name).includes(s) ||
+      normalizeText(d.doc_number).includes(s)
     )
   })
 

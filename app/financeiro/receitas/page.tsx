@@ -3,7 +3,7 @@
 import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
-import { formatCurrency, formatDate } from '@/lib/utils'
+import { formatCurrency, formatDate, matchesSearch } from '@/lib/utils'
 import { Plus, Trash2, X, Search, FileText, TrendingUp } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import { incomeCategoryLabel, mergeCategories } from '@/lib/incomeCategories'
@@ -104,7 +104,7 @@ export default function ReceitasPage() {
   const categoriasDisponiveis = mergeCategories(records.map(r => r.category))
 
   const filtered = records.filter(r => {
-    const matchSearch = !search || r.description.toLowerCase().includes(search.toLowerCase()) || (r.notes ?? '').toLowerCase().includes(search.toLowerCase())
+    const matchSearch = !search || matchesSearch(r.description, search) || matchesSearch(r.notes ?? '', search)
     const matchCat = filterCategory === 'all' || r.category === filterCategory
     const matchYear = filterYear === 'all' || r.income_date.startsWith(filterYear)
     return matchSearch && matchCat && matchYear

@@ -5,7 +5,9 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Plus, Trash2, Send, MessageSquare, Check, X, Search, ChevronDown, Filter } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
-import { formatDate } from '@/lib/utils'
+// Nota: esta página já tem uma função local chamada matchesSearch,
+// por isso importa-se apenas o normalizeText.
+import { formatDate, normalizeText } from '@/lib/utils'
 
 interface GatePhone {
   id: string
@@ -159,11 +161,11 @@ export default function PortaoPage() {
   function matchesSearch(p: GatePhone) {
     if (selectedSpaces.length > 0 && !selectedSpaces.includes(p.space ?? '')) return false
     if (!search) return true
-    const s = search.toLowerCase()
+    const s = normalizeText(search)
     return (
       p.phone.includes(s) ||
-      (p.name ?? '').toLowerCase().includes(s) ||
-      (p.space ?? '').toLowerCase().includes(s)
+      normalizeText(p.name).includes(s) ||
+      normalizeText(p.space).includes(s)
     )
   }
 
