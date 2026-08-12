@@ -75,6 +75,7 @@ function DespesasContent() {
   const [showSupplierDropdown, setShowSupplierDropdown] = useState(false)
   const supplierDropdownRef = useRef<HTMLDivElement>(null)
   const [filterProject, setFilterProject] = useState('all')
+  const [filterPayment, setFilterPayment] = useState<'all' | 'dinheiro' | 'banco'>('all')
   const [filterPeriod, setFilterPeriod] = useState<'all' | 'hoje' | 'semana' | 'mes' | 'ano'>('all')
   const [filterDateFrom, setFilterDateFrom] = useState('')
   const [filterDateTo, setFilterDateTo] = useState('')
@@ -203,7 +204,7 @@ function DespesasContent() {
 
   function resetFilters() {
     setSearch(''); setFilterCategory('all'); setFilterSuppliers([])
-    setFilterProject('all'); setFilterPeriod('all')
+    setFilterProject('all'); setFilterPeriod('all'); setFilterPayment('all')
     setFilterDateFrom(''); setFilterDateTo('')
     setFilterAmountMin(''); setFilterAmountMax('')
     clearExpenseFilter()
@@ -211,7 +212,8 @@ function DespesasContent() {
   }
 
   const hasActiveFilters = search || filterCategory !== 'all' || filterSuppliers.length > 0 ||
-    filterProject !== 'all' || filterPeriod !== 'all' || filterDateFrom || filterDateTo || filterAmountMin || filterAmountMax || filterExpenseId
+    filterProject !== 'all' || filterPeriod !== 'all' || filterPayment !== 'all' ||
+    filterDateFrom || filterDateTo || filterAmountMin || filterAmountMax || filterExpenseId
 
   const allSuppliers = [...new Set(expenses.map(e => e.supplier).filter(Boolean))].sort()
   const dateRange = filterPeriod !== 'all' ? getDateRange(filterPeriod) : null
@@ -221,6 +223,10 @@ function DespesasContent() {
     const matchCat = filterCategory === 'all' || e.category === filterCategory
     const matchSupplier = filterSuppliers.length === 0 || filterSuppliers.includes(e.supplier)
     const matchProject = filterProject === 'all' || (filterProject === 'none' && !e.project_id) || e.project_id === filterProject
+    // 'banco' apanha tudo o que não é dinheiro, incluindo registos antigos
+    // sem método definido — senão desapareciam dos dois filtros.
+    const matchPayment = filterPayment === 'all'
+      || (filterPayment === 'dinheiro' ? e.payment_method === 'dinheiro' : e.payment_method !== 'dinheiro')
     const matchDateFrom = !filterDateFrom || e.expense_date >= filterDateFrom
     const matchDateTo = !filterDateTo || e.expense_date <= filterDateTo
     const matchPeriod = !dateRange || (e.expense_date >= dateRange.from && e.expense_date <= dateRange.to)
@@ -228,7 +234,7 @@ function DespesasContent() {
     const matchAmountMax = !filterAmountMax || e.amount <= parseFloat(filterAmountMax)
     const matchExpenseId = !filterExpenseId || e.id === filterExpenseId
     const matchSelectedPeriod = selectedPeriod === 'all' || e.expense_date?.slice(0, 7) === selectedPeriod
-    return matchSearch && matchCat && matchSupplier && matchProject && matchDateFrom && matchDateTo && matchPeriod && matchAmountMin && matchAmountMax && matchExpenseId && matchSelectedPeriod
+    return matchSearch && matchCat && matchSupplier && matchProject && matchPayment && matchDateFrom && matchDateTo && matchPeriod && matchAmountMin && matchAmountMax && matchExpenseId && matchSelectedPeriod
   }).sort((a, b) => {
     let valA = a[sortField] ?? '', valB = b[sortField] ?? ''
     if (sortField === 'amount') { valA = Number(valA); valB = Number(valB) }
@@ -397,7 +403,7 @@ function DespesasContent() {
           </div>
 
           {/* Filtros — linha 2 */}
-          <div className="grid grid-cols-5 gap-2 items-center">
+          <div className="grid grid-cols-6 gap-2 items-center">
             {/* Fornecedor multi-select */}
             <div className="relative col-span-2" ref={supplierDropdownRef}>
               <button onClick={() => setShowSupplierDropdown(!showSupplierDropdown)}
@@ -423,6 +429,16 @@ function DespesasContent() {
                 </div>
               )}
             </div>
+
+            {/* Método de pagamento */}
+            <select
+              className={`input text-sm ${filterPayment !== 'all' ? 'border-emerald-400 text-emerald-700' : 'text-gray-600'}`}
+              value={filterPayment}
+              onChange={e => setFilterPayment(e.target.value as 'all' | 'dinheiro' | 'banco')}>
+              <option value="all">Todos os pagamentos</option>
+              <option value="dinheiro">💵 Dinheiro</option>
+              <option value="banco">🏦 Banco</option>
+            </select>
 
             {/* Mais filtros (datas e valores) */}
             <button onClick={() => setShowMoreFilters(v => !v)}
