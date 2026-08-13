@@ -2,7 +2,7 @@
 
 import { useEffect, useState, use } from 'react'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { formatarHoras, motivoDiaEspecial } from '@/lib/ponto'
+import { formatarHoras, motivoDiaEspecial, calcularHoras } from '@/lib/ponto'
 import { Clock, Loader2, CheckCircle, Plus, LogOut } from 'lucide-react'
 
 /**
@@ -15,6 +15,50 @@ import { Clock, Loader2, CheckCircle, Plus, LogOut } from 'lucide-react'
  * O código de 4 dígitos fica guardado no telemóvel, por isso só é pedido
  * na primeira vez.
  */
+
+/**
+ * Escolha de horas com duas listas em vez da janela de relógio do Android.
+ *
+ * A janela nativa fica cortada em alguns telemóveis — o botão de confirmar
+ * desaparece para lá da margem do ecrã. Além disso, como as horas contam
+ * sempre por quartos de hora, faz sentido só oferecer 00, 15, 30 e 45.
+ */
+const HORAS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'))
+const MINUTOS = ['00', '15', '30', '45']
+
+function EscolherHora({ valor, onChange, etiqueta }: {
+  valor: string
+  onChange: (v: string) => void
+  etiqueta: string
+}) {
+  const [h, m] = (valor || '08:00').split(':')
+  // Se vier um minuto fora dos quartos (registo antigo), encosta ao mais próximo
+  const minutoValido = MINUTOS.includes(m) ? m : MINUTOS.reduce(
+    (melhor, atual) => Math.abs(Number(atual) - Number(m)) < Math.abs(Number(melhor) - Number(m)) ? atual : melhor,
+    '00'
+  )
+
+  return (
+    <div>
+      <label className="text-xs text-gray-500 block mb-1">{etiqueta}</label>
+      <div className="flex items-center gap-1">
+        <select
+          className="flex-1 min-w-0 border border-gray-200 rounded-lg px-2 py-2.5 text-base bg-white"
+          value={h}
+          onChange={e => onChange(`${e.target.value}:${minutoValido}`)}>
+          {HORAS.map(x => <option key={x} value={x}>{x}</option>)}
+        </select>
+        <span className="text-gray-400 font-bold">:</span>
+        <select
+          className="flex-1 min-w-0 border border-gray-200 rounded-lg px-2 py-2.5 text-base bg-white"
+          value={minutoValido}
+          onChange={e => onChange(`${h}:${e.target.value}`)}>
+          {MINUTOS.map(x => <option key={x} value={x}>{x}</option>)}
+        </select>
+      </div>
+    </div>
+  )
+}
 
 interface Dados {
   worker: { name: string; hourly_rate: number; hourly_rate_holiday: number | null }
@@ -159,7 +203,7 @@ export default function PontoPage({ params }: { params: Promise<{ token: string 
 
   // ------------------------------------------------------------ ponto
   return (
-    <div className="min-h-screen bg-gray-50 pb-28">
+    <div className="min-h-screen bg-gray-50 pb-28 overflow-x-hidden">
       <div className="bg-emerald-600 text-white px-5 pt-6 pb-8">
         <div className="flex items-start justify-between">
           <div>
@@ -211,16 +255,15 @@ export default function PontoPage({ params }: { params: Promise<{ token: string 
             </div>
 
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs text-gray-500 block mb-1">Entrada</label>
-                <input type="time" className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-base"
-                  value={form.start_time} onChange={e => setForm(f => ({ ...f, start_time: e.target.value }))} />
-              </div>
-              <div>
-                <label className="text-xs text-gray-500 block mb-1">Saída</label>
-                <input type="time" className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-base"
-                  value={form.end_time} onChange={e => setForm(f => ({ ...f, end_time: e.target.value }))} />
-              </div>
+              <EscolherHora etiqueta="Entrada" valor={form.start_time}
+                onChange={v => setForm(f => ({ ...f, start_time: v }))} />
+              <EscolherHora etiqueta="Saída" valor={form.end_time}
+                onChange={v => setForm(f => ({ ...f, end_time: v }))} />
+            </div>
+
+            <div className="bg-gray-50 rounded-lg px-3 py-2 text-sm text-center">
+              <span className="text-gray-500">Dá </span>
+              <strong className="text-gray-900">{formatarHoras(calcularHoras(form.start_time, form.end_time))}</strong>
             </div>
 
             <div>
