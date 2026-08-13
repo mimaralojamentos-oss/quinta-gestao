@@ -38,8 +38,13 @@ export async function middleware(request: NextRequest) {
     pathname === '/offline.html' ||
     pathname.startsWith('/icons/')
 
+  // Folha de ponto dos trabalhadores: entram por link secreto + código de
+  // 4 dígitos, sem conta no site. A validação é feita na API, não aqui.
+  const isPonto = pathname.startsWith('/ponto/') || pathname === '/api/ponto'
+
   const isPublicPath =
     isPwaAsset ||
+    isPonto ||
     pathname.startsWith('/_next') ||
     pathname.startsWith('/favicon') ||
     pathname.match(/\.(jpg|jpeg|png|gif|svg|ico|webp|mp4|pdf)$/i) !== null
