@@ -3,7 +3,7 @@
 import { useEffect, useState, use } from 'react'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { formatarHoras, motivoDiaEspecial, calcularHoras } from '@/lib/ponto'
-import { Clock, Loader2, CheckCircle, Plus, LogOut } from 'lucide-react'
+import { Clock, Loader2, CheckCircle, Plus, LogOut, Smartphone, X } from 'lucide-react'
 
 /**
  * Folha de ponto do trabalhador.
@@ -79,6 +79,22 @@ export default function PontoPage({ params }: { params: Promise<{ token: string 
   const [dados, setDados] = useState<Dados | null>(null)
   const [erro, setErro] = useState('')
   const [aCarregar, setACarregar] = useState(true)
+
+  // Dica de instalação: só faz sentido enquanto isto correr dentro do
+  // navegador. Quem já instalou não precisa de a ver.
+  const [dicaFechada, setDicaFechada] = useState(false)
+  const [emNavegador, setEmNavegador] = useState(false)
+  useEffect(() => {
+    // Fora do caminho síncrono do efeito, para não desencadear novo desenho
+    // imediato do ecrã.
+    const t = setTimeout(() => {
+      const instalada = window.matchMedia?.('(display-mode: standalone)').matches
+        || (window.navigator as any).standalone === true
+      setEmNavegador(!instalada)
+    }, 0)
+    return () => clearTimeout(t)
+  }, [])
+  const podeInstalar = autenticado && emNavegador && !dicaFechada
 
   const [mostrarForm, setMostrarForm] = useState(false)
   const [guardando, setGuardando] = useState(false)
@@ -342,6 +358,25 @@ export default function PontoPage({ params }: { params: Promise<{ token: string 
               ))}
             </div>
           </>
+        )}
+
+        {podeInstalar && (
+          <div className="bg-white border border-emerald-100 rounded-xl p-3.5 mt-6 shadow-sm">
+            <div className="flex items-start gap-3">
+              <Smartphone className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-gray-900">Põe isto no ecrã do telemóvel</p>
+                <p className="text-xs text-gray-500 mt-1 leading-relaxed">
+                  Assim entras com um toque, sem procurar o link.<br />
+                  <strong>Android:</strong> menu ⋮ do Chrome → <em>Instale e crie um atalho</em>.<br />
+                  <strong>iPhone:</strong> no Safari, botão de partilha → <em>Adicionar ao ecrã principal</em>.
+                </p>
+              </div>
+              <button onClick={() => setDicaFechada(true)} className="text-gray-300 p-1 flex-shrink-0" title="Fechar">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
         )}
 
         <p className="text-xs text-gray-400 text-center mt-8 px-4">
