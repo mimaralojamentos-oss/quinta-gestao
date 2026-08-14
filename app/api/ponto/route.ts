@@ -27,31 +27,44 @@ function adminClient() {
   )
 }
 
-/** Trava simples contra tentativas às cegas do código de 4 dígitos. */
-const tentativas = new Map<string, { contador: number; ate: number }>()
+const MAX_TENTATIVAS = 5
+const MINUTOS_BLOQUEIO = 15
 
-function bloqueado(token: string): boolean {
-  const t = tentativas.get(token)
-  if (!t) return false
-  if (Date.now() > t.ate) { tentativas.delete(token); return false }
-  return t.contador >= 5
+/**
+ * Comparação que demora sempre o mesmo tempo, independentemente de onde
+ * os valores diferem. Evita que se descubra o código medindo o tempo
+ * de resposta do servidor.
+ */
+function iguaisEmTempoConstante(a: string, b: string): boolean {
+  if (a.length !== b.length) return false
+  let diferenca = 0
+  for (let i = 0; i < a.length; i++) diferenca |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  return diferenca === 0
 }
 
-function registarFalha(token: string) {
-  const agora = Date.now()
-  const t = tentativas.get(token)
-  if (!t || agora > t.ate) {
-    tentativas.set(token, { contador: 1, ate: agora + 15 * 60 * 1000 })
-  } else {
-    t.contador += 1
-  }
+/** Deixa rasto dos acessos à folha de ponto no registo geral da aplicação. */
+async function registarAcesso(supabase: any, nome: string, acao: string, detalhes: string) {
+  try {
+    await supabase.from('access_logs').insert({
+      user_id: null,
+      user_email: `ponto:${nome}`,
+      action: acao,
+      page: '/ponto',
+      details: detalhes,
+    })
+  } catch { /* nunca impedir o trabalhador de trabalhar por causa do registo */ }
 }
 
+/**
+ * Valida o link secreto e o código de 4 dígitos.
+ *
+ * O travão de tentativas vive na base de dados, não na memória do servidor.
+ * Em memória não servia de nada: o Vercel arranca instâncias novas a toda a
+ * hora e o contador voltava a zero, deixando tentar o código à vontade —
+ * são só 10 mil combinações.
+ */
 async function autenticar(token: string, pin: string) {
   if (!token || !pin) return { erro: 'Faltam dados de acesso.' as const }
-  if (bloqueado(token)) {
-    return { erro: 'Demasiadas tentativas erradas. Tenta daqui a 15 minutos.' as const }
-  }
 
   const supabase = adminClient()
   const { data: worker } = await supabase
@@ -60,14 +73,38 @@ async function autenticar(token: string, pin: string) {
     .eq('access_token', token)
     .maybeSingle()
 
-  if (!worker) { registarFalha(token); return { erro: 'Link inválido.' as const } }
-  if (String(worker.pin) !== String(pin)) {
-    registarFalha(token)
-    return { erro: 'Código errado.' as const }
+  // Resposta igual para link inexistente e código errado, para não confirmar
+  // a quem tenta às cegas que encontrou um link válido.
+  if (!worker) return { erro: 'Link ou código inválidos.' as const }
+
+  if (worker.locked_until && new Date(worker.locked_until) > new Date()) {
+    const minutos = Math.ceil((new Date(worker.locked_until).getTime() - Date.now()) / 60000)
+    return { erro: `Demasiadas tentativas erradas. Tenta daqui a ${minutos} minuto(s).` as const }
   }
+
+  if (!iguaisEmTempoConstante(String(worker.pin), String(pin))) {
+    const falhas = (worker.failed_attempts ?? 0) + 1
+    const bloquear = falhas >= MAX_TENTATIVAS
+    await supabase.from('workers').update({
+      failed_attempts: bloquear ? 0 : falhas,
+      locked_until: bloquear ? new Date(Date.now() + MINUTOS_BLOQUEIO * 60000).toISOString() : null,
+    }).eq('id', worker.id)
+
+    if (bloquear) {
+      await registarAcesso(supabase, worker.name, 'login',
+        `Acesso à folha de ponto bloqueado após ${MAX_TENTATIVAS} códigos errados`)
+      return { erro: `Demasiadas tentativas erradas. Tenta daqui a ${MINUTOS_BLOQUEIO} minutos.` as const }
+    }
+    return { erro: 'Link ou código inválidos.' as const }
+  }
+
   if (!worker.active) return { erro: 'Este acesso foi desativado. Fala com o gestor.' as const }
 
-  tentativas.delete(token)
+  // Código certo: limpa o contador de falhas
+  if (worker.failed_attempts || worker.locked_until) {
+    await supabase.from('workers').update({ failed_attempts: 0, locked_until: null }).eq('id', worker.id)
+  }
+
   return { worker: worker as Worker, supabase }
 }
 
@@ -123,6 +160,9 @@ export async function POST(request: NextRequest) {
     })
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+    await registarAcesso(supabase, worker.name, 'criar',
+      `Trabalhador registou ${horas}h em ${work_date} (${start_time}-${end_time}) — ${valor.toFixed(2)} EUR`)
   }
 
   // ---------------------------------------------------------- devolver

@@ -1,6 +1,9 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/require-admin'
+import { passwordAceitavel, REGRA_PASSWORD } from '@/lib/password'
+
+const PAPEIS_VALIDOS = ['admin', 'coadmin', 'electrician', 'viewer', 'super_reader']
 
 function getAdminClient() {
   return createClient(
@@ -30,6 +33,16 @@ export async function POST(request: Request) {
 
   try {
     const { email, password, name, role } = await request.json()
+
+    // A criação de contas não validava a força da palavra-passe.
+    if (!passwordAceitavel(password)) {
+      return NextResponse.json({ error: `Palavra-passe demasiado fraca. ${REGRA_PASSWORD}` }, { status: 400 })
+    }
+    // Só papéis conhecidos. Antes aceitava qualquer texto vindo do pedido.
+    if (!PAPEIS_VALIDOS.includes(String(role))) {
+      return NextResponse.json({ error: 'Papel de utilizador inválido.' }, { status: 400 })
+    }
+
     const supabaseAdmin = getAdminClient()
     const { data, error } = await supabaseAdmin.auth.admin.createUser({
       email,

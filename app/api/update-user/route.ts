@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/require-admin'
+import { passwordAceitavel, REGRA_PASSWORD } from '@/lib/password'
 
 export async function POST(request: Request) {
   const auth = await requireAdmin()
@@ -13,8 +14,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'userId é obrigatório' }, { status: 400 })
     }
 
-    if (password && password.length < 6) {
-      return NextResponse.json({ error: 'A password deve ter pelo menos 6 caracteres' }, { status: 400 })
+    // 6 caracteres é fraco de mais para contas que veem contas bancárias,
+    // rendas e dados pessoais de inquilinos.
+    if (password && !passwordAceitavel(password)) {
+      return NextResponse.json({ error: `Palavra-passe demasiado fraca. ${REGRA_PASSWORD}` }, { status: 400 })
     }
 
     const supabase = createClient(

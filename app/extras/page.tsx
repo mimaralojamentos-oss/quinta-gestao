@@ -2,7 +2,7 @@
 
 import AppLayout from '@/components/layout/AppLayout'
 import Link from 'next/link'
-import { Mail, Truck, ChevronRight } from 'lucide-react'
+import { Mail, Truck, ChevronRight, ShieldCheck } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 
 /**
@@ -18,6 +18,14 @@ const cards = [
     description: 'Histórico completo de todos os e-mails que a aplicação enviou, com o texto original.',
     roles: ['admin', 'coadmin', 'super_reader'],
     color: 'bg-blue-50 text-blue-600 border-blue-100',
+  },
+  {
+    href: '/extras/auditoria',
+    icon: ShieldCheck,
+    title: 'Registo de Alterações',
+    description: 'Tudo o que foi criado, alterado ou apagado nos dados, com o antes e o depois e quem o fez.',
+    roles: ['admin'],
+    color: 'bg-emerald-50 text-emerald-600 border-emerald-100',
   },
   {
     href: '/extras/fornecedores',
