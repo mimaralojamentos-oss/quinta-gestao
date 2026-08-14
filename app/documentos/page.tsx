@@ -123,6 +123,11 @@ export default function DocumentosPage() {
   const [editForm, setEditForm] = useState<any>({})
   const [saving, setSaving] = useState(false)
 
+  // Mudança de tipo de um documento, feita a partir da etiqueta da lista
+  const [mudarTipo, setMudarTipo] = useState<{ doc: Document; novoTipo: string; apagarDespesa: boolean } | null>(null)
+  const [aGuardarTipo, setAGuardarTipo] = useState(false)
+  const [erroTipo, setErroTipo] = useState('')
+
   const [linkDoc, setLinkDoc] = useState<Document | null>(null)
   const [meters, setMeters] = useState<Meter[]>([])
   const [selectedMeterId, setSelectedMeterId] = useState('')
@@ -449,6 +454,42 @@ async function handleSaveEdit() {
     setFilterDateEnd(''); setFilterValueMin(''); setFilterValueMax(''); setFilterDespesa('all')
   }
 
+  // ------------------------------------------------------------ mudar tipo
+  function abrirMudarTipo(doc: Document) {
+    setMudarTipo({ doc, novoTipo: doc.tipo, apagarDespesa: false })
+    setErroTipo('')
+  }
+
+  async function confirmarMudarTipo() {
+    if (!mudarTipo) return
+    const { doc, novoTipo, apagarDespesa } = mudarTipo
+    if (novoTipo === doc.tipo) { setMudarTipo(null); return }
+
+    setAGuardarTipo(true); setErroTipo('')
+
+    const { error } = await supabase.from('documents').update({ tipo: novoTipo }).eq('id', doc.id)
+    if (error) { setErroTipo(error.message); setAGuardarTipo(false); return }
+
+    // A despesa associada só é tocada se o utilizador tiver dito que sim.
+    if (apagarDespesa && doc.expense_id) {
+      await supabase.from('cash_fund_movements').delete().eq('source_id', doc.expense_id)
+      await supabase.from('documents').update({ expense_id: null }).eq('id', doc.id)
+      const { error: errDespesa } = await supabase.from('expenses').delete().eq('id', doc.expense_id)
+      if (errDespesa) { setErroTipo(`Tipo alterado, mas a despesa não foi apagada: ${errDespesa.message}`); setAGuardarTipo(false); return }
+    }
+
+    await logAccess({
+      action: 'editar',
+      page: '/documentos',
+      details: `Mudou o tipo do documento "${doc.original_name ?? doc.file_path}" de ${tipoLabels[doc.tipo] ?? doc.tipo} para ${tipoLabels[novoTipo] ?? novoTipo}`
+        + (apagarDespesa && doc.expense_id ? ' e apagou a despesa associada' : ''),
+    })
+
+    setAGuardarTipo(false)
+    setMudarTipo(null)
+    await fetchAll()
+  }
+
   const hasActiveFilters = !!(search || filterTipo !== 'all' || filterDateStart || filterDateEnd || filterValueMin || filterValueMax || filterDespesa !== 'all')
 
   const allDocs = [
@@ -640,9 +681,18 @@ async function handleSaveEdit() {
                 {filtered.map((doc, i) => (
                   <tr key={`${doc._tipo}-${doc._id}-${i}`} className="hover:bg-gray-50 transition-colors">
                     <td className="table-cell">
-                      <span className={`text-xs px-2 py-1 rounded-full font-medium ${tipoColors[doc._tipo] ?? 'bg-gray-100 text-gray-700'}`}>
-                        {tipoLabels[doc._tipo] ?? doc._tipo}
-                      </span>
+                      {(isAdmin || isCoAdmin) && doc._doc ? (
+                        <button
+                          onClick={() => abrirMudarTipo(doc._doc!)}
+                          title="Clica para mudar o tipo deste documento"
+                          className={`text-xs px-2 py-1 rounded-full font-medium hover:ring-2 hover:ring-offset-1 hover:ring-gray-300 transition-all cursor-pointer ${tipoColors[doc._tipo] ?? 'bg-gray-100 text-gray-700'}`}>
+                          {tipoLabels[doc._tipo] ?? doc._tipo}
+                        </button>
+                      ) : (
+                        <span className={`text-xs px-2 py-1 rounded-full font-medium ${tipoColors[doc._tipo] ?? 'bg-gray-100 text-gray-700'}`}>
+                          {tipoLabels[doc._tipo] ?? doc._tipo}
+                        </span>
+                      )}
                     </td>
                     <td className="table-cell">
                       <div className="flex items-center gap-2">
@@ -1070,6 +1120,99 @@ async function handleSaveEdit() {
           onClose={() => setShowManualModal(false)}
           onSaved={() => { setShowManualModal(false); fetchAll() }}
         />
+      )}
+
+      {/* Mudar o tipo de um documento */}
+      {mudarTipo && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
+            <div className="flex items-center justify-between p-5 border-b border-gray-100">
+              <h2 className="font-semibold text-lg text-gray-900">Mudar o tipo do documento</h2>
+              <button onClick={() => setMudarTipo(null)}><X className="w-5 h-5 text-gray-400" /></button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div>
+                <p className="text-xs text-gray-500 mb-1">Documento</p>
+                <p className="text-sm text-gray-800 bg-gray-50 rounded-lg px-3 py-2 break-words">
+                  {mudarTipo.doc.original_name ?? mudarTipo.doc.file_path}
+                </p>
+              </div>
+
+              <div>
+                <label className="label">Tipo</label>
+                <div className="flex items-center gap-2 text-sm mb-2">
+                  <span className={`text-xs px-2 py-1 rounded-full font-medium ${tipoColors[mudarTipo.doc.tipo] ?? 'bg-gray-100'}`}>
+                    {tipoLabels[mudarTipo.doc.tipo] ?? mudarTipo.doc.tipo}
+                  </span>
+                  <span className="text-gray-400">passa a</span>
+                  <span className={`text-xs px-2 py-1 rounded-full font-medium ${tipoColors[mudarTipo.novoTipo] ?? 'bg-gray-100'}`}>
+                    {tipoLabels[mudarTipo.novoTipo] ?? mudarTipo.novoTipo}
+                  </span>
+                </div>
+                <select className="input" value={mudarTipo.novoTipo}
+                  onChange={e => setMudarTipo(m => m && ({ ...m, novoTipo: e.target.value }))}>
+                  {Object.entries(tipoLabels).map(([valor, etiqueta]) => (
+                    <option key={valor} value={valor}>{etiqueta}</option>
+                  ))}
+                </select>
+              </div>
+
+              {mudarTipo.doc.expense_id ? (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2.5">
+                  <p className="text-sm text-amber-800 font-medium">
+                    ⚠ Este documento tem uma despesa associada
+                  </p>
+                  <p className="text-xs text-amber-700">
+                    Se deixou de ser uma fatura, essa despesa provavelmente também não deve existir.
+                    Escolhe o que fazer:
+                  </p>
+                  <label className="flex items-start gap-2 cursor-pointer">
+                    <input type="radio" name="despesa" className="accent-emerald-600 mt-0.5"
+                      checked={!mudarTipo.apagarDespesa}
+                      onChange={() => setMudarTipo(m => m && ({ ...m, apagarDespesa: false }))} />
+                    <span className="text-sm text-gray-700">
+                      <strong>Manter a despesa</strong>
+                      <span className="block text-xs text-gray-500">Só muda o tipo. As contas ficam iguais.</span>
+                    </span>
+                  </label>
+                  <label className="flex items-start gap-2 cursor-pointer">
+                    <input type="radio" name="despesa" className="accent-red-600 mt-0.5"
+                      checked={mudarTipo.apagarDespesa}
+                      onChange={() => setMudarTipo(m => m && ({ ...m, apagarDespesa: true }))} />
+                    <span className="text-sm text-gray-700">
+                      <strong className="text-red-600">Apagar a despesa</strong>
+                      <span className="block text-xs text-gray-500">
+                        Apaga também a saída no fundo de maneio, se existir. Não se pode desfazer.
+                      </span>
+                    </span>
+                  </label>
+                </div>
+              ) : (
+                <p className="text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2">
+                  Este documento não tem despesa associada — só muda a etiqueta.
+                </p>
+              )}
+
+              {erroTipo && <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg">{erroTipo}</p>}
+            </div>
+
+            <div className="flex justify-end gap-3 p-4 border-t border-gray-100">
+              <button className="btn-secondary" onClick={() => setMudarTipo(null)}>Cancelar</button>
+              <button
+                className={mudarTipo.apagarDespesa
+                  ? 'px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-700 disabled:opacity-50'
+                  : 'btn-primary'}
+                onClick={confirmarMudarTipo}
+                disabled={aGuardarTipo || mudarTipo.novoTipo === mudarTipo.doc.tipo}>
+                {aGuardarTipo ? 'A guardar...'
+                  : mudarTipo.novoTipo === mudarTipo.doc.tipo ? 'Escolhe um tipo diferente'
+                  : mudarTipo.apagarDespesa ? 'Mudar e apagar a despesa'
+                  : 'Confirmar mudança'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </AppLayout>
   )
