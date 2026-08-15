@@ -7,6 +7,8 @@ import EmailComposer from '@/components/EmailComposer'
 import { formatCurrency, formatDate, getCurrentMonth } from '@/lib/utils'
 import { logAccess } from '@/lib/logAccess'
 import { useFileDrop } from '@/lib/useFileDrop'
+import DestinoPagamentoPicker from '@/components/DestinoPagamentoPicker'
+import { type DestinoPagamento } from '@/lib/rentPaymentPlan'
 import { consumeAdvances, releaseAdvance, describeAdvanceTarget, buildAppliedAdvanceMap, appliedAdvanceFor } from '@/lib/advanceCredit'
 
 interface Props {
@@ -104,10 +106,13 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
   const [showEmailModal, setShowEmailModal] = useState(false)
 
   const [showRecebimentoForm, setShowRecebimentoForm] = useState(false)
-  const [recebimentoForm, setRecebimentoForm] = useState({
+  const [recebimentoForm, setRecebimentoForm] = useState<{
+    date: string; amount: string; method: string; destino: DestinoPagamento
+  }>({
     date: new Date().toISOString().slice(0, 10),
     amount: '',
     method: 'dinheiro',
+    destino: 'auto',
   })
   const [savingRecebimento, setSavingRecebimento] = useState(false)
   const [applyingAdvanceKey, setApplyingAdvanceKey] = useState<string | null>(null)
@@ -525,14 +530,23 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
       return sum + (p.amount ?? 0)
     }, 0) - totalAdvance
 
-  function computeAllocation(totalAmount: number, includeElec: boolean, includeDebts: boolean) {
+  /**
+   * Distribui o valor recebido. `destino` diz o que pode ser tocado:
+   * por omissão segue a ordem habitual, mas o utilizador pode dizer que
+   * aquele dinheiro é só para a luz ou só para dívidas.
+   */
+  function computeAllocation(totalAmount: number, destino: DestinoPagamento = 'auto') {
     let remaining = totalAmount
     const result: Array<{ item: PaymentRow; paying: number }> = []
 
+    const includeRenda = destino === 'auto' || destino === 'renda'
+    const includeElec = destino === 'auto' || destino === 'luz'
+    const includeDebts = destino === 'auto' || destino === 'dividas'
+
     // 1ª PRIORIDADE: Rendas vencidas (do mais antigo para o mais recente, pagamento parcial permitido)
-    const rendas = payments
+    const rendas = includeRenda ? payments
       .filter(p => !p.payment_date && !p.isManualDebt && !p.isElecCharge)
-      .sort((a, b) => (a.reference_month ?? '').localeCompare(b.reference_month ?? ''))
+      .sort((a, b) => (a.reference_month ?? '').localeCompare(b.reference_month ?? '')) : []
     for (const item of rendas) {
       if (remaining <= 0) break
       const paying = parseFloat(Math.min(remaining, item.amount).toFixed(2))
@@ -575,7 +589,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
     const total = parseFloat(recebimentoForm.amount)
     if (!total || total <= 0) return
     setSavingRecebimento(true)
-    const { allocation, leftover } = computeAllocation(total, true, true)
+    const { allocation, leftover } = computeAllocation(total, recebimentoForm.destino)
 
     const isCash = recebimentoForm.method === 'dinheiro'
     const activeLease = leases.find((l: any) => l.status === 'ativo') ?? leases[0]
@@ -688,7 +702,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
 
     await fetchPayments()
     setShowRecebimentoForm(false)
-    setRecebimentoForm({ date: new Date().toISOString().slice(0, 10), amount: '', method: 'dinheiro' })
+    setRecebimentoForm({ date: new Date().toISOString().slice(0, 10), amount: '', method: 'dinheiro', destino: 'auto' })
     setSavingRecebimento(false)
   }
 
@@ -1188,7 +1202,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
 
               {showRecebimentoForm && (() => {
                 const total = parseFloat(recebimentoForm.amount) || 0
-                const { allocation, leftover } = computeAllocation(total, true, true)
+                const { allocation, leftover } = computeAllocation(total, recebimentoForm.destino)
                 return (
                   <div className="border border-blue-200 bg-blue-50 rounded-xl p-4 mb-4">
                     <h3 className="font-medium text-gray-800 mb-3">💰 Registar Recebimento</h3>
@@ -1217,10 +1231,17 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                       </div>
                     </div>
 
+                    <div className="mb-3">
+                      <DestinoPagamentoPicker
+                        valor={recebimentoForm.destino}
+                        onChange={d => setRecebimentoForm(f => ({ ...f, destino: d }))} />
+                    </div>
 
                     {total > 0 && (
                       <div className="border border-blue-200 rounded-lg overflow-hidden mb-3">
-                        <div className="bg-blue-100 px-3 py-2 text-xs font-semibold text-blue-800">Distribuição automática</div>
+                        <div className="bg-blue-100 px-3 py-2 text-xs font-semibold text-blue-800">
+                          Distribuição{recebimentoForm.destino !== 'auto' ? '' : ' automática'}
+                        </div>
                         {allocation.length === 0 ? (
                           <p className="text-xs text-gray-400 p-3 text-center">Não há valores em dívida para cobrir.</p>
                         ) : (
@@ -1264,7 +1285,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                       </div>
                     )}
                     <div className="flex gap-2">
-                      <button className="btn-secondary flex-1" onClick={() => { setShowRecebimentoForm(false); setRecebimentoForm({ date: new Date().toISOString().slice(0, 10), amount: '', method: 'dinheiro' }) }}>
+                      <button className="btn-secondary flex-1" onClick={() => { setShowRecebimentoForm(false); setRecebimentoForm({ date: new Date().toISOString().slice(0, 10), amount: '', method: 'dinheiro', destino: 'auto' }) }}>
                         Cancelar
                       </button>
                       <button onClick={handleSaveRecebimento} disabled={savingRecebimento || !recebimentoForm.amount || allocation.length === 0}

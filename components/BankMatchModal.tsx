@@ -13,7 +13,8 @@ import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, formatDate, matchesSearch } from '@/lib/utils'
 import { Search, X, Sparkles, FileText, CheckCircle } from 'lucide-react'
 import { mergeCategories, normalizeCategory } from '@/lib/incomeCategories'
-import { buildRentPaymentPlan, type RentPaymentPlan } from '@/lib/rentPaymentPlan'
+import { buildRentPaymentPlan, DESTINOS, type RentPaymentPlan, type DestinoPagamento } from '@/lib/rentPaymentPlan'
+import DestinoPagamentoPicker from '@/components/DestinoPagamentoPicker'
 import { logAccess } from '@/lib/logAccess'
 
 /**
@@ -114,7 +115,7 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
   documents: any[]
   autoMatches: any[]
   bankId: string
-  onSave: (tx: BankTransaction, type: string, tenantId: string, expenseId: string, notes: string, documentId?: string, referenceMonth?: string, incomeId?: string, skipProcessing?: boolean, cashMovementId?: string) => void
+  onSave: (tx: BankTransaction, type: string, tenantId: string, expenseId: string, notes: string, documentId?: string, referenceMonth?: string, incomeId?: string, skipProcessing?: boolean, cashMovementId?: string, destino?: DestinoPagamento) => void
   onSaveRule: () => void
   onClose: () => void
 }) {
@@ -157,6 +158,9 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
   // Transferências do fundo de maneio ainda por confirmar no extrato
   const [cashTransfers, setCashTransfers] = useState<any[]>([])
   const [cashMovementId, setCashMovementId] = useState('')
+  // Para onde vai o dinheiro: por omissão a ordem habitual, mas o operador
+  // pode dizer que aquele valor é só para a luz ou só para dívidas.
+  const [destino, setDestino] = useState<DestinoPagamento>('auto')
   // Pré-visualização da distribuição do valor recebido
   const [plan, setPlan] = useState<RentPaymentPlan | null>(null)
   const [planLoading, setPlanLoading] = useState(false)
@@ -247,6 +251,7 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
           amount: tx.amount,
           referenceMonth: mes,
           alreadyPaidRenda: jaPago,
+          destino,
         })
 
         if (!cancelado) setPlan(resultado)
@@ -257,7 +262,7 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
 
     calcular()
     return () => { cancelado = true }
-  }, [type, tenantId, referenceMonth, tx.amount])
+  }, [type, tenantId, referenceMonth, tx.amount, destino])
 
   /**
    * Cria uma despesa a partir dos dados do movimento bancário, sem sair
@@ -504,10 +509,22 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
                 <p className="text-xs text-gray-400">A calcular a distribuição...</p>
               )}
 
+              {/* Para onde vai o dinheiro. Por omissão segue a ordem habitual,
+                  mas quando o inquilino diz "isto é para a luz" pode-se
+                  impedir que o valor seja absorvido pela renda do mês. */}
+              <div className="mb-3">
+                <DestinoPagamentoPicker valor={destino} onChange={setDestino} />
+              </div>
+
               {plan && !planLoading && (
                 <div className="border border-emerald-200 bg-emerald-50/60 rounded-lg p-3">
                   <p className="text-xs font-medium text-emerald-800 mb-2">
                     Distribuição de {formatCurrency(tx.amount)}
+                    {destino !== 'auto' && (
+                      <span className="ml-1 font-normal">
+                        — {DESTINOS.find(d => d.valor === destino)?.label.toLowerCase()}
+                      </span>
+                    )}
                   </p>
 
                   <div className="space-y-1.5 text-sm">
@@ -941,6 +958,7 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
               type === 'receita_extraordinaria' ? (finalIncomeId || undefined) : undefined,
               skipProcessing,
               type === 'transferencia_interna' ? (cashMovementId || undefined) : undefined,
+              type === 'renda' ? destino : undefined,
             )
           }}>{creatingIncome ? 'A guardar...' : 'Guardar'}</button>
         </div>

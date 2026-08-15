@@ -3,7 +3,8 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency, formatDate, getMonthLabel } from '@/lib/utils'
-import { buildRentPaymentPlan, applyRentPaymentPlan } from '@/lib/rentPaymentPlan'
+import { buildRentPaymentPlan, applyRentPaymentPlan, type DestinoPagamento } from '@/lib/rentPaymentPlan'
+import DestinoPagamentoPicker from '@/components/DestinoPagamentoPicker'
 import { X, Pencil, Trash2, AlertTriangle } from 'lucide-react'
 import { logAccess } from '@/lib/logAccess'
 import { consumeAdvances } from '@/lib/advanceCredit'
@@ -47,6 +48,8 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
   const [mode, setMode] = useState<'debts' | 'new'>('debts')
   const [editingPayment, setEditingPayment] = useState<any | null>(null)
   const [debtItems, setDebtItems] = useState<DebtItem[]>([])
+  // Para onde vai o valor recebido (igual ao banco e à ficha do inquilino)
+  const [destinoPagamento, setDestinoPagamento] = useState<DestinoPagamento>('auto')
   const [singleAmount, setSingleAmount] = useState('')
   const [singleDate, setSingleDate] = useState(new Date().toISOString().slice(0, 10))
   const [singleMethod, setSingleMethod] = useState('dinheiro')
@@ -165,15 +168,23 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
     setLoadingDebts(false)
   }
 
-  function computeAllocation(total: number) {
+  /**
+   * Distribui o valor recebido. `destino` limita o que pode ser tocado —
+   * por omissão segue a ordem habitual: renda, luz, dívidas.
+   */
+  function computeAllocation(total: number, destino: DestinoPagamento = 'auto') {
     let remaining = total
     const result: { item: DebtItem; paying: number }[] = []
 
-    const rendas = [...debtItems].filter(d => d.type === 'renda' && d.remainingAmount > 0)
+    const podeRenda = destino === 'auto' || destino === 'renda'
+    const podeLuz = destino === 'auto' || destino === 'luz'
+    const podeDividas = destino === 'auto' || destino === 'dividas'
+
+    const rendas = !podeRenda ? [] : [...debtItems].filter(d => d.type === 'renda' && d.remainingAmount > 0)
       .sort((a, b) => (a.referenceMonth ?? '').localeCompare(b.referenceMonth ?? ''))
-    const elec = [...debtItems].filter(d => d.type === 'eletricidade' && d.remainingAmount > 0)
+    const elec = !podeLuz ? [] : [...debtItems].filter(d => d.type === 'eletricidade' && d.remainingAmount > 0)
       .sort((a, b) => (a.referenceMonth ?? '').localeCompare(b.referenceMonth ?? ''))
-    const manual = [...debtItems].filter(d => d.type === 'manual' && d.remainingAmount > 0)
+    const manual = !podeDividas ? [] : [...debtItems].filter(d => d.type === 'manual' && d.remainingAmount > 0)
 
     for (const item of rendas) {
       if (remaining <= 0) break
@@ -202,7 +213,7 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
     if (!total || total <= 0) { setError('Introduz o valor recebido'); return }
     setSaving(true); setError('')
 
-    const { allocation, leftover } = computeAllocation(total)
+    const { allocation, leftover } = computeAllocation(total, destinoPagamento)
 
     for (const { item, paying } of allocation) {
       const { type, referenceMonth, debtId, chargeId } = item
@@ -566,12 +577,16 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
                     </div>
                   </div>
 
+                  <DestinoPagamentoPicker valor={destinoPagamento} onChange={setDestinoPagamento} />
+
                   {/* Preview distribuição */}
                   {parseFloat(singleAmount) > 0 && (() => {
-                    const { allocation, leftover } = computeAllocation(parseFloat(singleAmount))
+                    const { allocation, leftover } = computeAllocation(parseFloat(singleAmount), destinoPagamento)
                     return (
                       <div className="border border-blue-200 rounded-lg overflow-hidden">
-                        <div className="bg-blue-100 px-3 py-2 text-xs font-semibold text-blue-800">Distribuição automática</div>
+                        <div className="bg-blue-100 px-3 py-2 text-xs font-semibold text-blue-800">
+                          Distribuição{destinoPagamento !== 'auto' ? '' : ' automática'}
+                        </div>
                         <div className="divide-y divide-blue-50">
                           {allocation.map((a, i) => {
                             const icon = a.item.type === 'eletricidade' ? '⚡' : a.item.type === 'manual' ? '📋' : '🏠'

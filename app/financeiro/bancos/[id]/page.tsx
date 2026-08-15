@@ -4,7 +4,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, formatDate, matchesSearch, normalizeText } from '@/lib/utils'
-import { buildRentPaymentPlan, applyRentPaymentPlan } from '@/lib/rentPaymentPlan'
+import { buildRentPaymentPlan, applyRentPaymentPlan, type DestinoPagamento } from '@/lib/rentPaymentPlan'
 import { ensureExpenseForTransaction, emptySummary, addToSummary, describeSummary } from '@/lib/bankExpense'
 import { useFileDrop } from '@/lib/useFileDrop'
 import { useAuth } from '@/lib/auth-context'
@@ -376,7 +376,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
   // aplicando o valor por ordem de prioridade: renda > eletricidade em dívida > dívidas abertas > adiantamento.
   // Devolve 'created' se criou, 'skipped' se já existia pagamento de renda para o mês,
   // 'cancelled' se o utilizador rejeitou o resumo, ou 'no_lease' se não há contrato associado.
-  async function processRendaTransaction(tx: Transaction, overrideMonth?: string, skipConfirm?: boolean): Promise<'created' | 'skipped' | 'no_lease' | 'cancelled'> {
+  async function processRendaTransaction(tx: Transaction, overrideMonth?: string, skipConfirm?: boolean, destino?: DestinoPagamento): Promise<'created' | 'skipped' | 'no_lease' | 'cancelled'> {
     // Movimentos marcados como histórico nunca geram pagamentos, nem sequer
     // através dos botões de sincronização (que não pedem confirmação).
     if (tx.skip_processing) return 'no_lease'
@@ -405,6 +405,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
       amount: tx.amount,
       referenceMonth,
       alreadyPaidRenda,
+      destino,
     })
 
     if (!skipConfirm && !window.confirm(`${plan.summary}\n\nConfirmar processamento deste pagamento?`)) return 'cancelled'
@@ -519,7 +520,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     fetchData()
   }
 
-  async function saveManualMatch(tx: Transaction, type: string, tenantId: string, expenseId: string, notes: string, documentId?: string, referenceMonth?: string, incomeId?: string, skipProcessing?: boolean, cashMovementId?: string) {
+  async function saveManualMatch(tx: Transaction, type: string, tenantId: string, expenseId: string, notes: string, documentId?: string, referenceMonth?: string, incomeId?: string, skipProcessing?: boolean, cashMovementId?: string, destino?: DestinoPagamento) {
     const confirmedLeaseId = tenantId ? (leases.find(l => (l.tenant as any)?.id === tenantId)?.id ?? null) : null
 
     const { error } = await supabase.from('bank_transactions').update({
@@ -562,7 +563,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     // Marcada como histórico: identificada, mas sem gerar movimentos.
     if (skipProcessing) { fetchData(); return }
     if (type === 'renda' && confirmedLeaseId) {
-      const result = await processRendaTransaction({ ...tx, confirmed_type: 'renda', confirmed_tenant_id: tenantId || null, confirmed_lease_id: confirmedLeaseId }, referenceMonth)
+      const result = await processRendaTransaction({ ...tx, confirmed_type: 'renda', confirmed_tenant_id: tenantId || null, confirmed_lease_id: confirmedLeaseId }, referenceMonth, false, destino)
       warnIfSkipped(result)
     } else if (type === 'despesa') {
       const result = await ensureExpense({

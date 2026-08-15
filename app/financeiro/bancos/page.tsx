@@ -7,7 +7,7 @@ import { formatCurrency, formatDate, normalizeText } from '@/lib/utils'
 import { Plus, Building, CreditCard, ArrowUpRight, ArrowDownRight, Upload, Eye, X, Loader2, FileText, CheckCircle, Printer } from 'lucide-react'
 import { useFileDrop } from '@/lib/useFileDrop'
 import { useAuth } from '@/lib/auth-context'
-import { buildRentPaymentPlan, applyRentPaymentPlan } from '@/lib/rentPaymentPlan'
+import { buildRentPaymentPlan, applyRentPaymentPlan, type DestinoPagamento } from '@/lib/rentPaymentPlan'
 import { ensureExpenseForTransaction } from '@/lib/bankExpense'
 import BankMatchModal from '@/components/BankMatchModal'
 import BankImportModal from '@/components/BankImportModal'
@@ -222,7 +222,7 @@ export default function BancosPage() {
   async function saveManualMatch(
     tx: any, type: string, tenantId: string, expenseId: string, notes: string,
     documentId?: string, referenceMonth?: string, incomeId?: string, skipProcessing?: boolean,
-    cashMovementId?: string,
+    cashMovementId?: string, destino?: DestinoPagamento,
   ) {
     const lease = tenantId ? leases.find(l => (l.tenant as any)?.id === tenantId) : null
 
@@ -285,6 +285,7 @@ export default function BancosPage() {
         amount: tx.amount,
         referenceMonth: mes,
         alreadyPaidRenda: jaPago,
+        destino,
       })
 
       if (window.confirm(`${plan.summary}\n\nConfirmar processamento deste pagamento?`)) {

@@ -49,6 +49,24 @@ export interface RentPaymentPlan {
   summary: string
 }
 
+/**
+ * Para onde vai o dinheiro recebido.
+ *
+ * 'auto' é a ordem habitual: primeiro a renda do mês, depois a eletricidade
+ * em atraso, depois as dívidas, e o que sobrar fica como adiantamento.
+ *
+ * As outras servem para quando o inquilino diz expressamente ao que vem —
+ * "isto é para a luz" — e não se quer que o valor seja absorvido pela renda.
+ */
+export type DestinoPagamento = 'auto' | 'renda' | 'luz' | 'dividas'
+
+export const DESTINOS: { valor: DestinoPagamento; label: string; descricao: string }[] = [
+  { valor: 'auto', label: 'Automático', descricao: 'Renda, depois luz, depois dívidas' },
+  { valor: 'renda', label: 'Só renda', descricao: 'O que sobrar fica como adiantamento' },
+  { valor: 'luz', label: 'Só eletricidade', descricao: 'Não toca na renda do mês' },
+  { valor: 'dividas', label: 'Só dívidas', descricao: 'Apenas dívidas em conta corrente' },
+]
+
 interface BuildPlanParams {
   leaseId: string
   tenantId: string | null | undefined
@@ -56,6 +74,8 @@ interface BuildPlanParams {
   amount: number
   referenceMonth: string
   alreadyPaidRenda?: number
+  /** Por omissão 'auto', que mantém o comportamento de sempre. */
+  destino?: DestinoPagamento
 }
 
 // Distribui um pagamento de renda por ordem de prioridade:
@@ -63,21 +83,29 @@ interface BuildPlanParams {
 // 3. Dívidas abertas (mais antigas primeiro, pagamento parcial permitido), 4. Adiantamento.
 // Se o valor pago for inferior à renda, regista a diferença como nova dívida.
 export async function buildRentPaymentPlan(supabase: any, params: BuildPlanParams): Promise<RentPaymentPlan> {
-  const { leaseId, tenantId, monthlyRent, amount, referenceMonth, alreadyPaidRenda = 0 } = params
+  const { leaseId, tenantId, monthlyRent, amount, referenceMonth, alreadyPaidRenda = 0, destino = 'auto' } = params
   let remaining = parseFloat(amount.toFixed(2))
   const lines: string[] = []
 
+  // Que partes é que este pagamento pode tocar
+  const podeRenda = destino === 'auto' || destino === 'renda'
+  const podeLuz = destino === 'auto' || destino === 'luz'
+  const podeDividas = destino === 'auto' || destino === 'dividas'
+
   const remainingRent = Math.max(0, monthlyRent - alreadyPaidRenda)
-  const rendaAmount = Math.min(remaining, remainingRent)
+  const rendaAmount = podeRenda ? Math.min(remaining, remainingRent) : 0
   remaining = parseFloat((remaining - rendaAmount).toFixed(2))
   const rendaFullyPaid = alreadyPaidRenda + rendaAmount >= monthlyRent
-  lines.push(rendaFullyPaid
-    ? `Renda: ${formatCurrency(rendaAmount)} ✅`
-    : `Renda: ${formatCurrency(rendaAmount)} de ${formatCurrency(monthlyRent)} ⚠️`)
+
+  if (podeRenda) {
+    lines.push(rendaFullyPaid
+      ? `Renda: ${formatCurrency(rendaAmount)} ✅`
+      : `Renda: ${formatCurrency(rendaAmount)} de ${formatCurrency(monthlyRent)} ⚠️`)
+  }
 
   const electricityCharges: ElectricityChargePlan[] = []
   let electricityTotal = 0
-  if (remaining > 0) {
+  if (podeLuz && remaining > 0) {
     const { data: charges } = await supabase
       .from('electricity_charges')
       .select('id, amount, amount_paid, charge_date')
@@ -121,7 +149,7 @@ export async function buildRentPaymentPlan(supabase: any, params: BuildPlanParam
   }
 
   const debtPayments: DebtPaymentPlan[] = []
-  if (remaining > 0 && tenantId) {
+  if (podeDividas && remaining > 0 && tenantId) {
     const { data: debtsData } = await supabase
       .from('debts')
       .select('id, original_amount, description, payments:debt_payments(amount)')
@@ -149,7 +177,11 @@ export async function buildRentPaymentPlan(supabase: any, params: BuildPlanParam
   let adiantamento = 0
   if (remaining > 0) {
     adiantamento = remaining
-    lines.push(`Adiantamento: ${formatCurrency(adiantamento)}`)
+    // Com destino escolhido à mão, convém explicar porque é que sobrou:
+    // não é um excedente, é o que não coube naquilo que foi mandado pagar.
+    lines.push(destino === 'auto'
+      ? `Adiantamento: ${formatCurrency(adiantamento)}`
+      : `Sobra (fica como adiantamento): ${formatCurrency(adiantamento)}`)
   }
 
   return {
