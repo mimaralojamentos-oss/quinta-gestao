@@ -126,7 +126,7 @@ export default function Dashboard() {
 
         {/* Cards compactos do topo */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-          <div className="bg-white border border-gray-100 rounded-lg shadow-sm px-4 py-3 flex items-center gap-3">
+          <Link href="/espacos" prefetch={false} className="bg-white border border-gray-100 rounded-lg shadow-sm px-4 py-3 flex items-center gap-3 hover:shadow-md hover:border-emerald-100 transition-shadow">
             <div className="w-8 h-8 bg-emerald-50 rounded-lg flex items-center justify-center flex-shrink-0">
               <Building2 className="w-4 h-4 text-emerald-600" />
             </div>
@@ -137,9 +137,9 @@ export default function Dashboard() {
               </p>
               <p className="text-xs text-emerald-600 font-medium">{occupancyRate}% ocupação</p>
             </div>
-          </div>
+          </Link>
 
-          <div className="bg-white border border-gray-100 rounded-lg shadow-sm px-4 py-3 flex items-center gap-3">
+          <Link href="/inquilinos" prefetch={false} className="bg-white border border-gray-100 rounded-lg shadow-sm px-4 py-3 flex items-center gap-3 hover:shadow-md hover:border-blue-100 transition-shadow">
             <div className="w-8 h-8 bg-blue-50 rounded-lg flex items-center justify-center flex-shrink-0">
               <Users className="w-4 h-4 text-blue-600" />
             </div>
@@ -148,9 +148,9 @@ export default function Dashboard() {
               <p className="text-base font-bold text-gray-900">{stats.totalTenantsActive}</p>
               <p className="text-xs text-blue-600 font-medium">contratos ativos</p>
             </div>
-          </div>
+          </Link>
 
-          <div className="bg-white border border-gray-100 rounded-lg shadow-sm px-4 py-3 flex items-center gap-3">
+          <Link href="/projetos" prefetch={false} className="bg-white border border-gray-100 rounded-lg shadow-sm px-4 py-3 flex items-center gap-3 hover:shadow-md hover:border-orange-100 transition-shadow">
             <div className="w-8 h-8 bg-orange-50 rounded-lg flex items-center justify-center flex-shrink-0">
               <HardHat className="w-4 h-4 text-orange-500" />
             </div>
@@ -159,9 +159,9 @@ export default function Dashboard() {
               <p className="text-base font-bold text-gray-900">{stats.activeProjects}</p>
               <p className="text-xs text-orange-500 font-medium">em curso</p>
             </div>
-          </div>
+          </Link>
 
-          <div className="bg-white border border-gray-100 rounded-lg shadow-sm px-4 py-3 flex items-start gap-3">
+          <Link href="/eletricidade/quadros" prefetch={false} className="bg-white border border-gray-100 rounded-lg shadow-sm px-4 py-3 flex items-start gap-3 hover:shadow-md hover:border-yellow-100 transition-shadow">
             <div className="w-8 h-8 bg-yellow-50 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
               <Zap className="w-4 h-4 text-yellow-500" />
             </div>
@@ -186,7 +186,7 @@ export default function Dashboard() {
                 </div>
               )}
             </div>
-          </div>
+          </Link>
         </div>
 
         {/* Lembretes Manuais — só aparece se houver pendentes */}
