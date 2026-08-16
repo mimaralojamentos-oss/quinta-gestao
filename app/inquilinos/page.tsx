@@ -194,11 +194,14 @@ export default function InquilinosPage() {
   async function fetchDebts(tenantId: string) {
     setLoadingDebts(true)
     const { data: debtsData } = await supabase.from('debts').select('*').eq('tenant_id', tenantId).order('reference_date', { ascending: false })
-    const allDebts: Debt[] = []
-    for (const d of debtsData ?? []) {
-      const { data: payments } = await supabase.from('debt_payments').select('*').eq('debt_id', d.id).order('payment_date')
-      allDebts.push({ ...d, payments: payments ?? [] })
-    }
+    const debtIds = (debtsData ?? []).map(d => d.id)
+    const { data: paymentsData } = debtIds.length > 0
+      ? await supabase.from('debt_payments').select('*').in('debt_id', debtIds).order('payment_date')
+      : { data: [] }
+    const allDebts: Debt[] = (debtsData ?? []).map(d => ({
+      ...d,
+      payments: (paymentsData ?? []).filter(p => p.debt_id === d.id),
+    }))
     setDebts(allDebts)
     setLoadingDebts(false)
   }
