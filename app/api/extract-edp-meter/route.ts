@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { requireRole } from '@/lib/require-role'
 import { createClient } from '@supabase/supabase-js'
+import { checkFileSize } from '@/lib/fileUpload'
 
 // Extrai os dados de identificação de um quadro elétrico a partir de uma
 // fatura EDP, para preencher automaticamente o formulário "Novo Quadro".
@@ -18,6 +19,8 @@ export async function POST(request: Request) {
     if (file.type !== 'application/pdf') {
       return NextResponse.json({ error: 'Apenas ficheiros PDF são aceites' }, { status: 400 })
     }
+    const sizeError = checkFileSize(file)
+    if (sizeError) return sizeError
 
     const bytes = await file.arrayBuffer()
     const base64 = Buffer.from(bytes).toString('base64')

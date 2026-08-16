@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { createHash } from 'crypto'
 import { requireRole } from '@/lib/require-role'
+import { checkFileSize } from '@/lib/fileUpload'
 
 const CASH_FUND_START_DATE = '2026-06-01'
 
@@ -28,6 +29,8 @@ export async function POST(request: Request) {
     const createIncome = formData.get('create_income') === 'true' && canWriteFinance
 
     if (!file) return NextResponse.json({ error: 'Ficheiro não encontrado' }, { status: 400 })
+    const sizeError = checkFileSize(file)
+    if (sizeError) return sizeError
 
     const bytes = await file.arrayBuffer()
     const buffer = Buffer.from(bytes)

@@ -10,6 +10,10 @@
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { Upload, X, Loader2, ArrowRight } from 'lucide-react'
+// Vem do CDN oficial do SheetJS (ver "xlsx" no package.json), não do
+// registo do npm: a versão publicada lá ficou parada na 0.18.5 (2022) e
+// não tem as correções de segurança de versões mais recentes. Não trocar
+// para a versão do npm — seria uma regressão de segurança.
 import * as XLSX from 'xlsx'
 import { useFileDrop } from '@/lib/useFileDrop'
 import { matchesSearch } from '@/lib/utils'

@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { requireRole } from '@/lib/require-role'
+import { checkFileSize } from '@/lib/fileUpload'
 
 export async function POST(request: Request) {
   const auth = await requireRole(['admin', 'coadmin'])
@@ -11,6 +12,8 @@ export async function POST(request: Request) {
     const formData = await request.formData()
     const file = formData.get('file') as File
     if (!file) return NextResponse.json({ error: 'Ficheiro não encontrado' }, { status: 400 })
+    const sizeError = checkFileSize(file)
+    if (sizeError) return sizeError
 
     const bytes = await file.arrayBuffer()
     const base64 = Buffer.from(bytes).toString('base64')

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { requireRole } from '@/lib/require-role'
+import { checkFileSize } from '@/lib/fileUpload'
 
 export async function POST(request: Request) {
   const auth = await requireRole(['admin', 'coadmin'])
@@ -12,6 +13,8 @@ export async function POST(request: Request) {
 
     if (!file) return NextResponse.json({ error: 'Ficheiro não encontrado' }, { status: 400 })
     if (file.type !== 'application/pdf') return NextResponse.json({ error: 'Apenas ficheiros PDF são aceites' }, { status: 400 })
+    const sizeError = checkFileSize(file)
+    if (sizeError) return sizeError
 
     const bytes = await file.arrayBuffer()
     const buffer = Buffer.from(bytes)
