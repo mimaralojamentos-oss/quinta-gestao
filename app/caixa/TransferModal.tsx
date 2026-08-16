@@ -5,6 +5,8 @@ import { createClient } from '@/lib/supabase-client'
 import { formatCurrency } from '@/lib/utils'
 import { X, ArrowRight, Wallet, Building, Loader2 } from 'lucide-react'
 
+const supabase = createClient()
+
 interface Bank {
   id: string
   name: string
@@ -26,7 +28,6 @@ interface Props {
  * que o mesmo dinheiro seja contado duas vezes.
  */
 export default function TransferModal({ currentBalance, onClose, onSaved }: Props) {
-  const supabase = createClient()
   const [banks, setBanks] = useState<Bank[]>([])
   const [loadingBanks, setLoadingBanks] = useState(true)
   const [saving, setSaving] = useState(false)

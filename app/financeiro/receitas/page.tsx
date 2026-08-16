@@ -8,6 +8,8 @@ import { Plus, Trash2, X, Search, FileText, TrendingUp } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import { incomeCategoryLabel, mergeCategories } from '@/lib/incomeCategories'
 
+const supabase = createClient()
+
 interface IncomeRecord {
   id: string
   description: string
@@ -27,7 +29,6 @@ function categoryLabel(cat: string) {
 }
 
 export default function ReceitasPage() {
-  const supabase = createClient()
   const { canWrite } = useAuth()
   const [records, setRecords] = useState<IncomeRecord[]>([])
   const [loading, setLoading] = useState(true)

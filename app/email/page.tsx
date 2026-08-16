@@ -8,12 +8,13 @@ import EmailComposer, { type EmailContact } from '@/components/EmailComposer'
 import { EMAIL_CONTEXT_LABELS, type EmailContext } from '@/lib/emailConfig'
 import { Mail, Loader2, Send, Users } from 'lucide-react'
 
+const supabase = createClient()
+
 // Área de envio de e-mail livre: sem inquilino agarrado, o utilizador escolhe
 // o destinatário e escreve a mensagem. Continua a usar o módulo único de
 // e-mail, por isso mantém as mesmas regras: prefixo obrigatório no assunto,
 // administradores em CC e revisão ortográfica antes de enviar.
 export default function EmailLivrePage() {
-  const supabase = createClient()
   const { profile, loading: authLoading } = useAuth()
 
   const [contacts, setContacts] = useState<EmailContact[]>([])

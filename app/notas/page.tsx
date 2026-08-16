@@ -8,6 +8,8 @@ import { Plus, Edit2, Trash2, Bell, BellOff, CheckCircle, NotebookPen, User, Sen
 import NoteModal from './NoteModal'
 import { useAuth } from '@/lib/auth-context'
 
+const supabase = createClient()
+
 const NOTE_TYPE_LABELS: Record<string, string> = {
   chamada: '📞 Chamada',
   geral: '🏡 Geral',
@@ -48,7 +50,6 @@ function getUserColor(name: string) {
 }
 
 export default function NotasPage() {
-  const supabase = createClient()
   const { profile } = useAuth()
   const [notes, setNotes] = useState<any[]>([])
   const [loading, setLoading] = useState(true)

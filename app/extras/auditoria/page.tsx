@@ -8,6 +8,8 @@ import { useAuth } from '@/lib/auth-context'
 import { ShieldCheck, Search, ChevronLeft, X, Loader2, Plus, Pencil, Trash2 } from 'lucide-react'
 import Link from 'next/link'
 
+const supabase = createClient()
+
 /**
  * Trilho de auditoria — todas as alterações feitas aos dados.
  *
@@ -77,7 +79,6 @@ function diferencas(antes: any, depois: any): { campo: string; de: string; para:
 }
 
 export default function AuditoriaPage() {
-  const supabase = createClient()
   const { profile } = useAuth()
   const podeVer = profile?.role === 'admin'
 

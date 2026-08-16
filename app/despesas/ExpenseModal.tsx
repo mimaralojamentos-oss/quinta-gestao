@@ -8,6 +8,8 @@ import { formatCurrency, formatDate, matchesSearch } from '@/lib/utils'
 import { logAccess } from '@/lib/logAccess'
 import { useFileDrop } from '@/lib/useFileDrop'
 
+const supabase = createClient()
+
 interface Props {
   expense: Expense | null
   /**
@@ -33,7 +35,6 @@ function avancarUmMes(data: string): string {
 }
 
 export default function ExpenseModal({ expense, duplicateFrom, onClose, onSaved }: Props) {
-  const supabase = createClient()
   // Ao duplicar não há despesa a editar — só os valores de partida.
   const base = expense ?? duplicateFrom ?? null
   const modoDuplicar = !expense && !!duplicateFrom

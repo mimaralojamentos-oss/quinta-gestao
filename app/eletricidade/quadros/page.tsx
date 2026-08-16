@@ -10,6 +10,8 @@ import { useFileDrop, mergeUniqueFiles } from '@/lib/useFileDrop'
 import SelectedFilesList from '@/components/SelectedFilesList'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 
+const supabase = createClient()
+
 interface Meter {
   id: string
   name: string
@@ -162,8 +164,6 @@ export default function QuadrosPage() {
   const [filterStart, setFilterStart] = useState('2026-01-01')
   const [filterEnd, setFilterEnd] = useState(new Date().toISOString().slice(0, 10))
   const [chartData, setChartData] = useState<Record<string, any>[]>([])
-
-  const supabase = createClient()
 
   useEffect(() => { fetchAll() }, [])
 

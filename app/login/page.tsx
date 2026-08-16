@@ -4,6 +4,8 @@ import { createClient } from '@/lib/supabase-client'
 import { logAccess } from '@/lib/logAccess'
 import { Home, Eye, EyeOff, Loader2 } from 'lucide-react'
 
+const supabase = createClient()
+
 // Imagens de fundo do login, configuráveis por propriedade.
 //
 // A mesma base de código serve a Quinta e o Serpa Pinto, por isso as fotos
@@ -32,7 +34,6 @@ export default function LoginPage() {
   const [currentImage, setCurrentImage] = useState(0)
   // Decidido depois de montar, para o servidor e o navegador gerarem o mesmo HTML
   const [isMobile, setIsMobile] = useState(false)
-  const supabase = createClient()
 
   const backgroundImages =
     (isMobile && mobileImages.length > 0 ? mobileImages : desktopImages).length > 0

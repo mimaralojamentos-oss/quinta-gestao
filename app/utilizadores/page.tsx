@@ -7,6 +7,8 @@ import { Shield, Plus, Trash2, Eye, Zap, Key, ChevronLeft, History, BookOpen } f
 import Link from 'next/link'
 import { formatDateTime } from '@/lib/utils'
 
+const supabase = createClient()
+
 type Profile = {
   id: string
   email: string
@@ -42,7 +44,6 @@ const actionColors: Record<string, string> = {
 
 export default function UtilizadoresPage() {
   const { profile } = useAuth()
-  const supabase = createClient()
   const [profiles, setProfiles] = useState<Profile[]>([])
   const [loading, setLoading] = useState(true)
   const [showCreate, setShowCreate] = useState(false)

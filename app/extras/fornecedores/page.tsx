@@ -6,12 +6,15 @@ import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, formatDate, normalizeText } from '@/lib/utils'
 import { useAuth } from '@/lib/auth-context'
 import { logAccess } from '@/lib/logAccess'
+
 import {
   normalizeSupplier, buildAliasMap, groupSuppliers,
   type SupplierAlias, type SupplierGroup,
 } from '@/lib/suppliers'
 import { Truck, Search, ChevronLeft, ChevronDown, ChevronRight, X, Link2, Undo2, ArrowUpDown, ArrowUp, ArrowDown, FileText } from 'lucide-react'
 import Link from 'next/link'
+
+const supabase = createClient()
 
 type Ordem = 'nome' | 'faturas' | 'total'
 
@@ -27,7 +30,6 @@ function SetaOrdem({ ativo, dir }: { ativo: boolean; dir: 'asc' | 'desc' }) {
 }
 
 export default function FornecedoresPage() {
-  const supabase = createClient()
   const { profile } = useAuth()
   const podeEditar = ['admin', 'coadmin'].includes(profile?.role ?? '')
 

@@ -17,6 +17,8 @@ import { buildRentPaymentPlan, DESTINOS, type RentPaymentPlan, type DestinoPagam
 import DestinoPagamentoPicker from '@/components/DestinoPagamentoPicker'
 import { logAccess } from '@/lib/logAccess'
 
+const supabase = createClient()
+
 /**
  * Âmbito da procura de despesas e faturas ao reconciliar o banco.
  * Por omissão só mostra o que tem exatamente o mesmo valor da transação —
@@ -164,7 +166,6 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
   // Pré-visualização da distribuição do valor recebido
   const [plan, setPlan] = useState<RentPaymentPlan | null>(null)
   const [planLoading, setPlanLoading] = useState(false)
-  const supabase = createClient()
 
   // Origens conhecidas + as que já foram usadas antes, para a lista crescer sozinha
   const categoriasDisponiveis = mergeCategories(incomeRecords.map(r => r.category))

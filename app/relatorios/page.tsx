@@ -8,6 +8,8 @@ import { BarChart3, TrendingUp, Home, FileText, Calendar, ChevronDown, ChevronUp
 import EmailComposer from '@/components/EmailComposer'
 import { buildAppliedAdvanceMap, appliedAdvanceFor } from '@/lib/advanceCredit'
 
+const supabase = createClient()
+
 interface MonthOption { label: string; value: string }
 
 function getLastMonths(n: number): MonthOption[] {
@@ -34,7 +36,6 @@ const TIPO_LABELS: Record<string, string> = {
 }
 
 export default function RelatoriosPage() {
-  const supabase = createClient()
   const [activeReport, setActiveReport] = useState('dividas')
   const [selectedMonth, setSelectedMonth] = useState(MONTHS[0].value)
   const [loading, setLoading] = useState(false)

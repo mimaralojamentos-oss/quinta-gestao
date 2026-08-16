@@ -6,8 +6,9 @@ import { createClient } from '@/lib/supabase-client'
 import { useAuth } from '@/lib/auth-context'
 import { User, Lock, CheckCircle, AlertCircle } from 'lucide-react'
 
+const supabase = createClient()
+
 export default function PerfilPage() {
-  const supabase = createClient()
   const { profile, user } = useAuth()
 
   // nome

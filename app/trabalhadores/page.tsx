@@ -10,6 +10,8 @@ import { logAccess } from '@/lib/logAccess'
 import { HardHat, Plus, Search, X, ChevronRight, Users } from 'lucide-react'
 import Link from 'next/link'
 
+const supabase = createClient()
+
 /**
  * Folha de ponto — visão geral de todos os trabalhadores.
  *
@@ -25,7 +27,6 @@ interface LinhaTrabalhador extends Worker {
 }
 
 export default function TrabalhadoresPage() {
-  const supabase = createClient()
   const { isAdmin, isCoAdmin } = useAuth()
   const podeEditar = isAdmin || isCoAdmin
 

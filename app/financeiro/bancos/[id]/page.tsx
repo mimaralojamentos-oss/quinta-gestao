@@ -11,12 +11,15 @@ import { useAuth } from '@/lib/auth-context'
 import { incomeCategoryLabel } from '@/lib/incomeCategories'
 import BankMatchModal from '@/components/BankMatchModal'
 import BankImportModal from '@/components/BankImportModal'
+
 import {
   Upload, CheckCircle, Clock, XCircle, ArrowUpRight,
   ArrowDownRight, ChevronLeft, Loader2, X, ArrowRight, Link2, Edit2, Search, SlidersHorizontal, Sparkles, RefreshCw, FileText
 } from 'lucide-react'
 import Link from 'next/link'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
+
+const supabase = createClient()
 
 interface Transaction {
   id: string
@@ -117,7 +120,6 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
   const [filterAmountMax, setFilterAmountMax] = useState('')
   const [filterDirection, setFilterDirection] = useState<'all' | 'entrada' | 'saida'>('all')
 
-  const supabase = createClient()
   const { canWrite } = useAuth()
 
   useEffect(() => { params.then(p => setBankId(p.id)) }, [])

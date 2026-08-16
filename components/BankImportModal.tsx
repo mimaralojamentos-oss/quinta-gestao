@@ -10,13 +10,10 @@
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { Upload, X, Loader2, ArrowRight } from 'lucide-react'
-// Vem do CDN oficial do SheetJS (ver "xlsx" no package.json), não do
-// registo do npm: a versão publicada lá ficou parada na 0.18.5 (2022) e
-// não tem as correções de segurança de versões mais recentes. Não trocar
-// para a versão do npm — seria uma regressão de segurança.
-import * as XLSX from 'xlsx'
 import { useFileDrop } from '@/lib/useFileDrop'
 import { matchesSearch } from '@/lib/utils'
+
+const supabase = createClient()
 
 interface ColumnMapping {
   date: string
@@ -47,7 +44,6 @@ export default function BankImportModal({ bankId, bankName, columnMapping, onImp
   onImported: () => void
   onClose: () => void
 }) {
-  const supabase = createClient()
   const [importing, setImporting] = useState(false)
   const [importStep, setImportStep] = useState<'upload' | 'mapping' | 'preview'>('upload')
   const [parsedHeaders, setParsedHeaders] = useState<string[]>([])
@@ -65,6 +61,13 @@ export default function BankImportModal({ bankId, bankName, columnMapping, onImp
   async function handleFileSelect(file: File) {
     setImportFile(file); setImporting(true)
     try {
+      // Carregado só quando é preciso, para não entrar no bundle inicial
+      // da página. Vem do CDN oficial do SheetJS (ver "xlsx" no
+      // package.json), não do registo do npm: a versão publicada lá ficou
+      // parada na 0.18.5 (2022) e não tem as correções de segurança de
+      // versões mais recentes. Não trocar para a versão do npm — seria
+      // uma regressão de segurança.
+      const XLSX = await import('xlsx')
       const data = await file.arrayBuffer()
       const workbook = XLSX.read(data)
       const sheet = workbook.Sheets[workbook.SheetNames[0]]
@@ -105,6 +108,7 @@ export default function BankImportModal({ bankId, bankName, columnMapping, onImp
     if (!importFile) return
     setImporting(true)
     try {
+      const XLSX = await import('xlsx')
       const headers = parsedRows[headerRowIndex].map((h: any) => String(h ?? '').trim())
       const dataRows = parsedRows.slice(headerRowIndex + 1)
       const getCol = (fieldName: string) => headers.indexOf(fieldName)

@@ -9,6 +9,8 @@ import { useAuth } from '@/lib/auth-context'
 import { logAccess } from '@/lib/logAccess'
 import { consumeAdvances, linkAdvancesToCharge } from '@/lib/advanceCredit'
 
+const supabase = createClient()
+
 interface ElectricityConfig {
   id: number
   price_per_kwh: number
@@ -114,8 +116,6 @@ export default function QuadrosEspacosPage() {
   })
   const [savingConfig, setSavingConfig] = useState(false)
   const [configSaved, setConfigSaved] = useState(false)
-
-  const supabase = createClient()
 
   const pricePerKwh = config?.price_per_kwh ?? 0.18
   const vatRate = config?.vat_rate ?? 0.23

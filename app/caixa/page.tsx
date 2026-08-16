@@ -11,12 +11,13 @@ import TransferModal from './TransferModal'
 import { useAuth } from '@/lib/auth-context'
 import SortIcon from '@/components/SortIcon'
 
+const supabase = createClient()
+
 type SourceFilter = 'all' | 'manual' | 'renda' | 'despesa' | 'documento' | 'transferencia_banco'
 type SortField = 'movement_date' | 'description' | 'type' | 'source' | 'amount' | 'notes'
 type SortDir = 'asc' | 'desc'
 
 export default function CaixaPage() {
-  const supabase = createClient()
   const { isAdmin, isCoAdmin } = useAuth()
   const [movements, setMovements] = useState<CashFundMovement[]>([])
   const [loading, setLoading] = useState(true)

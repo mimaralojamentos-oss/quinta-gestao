@@ -6,6 +6,8 @@ import { formatCurrency, categoryLabel, getMonthLabel } from '@/lib/utils'
 import { logAccess } from '@/lib/logAccess'
 import { X, Copy, AlertTriangle, Loader2 } from 'lucide-react'
 
+const supabase = createClient()
+
 /**
  * Copiar despesas de um mês para outro.
  *
@@ -76,7 +78,6 @@ function opcoesDeMes(): { val: string; label: string }[] {
 }
 
 export default function CopiarDespesasModal({ defaultTarget, onClose, onCopied }: Props) {
-  const supabase = createClient()
 
   const destinoInicial = defaultTarget && defaultTarget !== 'all'
     ? defaultTarget

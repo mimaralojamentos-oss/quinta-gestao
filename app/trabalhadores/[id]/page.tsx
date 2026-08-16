@@ -4,6 +4,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState, use } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, formatDate } from '@/lib/utils'
+
 import {
   calcularConta, calcularHoras, formatarHoras, tarifaDoDia, ehDiaEspecial,
   motivoDiaEspecial, gerarToken, gerarPin,
@@ -16,6 +17,8 @@ import {
   Banknote, RefreshCw, Link2, FileText,
 } from 'lucide-react'
 import Link from 'next/link'
+
+const supabase = createClient()
 
 /**
  * Ficha de um trabalhador: tarifas, link de acesso, registos e pagamentos.
@@ -33,7 +36,6 @@ function novoNumeroRecibo(): string {
 
 export default function TrabalhadorPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
-  const supabase = createClient()
   const { isAdmin, isCoAdmin } = useAuth()
   const podeEditar = isAdmin || isCoAdmin
 

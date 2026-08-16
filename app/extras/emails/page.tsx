@@ -8,6 +8,8 @@ import { useAuth } from '@/lib/auth-context'
 import { Mail, Search, X, ChevronLeft, AlertTriangle, CheckCircle } from 'lucide-react'
 import Link from 'next/link'
 
+const supabase = createClient()
+
 interface SentEmail {
   id: string
   sent_at: string
@@ -25,7 +27,6 @@ interface SentEmail {
 type Filtro = 'todos' | 'enviado' | 'erro'
 
 export default function EmailsEnviadosPage() {
-  const supabase = createClient()
   const { profile } = useAuth()
   const podeVer = ['admin', 'coadmin', 'super_reader'].includes(profile?.role ?? '')
 

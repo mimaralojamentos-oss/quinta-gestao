@@ -5,6 +5,8 @@ import { createClient } from '@/lib/supabase-client'
 import { X, Search, Bell, BellOff } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 
+const supabase = createClient()
+
 interface NoteModalProps {
   note?: any
   onClose: () => void
@@ -19,7 +21,6 @@ const NOTE_TYPES = [
 ]
 
 export default function NoteModal({ note, onClose, onSaved }: NoteModalProps) {
-  const supabase = createClient()
   const { profile } = useAuth()
 
   const now = new Date()

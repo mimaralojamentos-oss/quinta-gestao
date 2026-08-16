@@ -5,6 +5,8 @@ import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, formatDate, getMonthLabel, getCurrentMonth } from '@/lib/utils'
 
+const supabase = createClient()
+
 function calcNextRenewal(startDate: string, endDate: string): Date {
   const start = new Date(startDate)
   const end = new Date(endDate)
@@ -38,7 +40,6 @@ interface AlertItem {
 }
 
 export default function AlertasPage() {
-  const supabase = createClient()
   const [alerts, setAlerts] = useState<AlertItem[]>([])
   const [dismissed, setDismissed] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)

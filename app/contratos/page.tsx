@@ -4,11 +4,14 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, formatDate, matchesSearch } from '@/lib/utils'
+
 import {
   ScrollText, Download, AlertTriangle, CheckCircle,
   Clock, Search, Filter, ExternalLink,
 } from 'lucide-react'
 import Link from 'next/link'
+
+const supabase = createClient()
 
 interface ContractRow {
   id: string
@@ -83,7 +86,6 @@ function rowBg(days: number | null) {
 }
 
 export default function ContratosPage() {
-  const supabase = createClient()
   const [rows, setRows] = useState<ContractRow[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')

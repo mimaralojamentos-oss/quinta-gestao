@@ -7,6 +7,8 @@ import { formatCurrency, getMonthLabel, getCurrentMonth, formatDate } from '@/li
 import { Building2, Users, AlertTriangle, CheckCircle, Clock, HardHat, Zap, Bell, NotebookPen } from 'lucide-react'
 import Link from 'next/link'
 
+const supabase = createClient()
+
 export default function Dashboard() {
   const [stats, setStats] = useState({
     totalSpaces: 0, occupiedSpaces: 0, totalTenantsActive: 0,
@@ -19,7 +21,6 @@ export default function Dashboard() {
   const currentMonth = getCurrentMonth()
 
   async function fetchManualAlerts() {
-    const supabase = createClient()
     const todayStr = new Date().toISOString().slice(0, 10)
     const { data } = await supabase
       .from('notes')
@@ -33,7 +34,6 @@ export default function Dashboard() {
   }
 
   async function handleMarkSeen(id: string) {
-    const supabase = createClient()
     await supabase.from('notes').update({
       reminder_seen_at: new Date().toISOString(),
     }).eq('id', id)
@@ -42,7 +42,6 @@ export default function Dashboard() {
 
   async function fetchStats() {
     try {
-      const supabase = createClient()
       const nextMonth = new Date(currentMonth)
       nextMonth.setMonth(nextMonth.getMonth() + 1)
       const nextMonthStr = nextMonth.toISOString().slice(0, 10)

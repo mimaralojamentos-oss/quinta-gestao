@@ -13,6 +13,8 @@ import BankMatchModal from '@/components/BankMatchModal'
 import BankImportModal from '@/components/BankImportModal'
 import Link from 'next/link'
 
+const supabase = createClient()
+
 interface Bank {
   id: string
   name: string
@@ -55,7 +57,6 @@ export default function BancosPage() {
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [editBank, setEditBank] = useState<Bank | null>(null)
-  const supabase = createClient()
 
   // Vista agregada de créditos de todas as contas
   const [credits, setCredits] = useState<any[]>([])
@@ -818,7 +819,6 @@ function BankModal({ bank, onClose, onSaved }: { bank: Bank | null; onClose: () 
   const [extractError, setExtractError] = useState('')
   const [error, setError] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const supabase = createClient()
 
   const bankPdfDrop = useFileDrop({
     accept: ['.pdf'],
