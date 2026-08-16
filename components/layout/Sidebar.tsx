@@ -17,7 +17,6 @@ const navItems = [
   { href: '/inquilinos', label: 'Inquilinos', icon: Users },
   { href: '/contratos', label: 'Contratos', icon: ScrollText },
   { href: '/projetos', label: 'Projetos', icon: HardHat },
-  { href: '/trabalhadores', label: 'Folha de Ponto', icon: Clock },
   { href: '/documentos', label: 'Documentos', icon: FolderOpen },
   { href: '/notas', label: 'Notas', icon: NotebookPen },
   { href: '/alertas', label: 'Alertas', icon: Bell },
@@ -28,6 +27,8 @@ const navItems = [
 
 // Páginas com acesso restrito — só aparecem a quem as pode usar.
 const emailNavItem = { href: '/email', label: 'Enviar E-mail', icon: Mail }
+// Salários e o link/PIN secreto da folha de ponto: só quem gere pessoal.
+const trabalhadoresNavItem = { href: '/trabalhadores', label: 'Folha de Ponto', icon: Clock }
 
 const eletricidadeItems = [
   { href: '/eletricidade/quadros', label: 'Quadros Elétricos', icon: Zap },
@@ -44,7 +45,7 @@ const financeItems = [
 
 export default function Sidebar({ onClose }: { onClose?: () => void }) {
   const pathname = usePathname()
-  const { profile, isAdmin, signOut } = useAuth()
+  const { profile, isAdmin, isCoAdmin, signOut } = useAuth()
   const [financeOpen, setFinanceOpen] = useState(
     pathname.startsWith('/pagamentos') ||
     pathname.startsWith('/despesas') ||
@@ -59,6 +60,7 @@ export default function Sidebar({ onClose }: { onClose?: () => void }) {
   // O Super Leitor entra para consultar e rever, mas o botão de enviar
   // fica-lhe desativado dentro do próprio módulo.
   const canSeeEmail = ['admin', 'coadmin', 'super_reader'].includes(profile?.role ?? '')
+  const canSeeTrabalhadores = isAdmin || isCoAdmin
 
   return (
     <aside className="w-64 bg-white border-r border-gray-100 h-screen flex flex-col">
@@ -75,7 +77,11 @@ export default function Sidebar({ onClose }: { onClose?: () => void }) {
       </div>
 
       <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
-        {(canSeeEmail ? [...navItems, emailNavItem] : navItems).map((item) => {
+        {[
+          ...navItems,
+          ...(canSeeTrabalhadores ? [trabalhadoresNavItem] : []),
+          ...(canSeeEmail ? [emailNavItem] : []),
+        ].map((item) => {
           const Icon = item.icon
           const isActive = pathname === item.href || pathname.startsWith(item.href + '/')
           return (

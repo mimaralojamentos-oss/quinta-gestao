@@ -48,7 +48,7 @@ export default function TrabalhadoresPage() {
   async function carregar(silencioso = false) {
     if (!silencioso) setLoading(true)
     const [wRes, eRes, pRes] = await Promise.all([
-      supabase.from('workers').select('*').order('name'),
+      supabase.from('workers').select('id, name, phone, hourly_rate, hourly_rate_holiday, active').order('name'),
       supabase.from('work_entries').select('worker_id, work_date, start_time, amount, hours'),
       supabase.from('worker_payments').select('worker_id, amount'),
     ])
