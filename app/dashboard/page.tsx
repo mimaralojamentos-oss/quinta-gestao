@@ -18,8 +18,6 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const currentMonth = getCurrentMonth()
 
-  useEffect(() => { fetchStats(); fetchManualAlerts() }, [])
-
   async function fetchManualAlerts() {
     const supabase = createClient()
     const todayStr = new Date().toISOString().slice(0, 10)
@@ -99,6 +97,8 @@ export default function Dashboard() {
 
   const occupancyRate = stats.totalSpaces > 0
     ? Math.round((stats.occupiedSpaces / stats.totalSpaces) * 100) : 0
+
+  useEffect(() => { fetchStats(); fetchManualAlerts() }, [])
 
   if (loading) {
     return (

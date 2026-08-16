@@ -4,10 +4,11 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency, getMonthLabel, getCurrentMonth, matchesSearch } from '@/lib/utils'
-import { Plus, ChevronLeft, ChevronRight, CheckCircle, Clock, Search, SlidersHorizontal, X, ArrowUpDown, ArrowUp, ArrowDown, ChevronDown } from 'lucide-react'
+import { Plus, ChevronLeft, ChevronRight, CheckCircle, Clock, Search, SlidersHorizontal, X, ChevronDown } from 'lucide-react'
 import PaymentModal from './PaymentModal'
 import AdvancePaymentModal from './AdvancePaymentModal'
 import { useAuth } from '@/lib/auth-context'
+import SortIcon from '@/components/SortIcon'
 
 interface LeaseWithDetails {
   id: string
@@ -161,11 +162,6 @@ export default function PagamentosPage() {
   function handleSort(field: SortField) {
     if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
     else { setSortField(field); setSortDir('asc') }
-  }
-
-  function SortIcon({ field }: { field: SortField }) {
-    if (sortField !== field) return <ArrowUpDown className="w-3 h-3 text-gray-300 ml-1 inline" />
-    return sortDir === 'asc' ? <ArrowUp className="w-3 h-3 text-emerald-600 ml-1 inline" /> : <ArrowDown className="w-3 h-3 text-emerald-600 ml-1 inline" />
   }
 
   function toggleSpace(ref: string) {
@@ -366,14 +362,14 @@ export default function PagamentosPage() {
             <table className="w-full">
               <thead className="bg-gray-50 border-b border-gray-100">
                 <tr>
-                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('space')}>Espaço <SortIcon field="space" /></th>
-                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('tenant')}>Inquilino <SortIcon field="tenant" /></th>
-                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('rent')}>Renda <SortIcon field="rent" /></th>
-                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('state')}>Estado <SortIcon field="state" /></th>
+                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('space')}>Espaço <SortIcon field="space" sortField={sortField} sortDir={sortDir} /></th>
+                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('tenant')}>Inquilino <SortIcon field="tenant" sortField={sortField} sortDir={sortDir} /></th>
+                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('rent')}>Renda <SortIcon field="rent" sortField={sortField} sortDir={sortDir} /></th>
+                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('state')}>Estado <SortIcon field="state" sortField={sortField} sortDir={sortDir} /></th>
                   <th className="table-header">Pago</th>
                   <th className="table-header">Método</th>
-                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('balance')}>Saldo mês <SortIcon field="balance" /></th>
-                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('debt')}>Total dívida <SortIcon field="debt" /></th>
+                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('balance')}>Saldo mês <SortIcon field="balance" sortField={sortField} sortDir={sortDir} /></th>
+                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('debt')}>Total dívida <SortIcon field="debt" sortField={sortField} sortDir={sortDir} /></th>
                   {(isAdmin || isCoAdmin) && <th className="table-header"></th>}
                 </tr>
               </thead>

@@ -22,8 +22,6 @@ export default function EmailLivrePage() {
   const [context, setContext] = useState<EmailContext>('geral')
   const [sentCount, setSentCount] = useState(0)
 
-  useEffect(() => { loadContacts() }, [])
-
   async function loadContacts() {
     try {
       const lista: EmailContact[] = []
@@ -75,6 +73,8 @@ export default function EmailLivrePage() {
       setLoading(false)
     }
   }
+
+  useEffect(() => { loadContacts() }, [])
 
   if (authLoading || loading) {
     return (

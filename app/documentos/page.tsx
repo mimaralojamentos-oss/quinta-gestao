@@ -5,12 +5,13 @@ import Link from 'next/link'
 import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency, formatDate, formatDateTime, normalizeText } from '@/lib/utils'
-import { Search, FileText, Eye, FolderOpen, Trash2, X, Plus, Upload, Loader2, CheckCircle, AlertCircle, Edit2, Filter, ChevronDown, ChevronUp, ArrowUpDown, ArrowUp, ArrowDown, Zap } from 'lucide-react'
+import { Search, FileText, Eye, FolderOpen, Trash2, X, Plus, Upload, Loader2, CheckCircle, AlertCircle, Edit2, Filter, ChevronDown, ChevronUp, Zap } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import { logAccess } from '@/lib/logAccess'
 import { useFileDrop, mergeUniqueFiles } from '@/lib/useFileDrop'
 import SelectedFilesList from '@/components/SelectedFilesList'
 import ManualDocumentModal from '@/components/ManualDocumentModal'
+import SortIcon from '@/components/SortIcon'
 
 interface Document {
   id: string
@@ -203,13 +204,6 @@ export default function DocumentosPage() {
   function handleSort(field: SortField) {
     if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
     else { setSortField(field); setSortDir('asc') }
-  }
-
-  function SortIcon({ field }: { field: SortField }) {
-    if (sortField !== field) return <ArrowUpDown className="w-3 h-3 text-gray-300 ml-1 inline" />
-    return sortDir === 'asc'
-      ? <ArrowUp className="w-3 h-3 text-emerald-600 ml-1 inline" />
-      : <ArrowDown className="w-3 h-3 text-emerald-600 ml-1 inline" />
   }
 
   function openEditModal(doc: Document) {
@@ -667,13 +661,13 @@ async function handleSaveEdit() {
             <table className="w-full">
               <thead className="bg-gray-50 border-b border-gray-100">
                 <tr>
-                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('tipo')}>Tipo <SortIcon field="tipo" /></th>
-                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('nome')}>Ficheiro <SortIcon field="nome" /></th>
-                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('associado')}>Associado a <SortIcon field="associado" /></th>
-                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('data')}>Data doc. <SortIcon field="data" /></th>
-                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('carregado')}>Carregado em <SortIcon field="carregado" /></th>
-                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('valor')}>Valor <SortIcon field="valor" /></th>
-                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('despesa')}>Despesa <SortIcon field="despesa" /></th>
+                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('tipo')}>Tipo <SortIcon field="tipo" sortField={sortField} sortDir={sortDir} /></th>
+                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('nome')}>Ficheiro <SortIcon field="nome" sortField={sortField} sortDir={sortDir} /></th>
+                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('associado')}>Associado a <SortIcon field="associado" sortField={sortField} sortDir={sortDir} /></th>
+                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('data')}>Data doc. <SortIcon field="data" sortField={sortField} sortDir={sortDir} /></th>
+                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('carregado')}>Carregado em <SortIcon field="carregado" sortField={sortField} sortDir={sortDir} /></th>
+                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('valor')}>Valor <SortIcon field="valor" sortField={sortField} sortDir={sortDir} /></th>
+                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('despesa')}>Despesa <SortIcon field="despesa" sortField={sortField} sortDir={sortDir} /></th>
                   <th className="table-header"></th>
                 </tr>
               </thead>

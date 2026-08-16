@@ -65,7 +65,6 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
     notes: '',
   })
 
-  useEffect(() => { fetchDebts() }, [])
 
   async function fetchDebts() {
     setLoadingDebts(true)
@@ -483,6 +482,7 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
     onSaved()
   }
 
+  useEffect(() => { fetchDebts() }, [])
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">

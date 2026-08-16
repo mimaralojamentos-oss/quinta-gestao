@@ -43,17 +43,6 @@ export default function NoteModal({ note, onClose, onSaved }: NoteModalProps) {
   const [showSpaceDropdown, setShowSpaceDropdown] = useState(false)
   const spaceRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    fetchSpaces()
-    function handleClick(e: MouseEvent) {
-      if (spaceRef.current && !spaceRef.current.contains(e.target as Node)) {
-        setShowSpaceDropdown(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
-  }, [])
-
   async function fetchSpaces() {
     const { data } = await supabase
       .from('spaces')
@@ -132,6 +121,17 @@ export default function NoteModal({ note, onClose, onSaved }: NoteModalProps) {
     }
     setSaving(false)
   }
+
+  useEffect(() => {
+    fetchSpaces()
+    function handleClick(e: MouseEvent) {
+      if (spaceRef.current && !spaceRef.current.contains(e.target as Node)) {
+        setShowSpaceDropdown(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [])
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">

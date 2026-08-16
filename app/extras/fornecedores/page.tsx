@@ -46,7 +46,6 @@ export default function FornecedoresPage() {
   const [guardando, setGuardando] = useState(false)
   const [erroModal, setErroModal] = useState('')
 
-  useEffect(() => { carregar() }, [])
 
   async function carregar() {
     setLoading(true)
@@ -156,6 +155,8 @@ export default function FornecedoresPage() {
 
   // Nomes já usados, para sugerir no campo de escrita
   const sugestoes = [...new Set(grupos.map(g => g.name))].sort()
+
+  useEffect(() => { carregar() }, [])
 
   return (
     <AppLayout>

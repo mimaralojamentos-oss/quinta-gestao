@@ -5,13 +5,14 @@ import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Tenant, Lease } from '@/lib/types'
 import { formatCurrency, formatDate, matchesSearch } from '@/lib/utils'
-import { Plus, Search, FileText, Phone, Mail, X, AlertTriangle, ArrowUpDown, ArrowUp, ArrowDown, ChevronDown, Trash2 } from 'lucide-react'
+import { Plus, Search, FileText, Phone, Mail, X, AlertTriangle, ChevronDown, Trash2 } from 'lucide-react'
 import TenantModal from './TenantModal'
 import LeaseModal from './LeaseModal'
 import { useAuth } from '@/lib/auth-context'
 import EmailComposer from '@/components/EmailComposer'
 import { logAccess } from '@/lib/logAccess'
 import { buildAppliedAdvanceMap, appliedAdvanceFor } from '@/lib/advanceCredit'
+import SortIcon from '@/components/SortIcon'
 import Link from 'next/link'
 
 interface TenantWithLease extends Tenant {
@@ -289,13 +290,6 @@ export default function InquilinosPage() {
     else { setSortField(field); setSortDir('asc') }
   }
 
-  function SortIcon({ field }: { field: SortField }) {
-    if (sortField !== field) return <ArrowUpDown className="w-3 h-3 text-gray-300 ml-1 inline" />
-    return sortDir === 'asc'
-      ? <ArrowUp className="w-3 h-3 text-emerald-600 ml-1 inline" />
-      : <ArrowDown className="w-3 h-3 text-emerald-600 ml-1 inline" />
-  }
-
   function toggleSpace(ref: string) {
     setFilterSpaces(prev => prev.includes(ref) ? prev.filter(r => r !== ref) : [...prev, ref])
   }
@@ -443,21 +437,21 @@ export default function InquilinosPage() {
               <thead className="bg-gray-50 border-b border-gray-100">
                 <tr>
                   <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('name')}>
-                    Inquilino <SortIcon field="name" />
+                    Inquilino <SortIcon field="name" sortField={sortField} sortDir={sortDir} />
                   </th>
                   <th className="table-header">Contacto</th>
                   <th className="table-header">NIF</th>
                   <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('spaces')}>
-                    Espaço(s) <SortIcon field="spaces" />
+                    Espaço(s) <SortIcon field="spaces" sortField={sortField} sortDir={sortDir} />
                   </th>
                   <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('rent')}>
-                    Renda <SortIcon field="rent" />
+                    Renda <SortIcon field="rent" sortField={sortField} sortDir={sortDir} />
                   </th>
                   <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('debt')}>
-                    Dívida <SortIcon field="debt" />
+                    Dívida <SortIcon field="debt" sortField={sortField} sortDir={sortDir} />
                   </th>
                   <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('contract')}>
-                    Contrato <SortIcon field="contract" />
+                    Contrato <SortIcon field="contract" sortField={sortField} sortDir={sortDir} />
                   </th>
                   <th className="table-header">Notas</th>
                   {(isAdmin || isCoAdmin) && <th className="table-header"></th>}

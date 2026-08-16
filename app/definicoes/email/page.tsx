@@ -45,8 +45,6 @@ export default function DefinicoesEmailPage() {
     fromEmail: '', fromName: '', replyTo: '', subjectPrefix: '',
   })
 
-  useEffect(() => { load() }, [])
-
   async function load() {
     try {
       const res = await fetch('/api/email-settings')
@@ -112,6 +110,8 @@ export default function DefinicoesEmailPage() {
   function applyPreset(p: typeof PRESETS[number]) {
     setForm(f => ({ ...f, smtpHost: p.host, smtpPort: p.port }))
   }
+
+  useEffect(() => { load() }, [])
 
   if (authLoading || loading) {
     return (

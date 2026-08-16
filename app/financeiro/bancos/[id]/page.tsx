@@ -3,7 +3,7 @@
 import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
-import { formatCurrency, formatDate, matchesSearch, normalizeText } from '@/lib/utils'
+import { formatCurrency, formatDate, matchesSearch, normalizeText, formatMonthShort } from '@/lib/utils'
 import { buildRentPaymentPlan, applyRentPaymentPlan, type DestinoPagamento } from '@/lib/rentPaymentPlan'
 import { ensureExpenseForTransaction, emptySummary, addToSummary, describeSummary } from '@/lib/bankExpense'
 import { useFileDrop } from '@/lib/useFileDrop'
@@ -68,13 +68,6 @@ interface MatchingRule {
   created_at: string
 }
 
-const MESES_ABREV_PT = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
-
-function formatMonthShortPT(dateString: string): string {
-  const [year, month] = dateString.split('-').map(Number)
-  return `${MESES_ABREV_PT[month - 1]} ${year}`
-}
-
 export default function BankDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const [bankId, setBankId] = useState('')
   const [bank, setBank] = useState<Bank | null>(null)
@@ -128,7 +121,6 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
   const { canWrite } = useAuth()
 
   useEffect(() => { params.then(p => setBankId(p.id)) }, [])
-  useEffect(() => { if (bankId) fetchData() }, [bankId])
 
   async function fetchData() {
     setLoading(true)
@@ -679,6 +671,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
       const result = await processRendaTransaction(tx, undefined, true)
       if (result === 'created') created++
       else if (result === 'skipped') skipped++
+      else if (result === 'cancelled') cancelled++
     }
     await fetchData()
     setSyncing(false)
@@ -796,6 +789,8 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     setFilterIdentification(prev => prev === val ? 'all' : val)
   }
 
+  useEffect(() => { if (bankId) fetchData() }, [bankId])
+
   return (
     <AppLayout>
       <div className="p-4 md:p-8">
@@ -841,7 +836,7 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
             <ResponsiveContainer width="100%" height={280}>
               <LineChart data={balanceChartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                <XAxis dataKey="date" tickFormatter={formatMonthShortPT} tick={{ fontSize: 12, fill: '#6b7280' }} />
+                <XAxis dataKey="date" tickFormatter={formatMonthShort} tick={{ fontSize: 12, fill: '#6b7280' }} />
                 <YAxis tickFormatter={v => `${v}€`} tick={{ fontSize: 12, fill: '#6b7280' }} />
                 <Tooltip
                   labelFormatter={(label: any) => formatDate(label)}

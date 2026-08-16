@@ -20,7 +20,6 @@ export default function AdvancePaymentModal({ onClose, onSaved }: Props) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
-  useEffect(() => { fetchLeases() }, [])
 
   async function fetchLeases() {
     setLoadingLeases(true)
@@ -69,6 +68,8 @@ export default function AdvancePaymentModal({ onClose, onSaved }: Props) {
     setSaving(false)
     onSaved()
   }
+
+  useEffect(() => { fetchLeases() }, [])
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">

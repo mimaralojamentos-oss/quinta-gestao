@@ -6,11 +6,12 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { Expense } from '@/lib/types'
 import { formatCurrency, formatDate, categoryLabel, matchesSearch } from '@/lib/utils'
-import { Plus, Search, Trash2, X, SlidersHorizontal, ChevronUp, ChevronDown, ChevronsUpDown, Eye, ChevronDown as ChevronDownIcon, Copy, CopyPlus } from 'lucide-react'
+import { Plus, Search, Trash2, X, SlidersHorizontal, Eye, ChevronDown as ChevronDownIcon, Copy, CopyPlus } from 'lucide-react'
 import ExpenseModal from './ExpenseModal'
 import CopiarDespesasModal from './CopiarDespesasModal'
 import { useAuth } from '@/lib/auth-context'
 import { logAccess } from '@/lib/logAccess'
+import SortIcon from '@/components/SortIcon'
 
 interface DeleteConfirm {
   expense: any
@@ -135,11 +136,6 @@ function DespesasContent() {
   function handleSort(field: SortField) {
     if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
     else { setSortField(field); setSortDir('asc') }
-  }
-
-  function SortIcon({ field }: { field: SortField }) {
-    if (sortField !== field) return <ChevronsUpDown className="w-3 h-3 ml-1 text-gray-400 inline" />
-    return sortDir === 'asc' ? <ChevronUp className="w-3 h-3 ml-1 text-emerald-600 inline" /> : <ChevronDown className="w-3 h-3 ml-1 text-emerald-600 inline" />
   }
 
   async function handlePaymentMethodToggle(expense: any) {
@@ -491,11 +487,11 @@ function DespesasContent() {
             <table className="w-full">
               <thead className="bg-gray-50 border-b border-gray-100">
                 <tr>
-                  <th className={thClass} onClick={() => handleSort('expense_date')}>Data <SortIcon field="expense_date" /></th>
-                  <th className={thClass} onClick={() => handleSort('description')}>Descrição <SortIcon field="description" /></th>
-                  <th className={thClass} onClick={() => handleSort('category')}>Categoria <SortIcon field="category" /></th>
-                  <th className={thClass} onClick={() => handleSort('supplier')}>Fornecedor <SortIcon field="supplier" /></th>
-                  <th className={thClass} onClick={() => handleSort('amount')}>Valor <SortIcon field="amount" /></th>
+                  <th className={thClass} onClick={() => handleSort('expense_date')}>Data <SortIcon field="expense_date" sortField={sortField} sortDir={sortDir} variant="chevron" /></th>
+                  <th className={thClass} onClick={() => handleSort('description')}>Descrição <SortIcon field="description" sortField={sortField} sortDir={sortDir} variant="chevron" /></th>
+                  <th className={thClass} onClick={() => handleSort('category')}>Categoria <SortIcon field="category" sortField={sortField} sortDir={sortDir} variant="chevron" /></th>
+                  <th className={thClass} onClick={() => handleSort('supplier')}>Fornecedor <SortIcon field="supplier" sortField={sortField} sortDir={sortDir} variant="chevron" /></th>
+                  <th className={thClass} onClick={() => handleSort('amount')}>Valor <SortIcon field="amount" sortField={sortField} sortDir={sortDir} variant="chevron" /></th>
                   <th className="table-header">Pagamento</th>
                   <th className="table-header">Projeto</th>
                   <th className="table-header">Fatura</th>

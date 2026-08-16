@@ -55,19 +55,34 @@ export function formatDateTime(value: string | Date | null | undefined): string 
   const hora = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
   return `${formatDate(d)} ${hora}`
 }
-export function formatMonth(dateString: string): string {
-  if (!dateString) return '—'
-  return new Date(dateString).toLocaleDateString('pt-PT', { month: 'long', year: 'numeric' })
-}
 export function getCurrentMonth(): string {
   const now = new Date()
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
 }
-export function getMonthLabel(dateString: string): string {
-  const months = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
-    'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro']
-  const d = new Date(dateString)
-  return `${months[d.getMonth()]} ${d.getFullYear()}`
+const MESES_PT = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro']
+const MESES_ABREV_PT = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
+
+/**
+ * "Mês Ano" a partir de 'AAAA-MM' ou 'AAAA-MM-DD'.
+ *
+ * Extrai o mês diretamente da string em vez de usar `new Date(dateString)`
+ * — pela mesma razão do formatDate acima: evita o recuo de um dia em fusos
+ * atrás de Greenwich.
+ */
+export function getMonthLabel(dateString: string | null | undefined): string {
+  if (!dateString) return '—'
+  const [ano, mes] = String(dateString).split('-')
+  const i = Number(mes) - 1
+  return MESES_PT[i] ? `${MESES_PT[i]} ${ano}` : String(dateString)
+}
+
+/** "Mês abreviado Ano" a partir de 'AAAA-MM' ou 'AAAA-MM-DD' — para eixos de gráficos. */
+export function formatMonthShort(dateString: string | null | undefined): string {
+  if (!dateString) return '—'
+  const [ano, mes] = String(dateString).split('-')
+  const i = Number(mes) - 1
+  return MESES_ABREV_PT[i] ? `${MESES_ABREV_PT[i]} ${ano}` : String(dateString)
 }
 export function spaceTypeLabel(type: string): string {
   const map: Record<string, string> = {

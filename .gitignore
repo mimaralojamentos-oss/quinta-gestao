@@ -3,3 +3,6 @@ node_modules/
 .next/
 .env*.local
 *.tsbuildinfo
+
+# Saída de scripts/generate-context-pdf.mjs — gerada localmente, não é código-fonte.
+*.pdf

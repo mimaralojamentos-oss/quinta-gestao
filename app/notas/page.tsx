@@ -64,7 +64,6 @@ export default function NotasPage() {
   const [editingCommentText, setEditingCommentText] = useState<string>('')
   const [savingEditComment, setSavingEditComment] = useState(false)
 
-  useEffect(() => { fetchNotes() }, [showArchived])
 
   async function fetchNotes() {
     setLoading(true)
@@ -178,6 +177,8 @@ export default function NotasPage() {
     n.has_reminder && !n.reminder_seen_at && n.reminder_date <= todayStr
   ).length
   const isOwner = (note: any) => note.created_by === profile?.id
+
+  useEffect(() => { fetchNotes() }, [showArchived])
 
   return (
     <AppLayout>

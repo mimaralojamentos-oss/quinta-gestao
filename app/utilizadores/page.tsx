@@ -55,11 +55,6 @@ export default function UtilizadoresPage() {
   const [accessLogs, setAccessLogs] = useState<AccessLog[]>([])
   const [loadingLogs, setLoadingLogs] = useState(true)
 
-  useEffect(() => {
-    fetchProfiles()
-    fetchAccessLogs()
-  }, [])
-
   async function fetchProfiles() {
     const { data: profilesData } = await supabase
       .from('profiles')
@@ -73,7 +68,7 @@ export default function UtilizadoresPage() {
       headers: { 'Content-Type': 'application/json' },
     })
 
-    let emailMap: Record<string, string> = {}
+    const emailMap: Record<string, string> = {}
     if (res.ok) {
       const data = await res.json()
       if (data.users) {
@@ -163,6 +158,11 @@ export default function UtilizadoresPage() {
     if (role === 'super_reader') return 'bg-blue-100 text-blue-700'
     return 'bg-gray-100 text-gray-600'
   }
+
+  useEffect(() => {
+    fetchProfiles()
+    fetchAccessLogs()
+  }, [])
 
   if (profile?.role !== 'admin') {
     return (

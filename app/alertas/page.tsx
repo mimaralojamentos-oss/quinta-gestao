@@ -45,8 +45,6 @@ export default function AlertasPage() {
   const [showDismissed, setShowDismissed] = useState(false)
   const [manualAlerts, setManualAlerts] = useState<any[]>([])
 
-  useEffect(() => { fetchAlerts(); fetchManualAlerts() }, [])
-
   async function fetchManualAlerts() {
     const todayStr = new Date().toISOString().slice(0, 10)
     const { data } = await supabase
@@ -233,6 +231,8 @@ export default function AlertasPage() {
 
   const highCount = activeAlerts.filter(a => a.severity === 'high').length
   const medCount = activeAlerts.filter(a => a.severity === 'medium').length
+
+  useEffect(() => { fetchAlerts(); fetchManualAlerts() }, [])
 
   return (
     <AppLayout>

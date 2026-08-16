@@ -3,7 +3,7 @@ export type SpaceStatus = 'arrendado' | 'disponivel'
 export type PaymentMethod = 'dinheiro' | 'banco' | 'transferencia'
 export type ExpenseCategory = 'obras' | 'edp' | 'pessoal' | 'contabilidade' | 'manutencao' | 'outros'
 export type ExpenseType = 'recorrente' | 'pontual'
-export type UserRole = 'admin' | 'coadmin' | 'viewer' | 'electrician'
+export type UserRole = 'admin' | 'coadmin' | 'viewer' | 'electrician' | 'super_reader'
 
 export interface Profile {
   id: string
@@ -92,6 +92,81 @@ export interface Expense {
   invoice_file_path: string | null
   notes: string | null
   created_at: string
+}
+export interface Debt {
+  id: string
+  tenant_id: string
+  description: string
+  original_amount: number
+  reference_date: string
+  created_at: string
+  tenant?: Tenant
+  payments?: DebtPayment[]
+}
+export interface DebtPayment {
+  id: string
+  debt_id: string
+  payment_date: string
+  amount: number
+  payment_method: PaymentMethod | null
+  notes: string | null
+  created_at: string
+  debt?: Debt
+}
+export interface Bank {
+  id: string
+  name: string
+  holder_name: string | null
+  iban: string | null
+  account_number: string | null
+  notes: string | null
+  column_mapping: Record<string, string> | null
+  created_at: string
+}
+export type BankTransactionStatus = 'por_validar' | 'validado' | 'ignorado'
+export interface BankTransaction {
+  id: string
+  bank_id: string
+  transaction_date: string
+  description: string
+  amount: number
+  balance: number | null
+  reference: string | null
+  import_code: string | null
+  status: BankTransactionStatus
+  suggested_type: string | null
+  suggested_lease_id: string | null
+  confirmed_type: string | null
+  confirmed_tenant_id: string | null
+  confirmed_lease_id: string | null
+  confirmed_expense_id: string | null
+  confirmed_income_id: string | null
+  confirmed_document_id: string | null
+  skip_processing: boolean | null
+  notes: string | null
+  created_at: string
+}
+export type NoteType = 'chamada' | 'geral' | 'lembrete' | 'outro'
+export interface Note {
+  id: string
+  title: string
+  description: string | null
+  type: NoteType
+  note_date: string
+  note_time: string | null
+  space_id: string | null
+  tenant_id: string | null
+  has_reminder: boolean
+  reminder_date: string | null
+  reminder_time: string | null
+  reminder_seen_at: string | null
+  dismissed: boolean
+  archived?: boolean
+  created_by: string | null
+  created_at: string
+  space?: Space
+  tenant?: Tenant
+  creator?: Profile
 }
 export interface CashFundMovement {
   id: string

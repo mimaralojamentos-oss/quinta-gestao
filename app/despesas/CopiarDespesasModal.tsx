@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
-import { formatCurrency, categoryLabel } from '@/lib/utils'
+import { formatCurrency, categoryLabel, getMonthLabel } from '@/lib/utils'
 import { logAccess } from '@/lib/logAccess'
 import { X, Copy, AlertTriangle, Loader2 } from 'lucide-react'
 
@@ -55,13 +55,6 @@ function chaveDespesa(e: any): string {
   return `${String(e.description ?? '').trim().toLowerCase()}__${String(e.supplier ?? '').trim().toLowerCase()}`
 }
 
-/** Nome legível de um mês 'AAAA-MM'. */
-function mesLegivel(mes: string): string {
-  const [ano, m] = mes.split('-').map(Number)
-  const texto = new Date(ano, m - 1, 1).toLocaleDateString('pt-PT', { month: 'long', year: 'numeric' })
-  return texto.charAt(0).toUpperCase() + texto.slice(1)
-}
-
 /** Mês anterior a 'AAAA-MM'. */
 function mesAnterior(mes: string): string {
   const [ano, m] = mes.split('-').map(Number)
@@ -76,7 +69,7 @@ function opcoesDeMes(): { val: string; label: string }[] {
   const d = new Date()
   for (let i = 0; i < 24; i++) {
     const val = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-    opts.push({ val, label: mesLegivel(val) })
+    opts.push({ val, label: getMonthLabel(val) })
     d.setMonth(d.getMonth() - 1)
   }
   return opts
@@ -98,8 +91,6 @@ export default function CopiarDespesasModal({ defaultTarget, onClose, onCopied }
 
   const meses = opcoesDeMes()
   const mesmoMes = origem === destino
-
-  useEffect(() => { carregar() }, [origem, destino])
 
   async function carregar() {
     setCarregando(true); setErro('')
@@ -202,12 +193,14 @@ export default function CopiarDespesasModal({ defaultTarget, onClose, onCopied }
     await logAccess({
       action: 'criar',
       page: '/despesas',
-      details: `Copiou ${criadas} despesa(s) de ${mesLegivel(origem)} para ${mesLegivel(destino)} — total ${formatCurrency(totalSelecionado)}`,
+      details: `Copiou ${criadas} despesa(s) de ${getMonthLabel(origem)} para ${getMonthLabel(destino)} — total ${formatCurrency(totalSelecionado)}`,
     })
 
     setCopiando(false)
     onCopied()
   }
+
+  useEffect(() => { carregar() }, [origem, destino])
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
@@ -260,7 +253,7 @@ export default function CopiarDespesasModal({ defaultTarget, onClose, onCopied }
             </div>
           ) : linhas.length === 0 ? (
             <p className="text-center text-gray-400 text-sm py-12">
-              Não há despesas em {mesLegivel(origem)}.
+              Não há despesas em {getMonthLabel(origem)}.
             </p>
           ) : (
             <>
@@ -268,7 +261,7 @@ export default function CopiarDespesasModal({ defaultTarget, onClose, onCopied }
                 <button onClick={marcarTodas} className="text-xs text-emerald-600 hover:underline font-medium">
                   {todasMarcadas ? 'Desmarcar todas' : 'Marcar todas'}
                 </button>
-                <p className="text-xs text-gray-400">{linhas.length} despesa(s) em {mesLegivel(origem)}</p>
+                <p className="text-xs text-gray-400">{linhas.length} despesa(s) em {getMonthLabel(origem)}</p>
               </div>
 
               <table className="w-full text-sm">
@@ -293,7 +286,7 @@ export default function CopiarDespesasModal({ defaultTarget, onClose, onCopied }
                         <p className="font-medium text-gray-800">{l.origem.description}</p>
                         {l.duplicada && (
                           <p className="text-xs text-amber-700 font-medium mt-0.5">
-                            ⚠️ Já existe em {mesLegivel(destino)}
+                            ⚠️ Já existe em {getMonthLabel(destino)}
                           </p>
                         )}
                       </td>

@@ -89,8 +89,6 @@ export default function ContratosPage() {
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<'todos' | 'a_expirar' | 'ok' | 'sem_prazo'>('todos')
 
-  useEffect(() => { fetchData() }, [])
-
   async function fetchData() {
     setLoading(true)
     const { data } = await supabase
@@ -143,6 +141,8 @@ export default function ContratosPage() {
   const expirado = rows.filter(r => { const d = daysUntilRenewal(r.start_date, r.end_date); return d !== null && d < 0 }).length
   const semPrazo = rows.filter(r => r.end_date === null).length
   const totalRenda = rows.reduce((s, r) => s + r.monthly_rent, 0)
+
+  useEffect(() => { fetchData() }, [])
 
   return (
     <AppLayout>

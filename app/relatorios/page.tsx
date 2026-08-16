@@ -3,7 +3,7 @@
 import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase-client'
-import { formatDate } from '@/lib/utils'
+import { formatDate, getMonthLabel } from '@/lib/utils'
 import { BarChart3, TrendingUp, Home, FileText, Calendar, ChevronDown, ChevronUp, Edit2, X, Save, ClipboardList, Download, Loader2, Receipt, Mail, AlertTriangle, Printer } from 'lucide-react'
 import EmailComposer from '@/components/EmailComposer'
 import { buildAppliedAdvanceMap, appliedAdvanceFor } from '@/lib/advanceCredit'
@@ -16,8 +16,7 @@ function getLastMonths(n: number): MonthOption[] {
   for (let i = 0; i < n; i++) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
     const value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-    const label = d.toLocaleDateString('pt-PT', { month: 'long', year: 'numeric' })
-    result.push({ value, label: label.charAt(0).toUpperCase() + label.slice(1) })
+    result.push({ value, label: getMonthLabel(value) })
   }
   return result
 }
@@ -32,16 +31,6 @@ const TIPO_LABELS: Record<string, string> = {
   extra: '➕ Extra',
   adiantamento: '💰 Adiantamento',
   outro: '📝 Outro',
-}
-
-/** "2026-07-01" ou "2026-07" → "Julho 2026" */
-function mesLegivel(valor: string | null | undefined): string {
-  if (!valor) return 'sem data'
-  const [ano, mes] = String(valor).split('-')
-  const nomes = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
-    'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro']
-  const i = Number(mes) - 1
-  return nomes[i] ? `${nomes[i]} ${ano}` : String(valor)
 }
 
 export default function RelatoriosPage() {
@@ -84,29 +73,6 @@ export default function RelatoriosPage() {
   const [showPagamentosSpaceDropdown, setShowPagamentosSpaceDropdown] = useState(false)
   const pagamentosSpaceRef = useRef<HTMLDivElement>(null)
   const [pagamentosMes, setPagamentosMes] = useState('year')
-
-  useEffect(() => {
-    if (activeReport === 'rendas' || activeReport === 'cobrancas') fetchRendas()
-    if (activeReport === 'ocupacao') fetchOcupacao()
-    if (activeReport === 'financeiro') fetchFinanceiro()
-    if (activeReport === 'contratos') fetchContratos()
-    if (activeReport === 'pagamentos') fetchPagamentos()
-    if (activeReport === 'dividas') fetchDividas()
-  }, [activeReport, selectedMonth])
-
-  useEffect(() => {
-    if (activeReport === 'pagamentos') fetchPagamentos()
-  }, [pagamentosEspacos, pagamentosMes])
-
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (pagamentosSpaceRef.current && !pagamentosSpaceRef.current.contains(e.target as Node)) {
-        setShowPagamentosSpaceDropdown(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [])
 
   async function fetchRendasData() {
     const startDate = `${selectedMonth}-01`
@@ -269,7 +235,7 @@ export default function RelatoriosPage() {
         for (const p of payments.filter(p => leaseIds.includes(p.lease_id) && !p.payment_date)) {
           parcelas.push({
             grupo: 'Renda',
-            descricao: `Renda de ${mesLegivel(p.reference_month)} (registada por pagar)`,
+            descricao: `Renda de ${getMonthLabel(p.reference_month)} (registada por pagar)`,
             valor: p.amount ?? 0,
             data: p.reference_month ?? '',
           })
@@ -306,8 +272,8 @@ export default function RelatoriosPage() {
                 // O valor entre parênteses é o que FALTA, não o que já foi pago —
                 // assim bate certo com o número que aparece na coluna da direita.
                 descricao: doMes.length > 0 || credito > 0
-                  ? `Renda de ${mesLegivel(mes)}${espacoRef ? ` · ${espacoRef}` : ''} — falta parte (${fmt(emFalta)} de ${fmt(rendaMes)})`
-                  : `Renda de ${mesLegivel(mes)}${espacoRef ? ` · ${espacoRef}` : ''}`,
+                  ? `Renda de ${getMonthLabel(mes)}${espacoRef ? ` · ${espacoRef}` : ''} — falta parte (${fmt(emFalta)} de ${fmt(rendaMes)})`
+                  : `Renda de ${getMonthLabel(mes)}${espacoRef ? ` · ${espacoRef}` : ''}`,
                 valor: emFalta,
                 data: `${mes}-01`,
               })
@@ -323,7 +289,7 @@ export default function RelatoriosPage() {
             const lease = tLeases.find(l => l.id === c.lease_id)
             const periodo = periodoDaCobranca(lease?.space_id, c.charge_date)
             const detalhes = [
-              periodo ? `consumo de ${periodo}` : `mês de ${mesLegivel(c.reference_month)}`,
+              periodo ? `consumo de ${periodo}` : `mês de ${getMonthLabel(c.reference_month)}`,
               c.units != null ? `${Number(c.units).toFixed(0)} kWh` : null,
               (c.amount_paid ?? 0) > 0 ? `já pagou ${fmt(c.amount_paid ?? 0)}` : null,
             ].filter(Boolean).join(' · ')
@@ -358,7 +324,7 @@ export default function RelatoriosPage() {
         for (const a of adiantamentos) {
           parcelas.push({
             grupo: 'Crédito',
-            descricao: `Adiantamento de ${mesLegivel(a.reference_month)}`,
+            descricao: `Adiantamento de ${getMonthLabel(a.reference_month)}`,
             valor: -(a.amount ?? 0),
             data: a.reference_month ?? '',
           })
@@ -692,7 +658,7 @@ export default function RelatoriosPage() {
       })
 
       // --- debt_payments (pagamentos de dívidas manuais) ---
-      let dpQuery = supabase
+      const dpQuery = supabase
         .from('debt_payments')
         .select('*, debt:debts(id, description, tenant_id, tenant:tenants(id, name, leases:leases(id, space:spaces(id, ref))))')
         .gte('payment_date', startDate)
@@ -971,6 +937,29 @@ export default function RelatoriosPage() {
   ]
 
   const showMonthPicker = activeReport === 'rendas' || activeReport === 'financeiro' || activeReport === 'cobrancas'
+
+  useEffect(() => {
+    if (activeReport === 'rendas' || activeReport === 'cobrancas') fetchRendas()
+    if (activeReport === 'ocupacao') fetchOcupacao()
+    if (activeReport === 'financeiro') fetchFinanceiro()
+    if (activeReport === 'contratos') fetchContratos()
+    if (activeReport === 'pagamentos') fetchPagamentos()
+    if (activeReport === 'dividas') fetchDividas()
+  }, [activeReport, selectedMonth])
+
+  useEffect(() => {
+    if (activeReport === 'pagamentos') fetchPagamentos()
+  }, [pagamentosEspacos, pagamentosMes])
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (pagamentosSpaceRef.current && !pagamentosSpaceRef.current.contains(e.target as Node)) {
+        setShowPagamentosSpaceDropdown(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   return (
     <>

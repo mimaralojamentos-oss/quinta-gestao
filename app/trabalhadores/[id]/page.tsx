@@ -58,7 +58,6 @@ export default function TrabalhadorPage({ params }: { params: Promise<{ id: stri
   const [guardandoPagamento, setGuardandoPagamento] = useState(false)
   const [erroPagamento, setErroPagamento] = useState('')
 
-  useEffect(() => { carregar() }, [id])
 
   async function carregar(silencioso = false) {
     if (!silencioso) setLoading(true)
@@ -372,6 +371,8 @@ export default function TrabalhadorPage({ params }: { params: Promise<{ id: stri
     const { data } = await supabase.storage.from('documents').createSignedUrl(doc.file_path, 60)
     if (data?.signedUrl) window.open(data.signedUrl, '_blank')
   }
+
+  useEffect(() => { carregar() }, [id])
 
   // ------------------------------------------------------------ ecrã
   if (loading) {

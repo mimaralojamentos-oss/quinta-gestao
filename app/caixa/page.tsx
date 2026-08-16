@@ -5,10 +5,11 @@ import { useEffect, useState, useMemo } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { CashFundMovement } from '@/lib/types'
 import { formatCurrency, formatDate, matchesSearch } from '@/lib/utils'
-import { Plus, TrendingUp, TrendingDown, Wallet, Trash2, Search, X, Calendar, ChevronUp, ChevronDown, ChevronsUpDown, ArrowRightLeft } from 'lucide-react'
+import { Plus, TrendingUp, TrendingDown, Wallet, Trash2, Search, X, Calendar, ArrowRightLeft } from 'lucide-react'
 import CashModal from './CashModal'
 import TransferModal from './TransferModal'
 import { useAuth } from '@/lib/auth-context'
+import SortIcon from '@/components/SortIcon'
 
 type SourceFilter = 'all' | 'manual' | 'renda' | 'despesa' | 'documento' | 'transferencia_banco'
 type SortField = 'movement_date' | 'description' | 'type' | 'source' | 'amount' | 'notes'
@@ -37,8 +38,6 @@ export default function CaixaPage() {
   const today = new Date()
   const currentMonthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`
   const [selectedMonth, setSelectedMonth] = useState<string>(currentMonthStr)
-
-  useEffect(() => { fetchData() }, [])
 
   const cashStartDate = process.env.NEXT_PUBLIC_CASH_FUND_START_DATE ?? null
 
@@ -75,13 +74,6 @@ export default function CaixaPage() {
   function handleSort(field: SortField) {
     if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
     else { setSortField(field); setSortDir('asc') }
-  }
-
-  function SortIcon({ field }: { field: SortField }) {
-    if (sortField !== field) return <ChevronsUpDown className="w-3 h-3 ml-1 text-gray-400 inline" />
-    return sortDir === 'asc'
-      ? <ChevronUp className="w-3 h-3 ml-1 text-emerald-600 inline" />
-      : <ChevronDown className="w-3 h-3 ml-1 text-emerald-600 inline" />
   }
 
   const monthOptions = useMemo(() => {
@@ -150,6 +142,8 @@ export default function CaixaPage() {
   ]
 
   const thClass = 'px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide cursor-pointer select-none hover:text-gray-700 whitespace-nowrap'
+
+  useEffect(() => { fetchData() }, [])
 
   return (
     <AppLayout>
@@ -303,22 +297,22 @@ export default function CaixaPage() {
               <thead className="bg-gray-50 border-b border-gray-100">
                 <tr>
                   <th className={thClass} style={{ width: '100px' }} onClick={() => handleSort('movement_date')}>
-                    Data <SortIcon field="movement_date" />
+                    Data <SortIcon field="movement_date" sortField={sortField} sortDir={sortDir} variant="chevron" />
                   </th>
                   <th className={thClass} onClick={() => handleSort('description')}>
-                    Descrição <SortIcon field="description" />
+                    Descrição <SortIcon field="description" sortField={sortField} sortDir={sortDir} variant="chevron" />
                   </th>
                   <th className={thClass} style={{ width: '110px' }} onClick={() => handleSort('type')}>
-                    Tipo <SortIcon field="type" />
+                    Tipo <SortIcon field="type" sortField={sortField} sortDir={sortDir} variant="chevron" />
                   </th>
                   <th className={thClass} style={{ width: '110px' }} onClick={() => handleSort('source')}>
-                    Origem <SortIcon field="source" />
+                    Origem <SortIcon field="source" sortField={sortField} sortDir={sortDir} variant="chevron" />
                   </th>
                   <th className={thClass} style={{ width: '100px' }} onClick={() => handleSort('amount')}>
-                    Valor <SortIcon field="amount" />
+                    Valor <SortIcon field="amount" sortField={sortField} sortDir={sortDir} variant="chevron" />
                   </th>
                   <th className={thClass} style={{ width: '200px' }} onClick={() => handleSort('notes')}>
-                    Notas <SortIcon field="notes" />
+                    Notas <SortIcon field="notes" sortField={sortField} sortDir={sortDir} variant="chevron" />
                   </th>
                   {(isAdmin || isCoAdmin) && <th className="px-3 py-2" style={{ width: '40px' }} />}
                 </tr>
