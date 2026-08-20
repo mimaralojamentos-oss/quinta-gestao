@@ -40,6 +40,48 @@ interface Contrato {
   space: any
 }
 
+// ------------------------------------------------------------ associação bancária
+// Ver o topo do pedido original para o modelo completo — a ligação
+// documento ↔ banco não vive na tabela documents, vive do lado do banco
+// (bank_transactions.confirmed_*) e em tabelas intermédias (expenses,
+// income_records, cash_fund_movements). Estes tipos só têm os campos que
+// precisamos para calcular o estado de cada documento.
+
+/** Uma transação bancária já confirmada, ligada a documento, despesa ou receita. */
+interface BankTxAssoc {
+  id: string
+  bank_id: string
+  transaction_date: string
+  description: string
+  amount: number
+  confirmed_document_id: string | null
+  confirmed_expense_id: string | null
+  confirmed_income_id: string | null
+}
+
+interface ExpenseLite {
+  id: string
+  payment_method: string | null
+  bank_transaction_id: string | null
+}
+
+interface IncomeLite {
+  id: string
+  document_id: string | null
+}
+
+interface CashMovLite {
+  source_id: string
+  bank_transaction_id: string | null
+}
+
+type BankStatusValue = 'banco' | 'numerario' | 'sem' | 'na'
+
+interface BankStatus {
+  estado: BankStatusValue
+  tx?: BankTxAssoc
+}
+
 interface DeleteConfirm {
   doc: Document
   hasExpense: boolean
@@ -62,8 +104,19 @@ interface UploadResult {
   detectedTipo?: string
 }
 
-type SortField = 'tipo' | 'nome' | 'associado' | 'data' | 'valor' | 'despesa' | 'carregado' | null
+type SortField = 'tipo' | 'nome' | 'associado' | 'data' | 'valor' | 'despesa' | 'banco' | 'carregado' | null
 type SortDir = 'asc' | 'desc'
+
+// Ordem de "importância" do estado bancário, para a coluna ser ordenável.
+// "Sem associação" primeiro — é o que se quer encontrar mais depressa.
+const bankStatusRank: Record<BankStatusValue, number> = { sem: 0, numerario: 1, na: 2, banco: 3 }
+
+const bankStatusLabels: Record<BankStatusValue, string> = {
+  banco: '✅ Banco',
+  numerario: '💵 Numerário',
+  sem: '⚠ Não',
+  na: '—',
+}
 
 const tipoLabels: Record<string, string> = {
   fatura: '🧾 Fatura',
@@ -95,6 +148,12 @@ export default function DocumentosPage() {
   const [contracts, setContracts] = useState<Contrato[]>([])
   const [loading, setLoading] = useState(true)
 
+  // Dados para calcular a associação bancária de cada documento (ver getBankStatus).
+  const [bankTransactions, setBankTransactions] = useState<BankTxAssoc[]>([])
+  const [expensesLite, setExpensesLite] = useState<ExpenseLite[]>([])
+  const [incomeRecordsLite, setIncomeRecordsLite] = useState<IncomeLite[]>([])
+  const [cashMovementsLite, setCashMovementsLite] = useState<CashMovLite[]>([])
+
   const [search, setSearch] = useState('')
   const [filterTipo, setFilterTipo] = useState('all')
   const [filterDateStart, setFilterDateStart] = useState('')
@@ -102,6 +161,7 @@ export default function DocumentosPage() {
   const [filterValueMin, setFilterValueMin] = useState('')
   const [filterValueMax, setFilterValueMax] = useState('')
   const [filterDespesa, setFilterDespesa] = useState('all')
+  const [filterBanco, setFilterBanco] = useState('all')
   const [showFilters, setShowFilters] = useState(false)
 
   const [sortField, setSortField] = useState<SortField>('carregado')
@@ -162,10 +222,24 @@ export default function DocumentosPage() {
 
   async function fetchAll() {
     setLoading(true)
-    const { data: docs } = await supabase.from('documents').select('*').eq('status', 'ativo').order('created_at', { ascending: false })
-    const { data: leases } = await supabase.from('leases').select('id, contract_file_path, start_date, tenant:tenants(name), space:spaces(ref)').not('contract_file_path', 'is', null)
-    setDocuments(docs ?? [])
-    setContracts((leases ?? []) as Contrato[])
+    const [docsRes, leasesRes, bankTxRes, expensesRes, incomeRes, cashRes] = await Promise.all([
+      supabase.from('documents').select('*').eq('status', 'ativo').order('created_at', { ascending: false }),
+      supabase.from('leases').select('id, contract_file_path, start_date, tenant:tenants(name), space:spaces(ref)').not('contract_file_path', 'is', null),
+      // Só as transações já ligadas a um documento, despesa ou receita — mesmo
+      // padrão de consulta já usado em components/BankMatchModal.tsx.
+      supabase.from('bank_transactions')
+        .select('id, bank_id, transaction_date, description, amount, confirmed_document_id, confirmed_expense_id, confirmed_income_id')
+        .or('confirmed_document_id.not.is.null,confirmed_expense_id.not.is.null,confirmed_income_id.not.is.null'),
+      supabase.from('expenses').select('id, payment_method, bank_transaction_id'),
+      supabase.from('income_records').select('id, document_id').not('document_id', 'is', null),
+      supabase.from('cash_fund_movements').select('source_id, bank_transaction_id').eq('source', 'documento'),
+    ])
+    setDocuments(docsRes.data ?? [])
+    setContracts((leasesRes.data ?? []) as Contrato[])
+    setBankTransactions(bankTxRes.data ?? [])
+    setExpensesLite(expensesRes.data ?? [])
+    setIncomeRecordsLite(incomeRes.data ?? [])
+    setCashMovementsLite(cashRes.data ?? [])
     setLoading(false)
   }
 
@@ -445,7 +519,8 @@ async function handleSaveEdit() {
 
   function clearFilters() {
     setSearch(''); setFilterTipo('all'); setFilterDateStart('')
-    setFilterDateEnd(''); setFilterValueMin(''); setFilterValueMax(''); setFilterDespesa('all')
+    setFilterDateEnd(''); setFilterValueMin(''); setFilterValueMax('')
+    setFilterDespesa('all'); setFilterBanco('all')
   }
 
   // ------------------------------------------------------------ mudar tipo
@@ -484,7 +559,70 @@ async function handleSaveEdit() {
     await fetchAll()
   }
 
-  const hasActiveFilters = !!(search || filterTipo !== 'all' || filterDateStart || filterDateEnd || filterValueMin || filterValueMax || filterDespesa !== 'all')
+  const hasActiveFilters = !!(search || filterTipo !== 'all' || filterDateStart || filterDateEnd || filterValueMin || filterValueMax || filterDespesa !== 'all' || filterBanco !== 'all')
+
+  // ------------------------------------------------------------ associação bancária
+  // Mapas construídos a partir dos dados já carregados — o estado de cada
+  // documento fica um simples lookup, sem mais nenhuma consulta à base de dados.
+  const bankTxById = new Map(bankTransactions.map(t => [t.id, t]))
+  const bankTxByDocId = new Map(bankTransactions.filter(t => t.confirmed_document_id).map(t => [t.confirmed_document_id as string, t]))
+  const bankTxByExpenseId = new Map(bankTransactions.filter(t => t.confirmed_expense_id).map(t => [t.confirmed_expense_id as string, t]))
+  const bankTxByIncomeId = new Map(bankTransactions.filter(t => t.confirmed_income_id).map(t => [t.confirmed_income_id as string, t]))
+  const expenseById = new Map(expensesLite.map(e => [e.id, e]))
+  const incomeIdByDocId = new Map(incomeRecordsLite.filter(r => r.document_id).map(r => [r.document_id as string, r.id]))
+  const cashMovByDocId = new Map(cashMovementsLite.filter(m => m.bank_transaction_id).map(m => [m.source_id, m]))
+
+  /**
+   * Estado de associação bancária de um documento. A ligação não vive na
+   * tabela documents — vive do lado do banco (bank_transactions.confirmed_*)
+   * e em tabelas intermédias (expenses, income_records, cash_fund_movements).
+   * Ordem de verificação, da ligação mais direta para a mais indireta:
+   *   1. bank_transactions.confirmed_document_id aponta para este documento
+   *   2. o documento tem despesa, e essa despesa está ligada a um movimento
+   *   3. (receitas) o documento gerou um income_record já confirmado no banco
+   *   4. (transferências internas) o movimento de caixa já foi confirmado no banco
+   */
+  function getBankStatus(doc: Document): BankStatus {
+    // Cartas e registos prediais nunca têm contrapartida financeira; sem
+    // valor não há nada para reconciliar.
+    if (doc.tipo === 'carta' || doc.tipo === 'registo_predial') return { estado: 'na' }
+    if (doc.amount == null) return { estado: 'na' }
+
+    // 1. Ligação direta documento → transação bancária
+    const direta = bankTxByDocId.get(doc.id)
+    if (direta) return { estado: 'banco', tx: direta }
+
+    // 2. Via despesa associada ao documento
+    if (doc.expense_id) {
+      const viaDespesa = bankTxByExpenseId.get(doc.expense_id)
+      if (viaDespesa) return { estado: 'banco', tx: viaDespesa }
+
+      const despesa = expenseById.get(doc.expense_id)
+      if (despesa?.bank_transaction_id) {
+        return { estado: 'banco', tx: bankTxById.get(despesa.bank_transaction_id) }
+      }
+      if (despesa?.payment_method === 'dinheiro') return { estado: 'numerario' }
+    }
+
+    // 3. Receita — via income_records
+    if (doc.tipo === 'receita') {
+      const incomeId = incomeIdByDocId.get(doc.id)
+      if (incomeId) {
+        const viaReceita = bankTxByIncomeId.get(incomeId)
+        if (viaReceita) return { estado: 'banco', tx: viaReceita }
+      }
+    }
+
+    // 4. Transferência interna — via movimento de caixa já confirmado no banco
+    if (doc.tipo === 'transferencia_interna') {
+      const movimento = cashMovByDocId.get(doc.id)
+      if (movimento?.bank_transaction_id) {
+        return { estado: 'banco', tx: bankTxById.get(movimento.bank_transaction_id) }
+      }
+    }
+
+    return { estado: 'sem' }
+  }
 
   const allDocs = [
     ...contracts.map(c => ({
@@ -495,17 +633,22 @@ async function handleSaveEdit() {
       _amount: null as number | null, _expense_id: null,
       _doc: null as Document | null, _contrato: c,
       _descricao: '', _created_at: '',
+      _bankEstado: 'na' as BankStatusValue, _bankTx: undefined as BankTxAssoc | undefined,
     })),
-    ...documents.map(d => ({
-      _tipo: d.tipo, _id: d.id,
-      _nome: d.original_name ?? d.file_path.split('/').pop() ?? '—',
-      _associado: d.supplier_name ?? d.items_summary ?? '—',
-      _data: d.doc_date, _path: d.file_path,
-      _amount: d.amount, _expense_id: d.expense_id,
-      _doc: d, _contrato: null,
-      _descricao: d.items_summary ?? '',
-      _created_at: d.created_at,
-    })),
+    ...documents.map(d => {
+      const banco = getBankStatus(d)
+      return {
+        _tipo: d.tipo, _id: d.id,
+        _nome: d.original_name ?? d.file_path.split('/').pop() ?? '—',
+        _associado: d.supplier_name ?? d.items_summary ?? '—',
+        _data: d.doc_date, _path: d.file_path,
+        _amount: d.amount, _expense_id: d.expense_id,
+        _doc: d, _contrato: null,
+        _descricao: d.items_summary ?? '',
+        _created_at: d.created_at,
+        _bankEstado: banco.estado, _bankTx: banco.tx,
+      }
+    }),
   ]
 
   const filtered = allDocs.filter(d => {
@@ -520,6 +663,9 @@ async function handleSaveEdit() {
     if (filterValueMax && (d._amount == null || d._amount > parseFloat(filterValueMax))) return false
     if (filterDespesa === 'sim' && !d._expense_id) return false
     if (filterDespesa === 'nao' && d._expense_id) return false
+    if (filterBanco === 'sim' && d._bankEstado !== 'banco') return false
+    if (filterBanco === 'nao' && d._bankEstado !== 'sem') return false
+    if (filterBanco === 'numerario' && d._bankEstado !== 'numerario') return false
     return true
   }).sort((a, b) => {
     const dir = sortDir === 'asc' ? 1 : -1
@@ -532,6 +678,7 @@ async function handleSaveEdit() {
     }
     if (sortField === 'valor') return dir * ((a._amount ?? 0) - (b._amount ?? 0))
     if (sortField === 'despesa') return dir * ((a._expense_id ? 1 : 0) - (b._expense_id ? 1 : 0))
+    if (sortField === 'banco') return dir * (bankStatusRank[a._bankEstado] - bankStatusRank[b._bankEstado])
     if (sortField === 'carregado') {
       if (!a._created_at) return 1; if (!b._created_at) return -1
       return dir * a._created_at.localeCompare(b._created_at)
@@ -596,7 +743,7 @@ async function handleSaveEdit() {
                 value={search} onChange={e => setSearch(e.target.value)} />
             </div>
             <button onClick={() => setShowFilters(!showFilters)}
-              className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-colors flex-shrink-0 ${showFilters || filterDateStart || filterDateEnd || filterValueMin || filterValueMax || filterDespesa !== 'all' ? 'bg-blue-50 border-blue-200 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+              className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-colors flex-shrink-0 ${showFilters || filterDateStart || filterDateEnd || filterValueMin || filterValueMax || filterDespesa !== 'all' || filterBanco !== 'all' ? 'bg-blue-50 border-blue-200 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
               <Filter className="w-4 h-4" />
               Filtros
               {showFilters ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
@@ -624,6 +771,15 @@ async function handleSaveEdit() {
                   <option value="all">Todas</option>
                   <option value="sim">✅ Com despesa</option>
                   <option value="nao">⚠ Sem despesa</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 block mb-1.5">Associação bancária</label>
+                <select className="input text-sm w-full" value={filterBanco} onChange={e => setFilterBanco(e.target.value)}>
+                  <option value="all">Todas</option>
+                  <option value="sim">✅ Com associação</option>
+                  <option value="nao">⚠ Sem associação</option>
+                  <option value="numerario">💵 Pagos em numerário</option>
                 </select>
               </div>
               <div>
@@ -668,6 +824,7 @@ async function handleSaveEdit() {
                   <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('carregado')}>Carregado em <SortIcon field="carregado" sortField={sortField} sortDir={sortDir} /></th>
                   <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('valor')}>Valor <SortIcon field="valor" sortField={sortField} sortDir={sortDir} /></th>
                   <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('despesa')}>Despesa <SortIcon field="despesa" sortField={sortField} sortDir={sortDir} /></th>
+                  <th className="table-header cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('banco')}>Banco <SortIcon field="banco" sortField={sortField} sortDir={sortDir} /></th>
                   <th className="table-header"></th>
                 </tr>
               </thead>
@@ -718,6 +875,23 @@ async function handleSaveEdit() {
                             ⚠ Não
                           </button>
                         ) : <span className="text-xs text-yellow-600">⚠ Não</span>}
+                    </td>
+                    <td className="table-cell">
+                      {doc._bankEstado === 'banco' && doc._bankTx ? (
+                        <Link href={`/financeiro/bancos/${doc._bankTx.bank_id}`}
+                          title={`${formatDate(doc._bankTx.transaction_date)} · ${doc._bankTx.description} · ${formatCurrency(doc._bankTx.amount)}`}
+                          className="text-xs text-emerald-600 font-medium hover:underline">
+                          {bankStatusLabels.banco}
+                        </Link>
+                      ) : doc._bankEstado === 'numerario' ? (
+                        <span className="text-xs text-gray-500" title="Pago em dinheiro — nunca aparece no extrato bancário">
+                          {bankStatusLabels.numerario}
+                        </span>
+                      ) : doc._bankEstado === 'sem' ? (
+                        <span className="text-xs text-yellow-600 font-medium">{bankStatusLabels.sem}</span>
+                      ) : (
+                        <span className="text-xs text-gray-400">{bankStatusLabels.na}</span>
+                      )}
                     </td>
                     <td className="table-cell">
                       <div className="flex items-center gap-2">
