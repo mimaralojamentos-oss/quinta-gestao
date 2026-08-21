@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Tenant, Lease, Space } from '@/lib/types'
 import { X, Upload, FileText, Loader2, Sparkles } from 'lucide-react'
-import { formatCurrency, openStorageDocument } from '@/lib/utils'
+import { formatCurrency, openStorageDocument, slugifyFilename } from '@/lib/utils'
 import { logAccess } from '@/lib/logAccess'
 import { useFileDrop } from '@/lib/useFileDrop'
 
@@ -141,7 +141,7 @@ export default function LeaseModal({ tenant, onClose, onSaved }: Props) {
     let contractPath = existingLease?.contract_file_path ?? null
 
     if (contractFile) {
-      const safeName = contractFile.name.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9._-]/g, '_')
+      const safeName = slugifyFilename(contractFile.name, { allowDot: true })
       const filename = `contracts/${tenant.id}/${Date.now()}_${safeName}`
       const { error: uploadErr } = await supabase.storage
         .from('documents')

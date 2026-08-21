@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { X, Download, CheckCircle, Loader2 } from 'lucide-react'
 import { logAccess } from '@/lib/logAccess'
+import { slugifyFilename } from '@/lib/utils'
 
 interface Props {
   onClose: () => void
@@ -199,7 +200,7 @@ export default function ManualDocumentModal({ onClose, onSaved }: Props) {
       const fileHash = await computeHash(blob)
 
       // 3. Upload to storage
-      const safeName = form.supplier.trim().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 30)
+      const safeName = slugifyFilename(form.supplier.trim(), { maxLength: 30 })
       const fileName = `manual/${form.doc_date}_${safeName}_${autoDocNum}.pdf`
 
       const { error: uploadErr } = await supabase.storage

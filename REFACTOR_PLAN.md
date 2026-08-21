@@ -6,7 +6,7 @@
 
 - [x] **Passo 1** — `getTenantName`/`getSpaceRef` → `lib/utils.ts` (item 16) — commit feito
 - [x] **Passo 2** — Abrir documento do storage → helper único (item 17) — commit feito
-- [ ] Passo 3 — Nome de ficheiro sem acentos → helper único (item 18)
+- [x] **Passo 3** — Nome de ficheiro sem acentos → helper único (item 18) — commit feito
 - [ ] Passo 4 — `handleSort` → hook `useSort` (item 15)
 - [ ] Passo 5 — Apagar despesa com segurança → helper único (item 1)
 - [ ] Passo 6 — Datas por extenso → `getMonthLabel`/`formatMonthShort` (item 14)

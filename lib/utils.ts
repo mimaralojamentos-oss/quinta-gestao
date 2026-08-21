@@ -130,6 +130,19 @@ export async function openStorageDocument(supabase: any, path: string): Promise<
 }
 
 /**
+ * Limpa um texto para poder ser usado num nome de ficheiro: tira acentos e
+ * troca por "_" tudo o que não seja letra, número (e, se `allowDot`, ponto).
+ * Ao contrário de `normalizeText`, preserva maiúsculas/minúsculas — é para
+ * nomes de ficheiro, não para comparar texto em pesquisas.
+ */
+export function slugifyFilename(texto: string, options: { allowDot?: boolean; maxLength?: number } = {}): string {
+  const semAcentos = String(texto).normalize('NFD').replace(/[̀-ͯ]/g, '')
+  const pattern = options.allowDot ? /[^a-zA-Z0-9._-]/g : /[^a-zA-Z0-9_-]/g
+  const limpo = semAcentos.replace(pattern, '_')
+  return options.maxLength ? limpo.slice(0, options.maxLength) : limpo
+}
+
+/**
  * Versão comparável de um texto para pesquisas: sem acentos e em minúsculas.
  *
  * Serve para "rogerio" encontrar "Rogério", "joao" encontrar "João" e

@@ -3,7 +3,7 @@
 import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState, use } from 'react'
 import { createClient } from '@/lib/supabase-client'
-import { formatCurrency, formatDate, openStorageDocument } from '@/lib/utils'
+import { formatCurrency, formatDate, openStorageDocument, slugifyFilename } from '@/lib/utils'
 
 import {
   calcularConta, calcularHoras, formatarHoras, tarifaDoDia, ehDiaEspecial,
@@ -293,7 +293,7 @@ export default function TrabalhadorPage({ params }: { params: Promise<{ id: stri
       let documentoId: string | null = null
       try {
         const blob = await gerarRecibo(numero, valor, data, notas)
-        const nomeLimpo = worker.name.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 30)
+        const nomeLimpo = slugifyFilename(worker.name, { maxLength: 30 })
         const caminho = `recibos/${data}_${nomeLimpo}_${numero}.pdf`
 
         const { error: errUpload } = await supabase.storage
