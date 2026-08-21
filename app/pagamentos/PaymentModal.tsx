@@ -8,28 +8,13 @@ import DestinoPagamentoPicker from '@/components/DestinoPagamentoPicker'
 import { X, Pencil, Trash2, AlertTriangle } from 'lucide-react'
 import { logAccess } from '@/lib/logAccess'
 import { consumeAdvances } from '@/lib/advanceCredit'
+import { PAYMENT_TYPES, PAYMENT_TYPE_LABELS } from '@/lib/paymentTypes'
 
 interface Props {
   lease: any
   currentMonth: string
   onClose: () => void
   onSaved: () => void
-}
-
-const tipoConfig = {
-  renda:  { label: '🏠 Renda', color: 'bg-emerald-600 text-white border-emerald-600' },
-  caucao: { label: '🔒 Caução / Sinal', color: 'bg-blue-600 text-white border-blue-600' },
-  extra:  { label: '➕ Extra', color: 'bg-orange-500 text-white border-orange-500' },
-  luz:    { label: '⚡ Luz', color: 'bg-yellow-500 text-white border-yellow-500' },
-  adiantamento: { label: '💰 Adiantamento', color: 'bg-purple-600 text-white border-purple-600' },
-}
-
-const tipoLabels: Record<string, string> = {
-  renda: '🏠 Renda',
-  caucao: '🔒 Caução',
-  extra: '➕ Extra',
-  luz: '⚡ Luz',
-  adiantamento: '💰 Adiantamento',
 }
 
 interface DebtItem {
@@ -344,7 +329,7 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
     if (!confirm('Tens a certeza que queres apagar este pagamento?')) return
     await supabase.from('cash_fund_movements').delete().eq('source_id', p.id)
     await supabase.from('rent_payments').delete().eq('id', p.id)
-    await logAccess({ action: 'apagar', page: '/pagamentos', details: `Apagou pagamento de ${tipoLabels[p.tipo] ?? p.tipo} (${formatCurrency(p.amount)}) de ${lease.tenant?.name} (${lease.space?.ref})` })
+    await logAccess({ action: 'apagar', page: '/pagamentos', details: `Apagou pagamento de ${PAYMENT_TYPE_LABELS[p.tipo] ?? p.tipo} (${formatCurrency(p.amount)}) de ${lease.tenant?.name} (${lease.space?.ref})` })
     onSaved()
   }
 
@@ -368,12 +353,12 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
           await supabase.from('cash_fund_movements').update({
             amount: parseFloat(form.amount),
             movement_date: form.payment_date,
-            description: `${tipoLabels[form.tipo] ?? 'Renda'} — ${lease.space?.ref} (${lease.tenant?.name})`,
+            description: `${PAYMENT_TYPE_LABELS[form.tipo] ?? 'Renda'} — ${lease.space?.ref} (${lease.tenant?.name})`,
           }).eq('id', existingCash.data.id)
         } else {
           await supabase.from('cash_fund_movements').insert({
             movement_date: form.payment_date,
-            description: `${tipoLabels[form.tipo] ?? 'Renda'} — ${lease.space?.ref} (${lease.tenant?.name})`,
+            description: `${PAYMENT_TYPE_LABELS[form.tipo] ?? 'Renda'} — ${lease.space?.ref} (${lease.tenant?.name})`,
             amount: parseFloat(form.amount),
             type: 'entrada',
             source: 'renda',
@@ -384,7 +369,7 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
         if (existingCash.data) await supabase.from('cash_fund_movements').delete().eq('id', existingCash.data.id)
       }
 
-      await logAccess({ action: 'editar', page: '/pagamentos', details: `Editou pagamento de ${tipoLabels[form.tipo] ?? form.tipo} (${formatCurrency(parseFloat(form.amount))}) de ${lease.tenant?.name} (${lease.space?.ref})` })
+      await logAccess({ action: 'editar', page: '/pagamentos', details: `Editou pagamento de ${PAYMENT_TYPE_LABELS[form.tipo] ?? form.tipo} (${formatCurrency(parseFloat(form.amount))}) de ${lease.tenant?.name} (${lease.space?.ref})` })
     } else if (form.tipo === 'renda') {
       const amount = parseFloat(form.amount)
       const plan = await buildRentPaymentPlan(supabase, {
@@ -467,7 +452,7 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
       if (form.payment_method === 'dinheiro' && newPayment) {
         await supabase.from('cash_fund_movements').insert({
           movement_date: form.payment_date,
-          description: `${tipoLabels[form.tipo] ?? 'Renda'} — ${lease.space?.ref} (${lease.tenant?.name})`,
+          description: `${PAYMENT_TYPE_LABELS[form.tipo] ?? 'Renda'} — ${lease.space?.ref} (${lease.tenant?.name})`,
           amount: parseFloat(form.amount),
           type: 'entrada',
           source: 'renda',
@@ -475,7 +460,7 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
         })
       }
 
-      await logAccess({ action: 'criar', page: '/pagamentos', details: `Registou pagamento de ${tipoLabels[form.tipo] ?? form.tipo} (${formatCurrency(parseFloat(form.amount))}) de ${lease.tenant?.name} (${lease.space?.ref})` })
+      await logAccess({ action: 'criar', page: '/pagamentos', details: `Registou pagamento de ${PAYMENT_TYPE_LABELS[form.tipo] ?? form.tipo} (${formatCurrency(parseFloat(form.amount))}) de ${lease.tenant?.name} (${lease.space?.ref})` })
     }
 
     setSaving(false)
@@ -631,7 +616,7 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
                     <div key={p.id} className={`flex justify-between items-center text-sm py-1.5 px-2 rounded-lg mb-1 ${editingPayment?.id === p.id ? 'bg-emerald-50 border border-emerald-200' : 'hover:bg-gray-100'}`}>
                       <div className="flex items-center gap-2">
                         <span className="text-gray-700">{formatDate(p.payment_date)}</span>
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-gray-200 text-gray-600">{tipoLabels[p.tipo] ?? p.tipo}</span>
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-gray-200 text-gray-600">{PAYMENT_TYPE_LABELS[p.tipo] ?? p.tipo}</span>
                         <span className={`text-xs px-1.5 py-0.5 rounded-full ${p.payment_method === 'dinheiro' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
                           {p.payment_method === 'dinheiro' ? '💵' : '🏦'}
                         </span>
@@ -657,10 +642,10 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
                 <div>
                   <label className="label">Tipo de Pagamento</label>
                   <div className="grid grid-cols-2 gap-2 mt-1">
-                    {Object.entries(tipoConfig).map(([key, cfg]) => (
-                      <button key={key} onClick={() => setForm(f => ({ ...f, tipo: key }))}
-                        className={`py-2 rounded-lg border text-sm font-medium transition-colors ${form.tipo === key ? cfg.color : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
-                        {cfg.label}
+                    {PAYMENT_TYPES.map(t => (
+                      <button key={t.value} onClick={() => setForm(f => ({ ...f, tipo: t.value }))}
+                        className={`py-2 rounded-lg border text-sm font-medium transition-colors ${form.tipo === t.value ? t.color : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
+                        {t.buttonLabel}
                       </button>
                     ))}
                   </div>

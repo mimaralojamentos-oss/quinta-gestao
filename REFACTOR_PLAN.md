@@ -12,7 +12,7 @@
 - [x] **Passo 6** — Datas por extenso → `getMonthLabel`/`formatMonthShort` (item 14) — commit feito. Levantamento de órfãos pedido no fim do Passo 5: 0 encontrados (24 movimentos de caixa por despesa, 167 documentos com expense_id, todos com destino válido).
 - [x] **Passo 7** — Moeda em templates → `formatCurrency` (item 19) — commit feito
 - [x] **Passo 8** — Categorias de despesa → lista única + corrigir `types.ts` + `despesas/page.tsx` (itens 2, 11) — commit feito
-- [ ] Passo 9 — Etiquetas de tipo de pagamento → lista única (item 13)
+- [x] **Passo 9** — Etiquetas de tipo de pagamento → lista única (item 13) — commit feito
 - [ ] Passo 10 — `getDebtRemaining` → helper único (item 12)
 - [ ] Passo 11 — Critério de duplicado em leituras de contador → unificar (item 6)
 - [ ] Passo 12 — Cálculo "rendas em falta mês a mês" → função única (item 7)

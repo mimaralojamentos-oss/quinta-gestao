@@ -10,6 +10,7 @@ import AdvancePaymentModal from './AdvancePaymentModal'
 import { useAuth } from '@/lib/auth-context'
 import SortIcon from '@/components/SortIcon'
 import { useSort } from '@/lib/useSort'
+import { PAYMENT_TYPE_LABELS } from '@/lib/paymentTypes'
 
 interface LeaseWithDetails {
   id: string
@@ -26,14 +27,6 @@ interface LeaseWithDetails {
   }[]
   balance: number
   total_debt: number
-}
-
-const tipoLabels: Record<string, string> = {
-  renda: '🏠 Renda',
-  caucao: '🔒 Caução',
-  extra: '➕ Extra',
-  luz: '⚡ Luz',
-  adiantamento: '💰 Adiantamento',
 }
 
 type SortField = 'space' | 'tenant' | 'rent' | 'state' | 'balance' | 'debt' | null
@@ -400,7 +393,7 @@ export default function PagamentosPage() {
                                   {p.payment_method === 'dinheiro' ? '💵' : '🏦'}
                                 </span>
                                 <span className={`text-xs px-2 py-0.5 rounded-full ${p.tipo === 'caucao' ? 'bg-blue-100 text-blue-700' : p.tipo === 'extra' ? 'bg-orange-100 text-orange-700' : p.tipo === 'luz' ? 'bg-yellow-100 text-yellow-700' : p.tipo === 'adiantamento' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-600'}`}>
-                                  {tipoLabels[p.tipo] ?? '🏠 Renda'}
+                                  {PAYMENT_TYPE_LABELS[p.tipo] ?? '🏠 Renda'}
                                 </span>
                               </div>
                             ))}
