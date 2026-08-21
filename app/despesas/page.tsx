@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { Expense } from '@/lib/types'
 import { formatCurrency, formatDate, categoryLabel, matchesSearch, openStorageDocument, deleteExpenseSafely, getMonthLabel } from '@/lib/utils'
+import { EXPENSE_CATEGORIES } from '@/lib/expenseCategories'
 import { Plus, Search, Trash2, X, SlidersHorizontal, Eye, ChevronDown as ChevronDownIcon, Copy, CopyPlus } from 'lucide-react'
 import ExpenseModal from './ExpenseModal'
 import CopiarDespesasModal from './CopiarDespesasModal'
@@ -238,11 +239,7 @@ function DespesasContent() {
   const filteredCash = filtered.filter(e => e.payment_method === 'dinheiro').reduce((s, e) => s + e.amount, 0)
   const filteredBank = filtered.filter(e => e.payment_method !== 'dinheiro').reduce((s, e) => s + e.amount, 0)
 
-  const categoryColors: Record<string, string> = {
-    obras: 'bg-orange-100 text-orange-700', edp: 'bg-yellow-100 text-yellow-700',
-    pessoal: 'bg-blue-100 text-blue-700', contabilidade: 'bg-purple-100 text-purple-700',
-    manutencao: 'bg-cyan-100 text-cyan-700', outros: 'bg-gray-100 text-gray-700',
-  }
+  const categoryColors: Record<string, string> = Object.fromEntries(EXPENSE_CATEGORIES.map(c => [c.value, c.color]))
 
   const monthOptions = (() => {
     const opts: { val: string; label: string }[] = []
@@ -376,12 +373,7 @@ function DespesasContent() {
             {/* Categoria */}
             <select className="input text-sm" value={filterCategory} onChange={e => setFilterCategory(e.target.value)}>
               <option value="all">Categoria</option>
-              <option value="obras">🏗️ Obras</option>
-              <option value="edp">⚡ Eletricidade</option>
-              <option value="pessoal">👤 Pessoal</option>
-              <option value="contabilidade">📊 Contabilidade</option>
-              <option value="manutencao">🔧 Manutenção</option>
-              <option value="outros">📦 Outros</option>
+              {EXPENSE_CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.filterLabel}</option>)}
             </select>
             {/* Projeto */}
             <select className="input text-sm" value={filterProject} onChange={e => setFilterProject(e.target.value)}>

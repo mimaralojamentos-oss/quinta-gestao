@@ -11,7 +11,7 @@
 - [x] **Passo 5** — Apagar despesa com segurança → helper único (item 1) — commit feito
 - [x] **Passo 6** — Datas por extenso → `getMonthLabel`/`formatMonthShort` (item 14) — commit feito. Levantamento de órfãos pedido no fim do Passo 5: 0 encontrados (24 movimentos de caixa por despesa, 167 documentos com expense_id, todos com destino válido).
 - [x] **Passo 7** — Moeda em templates → `formatCurrency` (item 19) — commit feito
-- [ ] Passo 8 — Categorias de despesa → lista única + corrigir `types.ts` + `despesas/page.tsx` (itens 2, 11)
+- [x] **Passo 8** — Categorias de despesa → lista única + corrigir `types.ts` + `despesas/page.tsx` (itens 2, 11) — commit feito
 - [ ] Passo 9 — Etiquetas de tipo de pagamento → lista única (item 13)
 - [ ] Passo 10 — `getDebtRemaining` → helper único (item 12)
 - [ ] Passo 11 — Critério de duplicado em leituras de contador → unificar (item 6)
@@ -191,6 +191,8 @@ Decidido em 2026-08-21: unificar para "Julho 2026" (o formato que `getMonthLabel
 Decidido em 2026-08-21: mesmo critério do Passo 6 — unificar com `formatCurrency`. O texto muda nestes 8 sítios (`relatorios.tsx` x5, `eletricidade/espacos.tsx` x3): vírgula decimal em vez de ponto, e espaço a separar milhares em valores acima de 1000€. O helper `eur()` local em `api/compose-email/route.ts` já produzia texto idêntico ao `formatCurrency` para valores pequenos — só diverge (sem separador de milhares) em valores grandes, por isso foi unificado também.
 
 Nota à parte (não corrigida neste passo, fora de âmbito): `app/relatorios/page.tsx` tem uma terceira forma de mostrar moeda, `fmt()` (linha ~727, usa `toLocaleString` em vez de `Intl.NumberFormat`) — produz o mesmo resultado que `formatCurrency`, só o caminho de código é diferente. Fica registado para uma limpeza futura, não fazia parte do que este passo cobria.
+
+**Passo 8 — nota sobre estilo visual preservado.** A app tinha 2 estilos diferentes para mostrar a categoria: os formulários de criar/editar despesa (sem emoji, ex. "Eletricidade (EDP)") e o filtro da página de Despesas (com emoji, ex. "⚡ Eletricidade"). Em vez de unificar os dois (o que mudaria texto onde não havia bug), `lib/expenseCategories.ts` guarda os dois rótulos lado a lado (`label` e `filterLabel`) — cada sítio continua a mostrar exatamente o que mostrava antes, exceto "administracao", que estava mesmo em falta no filtro e nas cores da página de Despesas (o bug confirmado com dados reais: 10 despesas). Essa categoria ganha agora uma cor própria (cinza-azulado) em vez de cair na cor "outros" por omissão.
 
 ---
 

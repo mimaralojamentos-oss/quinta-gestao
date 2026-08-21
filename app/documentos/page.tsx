@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency, formatDate, formatDateTime, normalizeText, getTenantName, getSpaceRef, openStorageDocument, deleteExpenseSafely } from '@/lib/utils'
+import { EXPENSE_CATEGORIES } from '@/lib/expenseCategories'
 import { Search, FileText, Eye, FolderOpen, Trash2, X, Plus, Upload, Loader2, CheckCircle, AlertCircle, Edit2, Filter, ChevronDown, ChevronUp, Zap } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import { logAccess } from '@/lib/logAccess'
@@ -964,13 +965,7 @@ async function handleSaveEdit() {
               <div>
                 <label className="label">Categoria</label>
                 <select className="input" value={editForm.category} onChange={e => setEditForm((f: any) => ({ ...f, category: e.target.value }))}>
-                  <option value="administracao">Administração</option>
-                  <option value="obras">Obras</option>
-                  <option value="edp">Eletricidade (EDP)</option>
-                  <option value="pessoal">Pessoal</option>
-                  <option value="contabilidade">Contabilidade</option>
-                  <option value="manutencao">Manutenção</option>
-                  <option value="outros">Outros</option>
+                  {EXPENSE_CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
                 </select>
               </div>
               <div>

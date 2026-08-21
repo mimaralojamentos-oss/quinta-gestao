@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase-client'
 import { Expense } from '@/lib/types'
 import { X, Upload, FileText, Loader2, Sparkles, Search, Link } from 'lucide-react'
 import { formatCurrency, formatDate, matchesSearch } from '@/lib/utils'
+import { EXPENSE_CATEGORIES } from '@/lib/expenseCategories'
 import { logAccess } from '@/lib/logAccess'
 import { useFileDrop } from '@/lib/useFileDrop'
 
@@ -346,13 +347,7 @@ export default function ExpenseModal({ expense, duplicateFrom, onClose, onSaved 
             <div>
               <label className="label">Categoria</label>
               <select className="input" value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value as any }))}>
-                <option value="administracao">Administração</option>
-                <option value="obras">Obras</option>
-                <option value="edp">Eletricidade (EDP)</option>
-                <option value="pessoal">Pessoal</option>
-                <option value="contabilidade">Contabilidade</option>
-                <option value="manutencao">Manutenção</option>
-                <option value="outros">Outros</option>
+                {EXPENSE_CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
               </select>
             </div>
             <div>

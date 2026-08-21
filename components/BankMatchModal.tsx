@@ -11,6 +11,7 @@
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, formatDate, matchesSearch } from '@/lib/utils'
+import { EXPENSE_CATEGORIES } from '@/lib/expenseCategories'
 import { Search, X, Sparkles, FileText, CheckCircle } from 'lucide-react'
 import { mergeCategories, normalizeCategory } from '@/lib/incomeCategories'
 import { buildRentPaymentPlan, DESTINOS, type RentPaymentPlan, type DestinoPagamento } from '@/lib/rentPaymentPlan'
@@ -676,13 +677,7 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
                       <label className="label text-xs">Categoria</label>
                       <select className="input text-sm" value={newExpense.category}
                         onChange={e => setNewExpense(f => ({ ...f, category: e.target.value }))}>
-                        <option value="administracao">Administração</option>
-                        <option value="obras">Obras</option>
-                        <option value="edp">Eletricidade (EDP)</option>
-                        <option value="pessoal">Pessoal</option>
-                        <option value="contabilidade">Contabilidade</option>
-                        <option value="manutencao">Manutenção</option>
-                        <option value="outros">Outros</option>
+                        {EXPENSE_CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
                       </select>
                     </div>
                     <div>

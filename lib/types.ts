@@ -1,7 +1,9 @@
+import type { ExpenseCategoryValue } from './expenseCategories'
+
 export type SpaceType = 'pavilhao' | 'habitacao' | 'loja'
 export type SpaceStatus = 'arrendado' | 'disponivel'
 export type PaymentMethod = 'dinheiro' | 'banco' | 'transferencia'
-export type ExpenseCategory = 'obras' | 'edp' | 'pessoal' | 'contabilidade' | 'manutencao' | 'outros'
+export type ExpenseCategory = ExpenseCategoryValue
 export type ExpenseType = 'recorrente' | 'pontual'
 export type UserRole = 'admin' | 'coadmin' | 'viewer' | 'electrician' | 'super_reader'
 

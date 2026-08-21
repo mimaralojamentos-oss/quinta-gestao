@@ -1,5 +1,6 @@
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
+import { EXPENSE_CATEGORIES } from './expenseCategories'
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
@@ -93,15 +94,7 @@ export function spaceTypeLabel(type: string): string {
   return map[type] ?? type
 }
 export function categoryLabel(cat: string): string {
-  const map: Record<string, string> = {
-    obras: 'Obras',
-    edp: 'Eletricidade (EDP)',
-    pessoal: 'Pessoal',
-    contabilidade: 'Contabilidade',
-    manutencao: 'Manutenção',
-    outros: 'Outros',
-  }
-  return map[cat] ?? cat
+  return EXPENSE_CATEGORIES.find(c => c.value === cat)?.label ?? cat
 }
 
 /** Nome do inquilino a partir de um valor de join do Supabase (pode vir como objeto ou como array). */
