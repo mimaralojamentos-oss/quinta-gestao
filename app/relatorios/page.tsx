@@ -646,9 +646,7 @@ export default function RelatoriosPage() {
 
       // Normalizar electricity_charges para o mesmo formato que rent_payments
       const elecNorm = (elecData ?? []).map((e: any) => {
-        const refMonth = e.reference_month
-          ? new Date(e.reference_month).toLocaleDateString('pt-PT', { month: 'long', year: 'numeric' })
-          : null
+        const refMonth = e.reference_month ? getMonthLabel(e.reference_month) : null
         return {
           ...e,
           tipo: 'luz',
@@ -1729,7 +1727,7 @@ export default function RelatoriosPage() {
 
                     const groupsHtml = groups.map((g: any) => {
                       const rows = [...g.items].sort((a: any, b: any) => (a.reference_month ?? '').localeCompare(b.reference_month ?? '')).map((p: any) => {
-                        const mes = p.reference_month ? new Date(p.reference_month).toLocaleDateString('pt-PT', { month: 'long', year: 'numeric' }) : '—'
+                        const mes = getMonthLabel(p.reference_month)
                         const tipoLabel = TIPO_LABELS[p.tipo || 'renda'] ?? p.tipo ?? 'Renda'
                         const tipoColor = (p.tipo || 'renda') === 'renda' ? '#065f46;background:#d1fae5' : p.tipo === 'adiantamento' ? '#5b21b6;background:#ede9fe' : '#92400e;background:#fef3c7'
                         return `<tr>
@@ -1755,7 +1753,7 @@ export default function RelatoriosPage() {
 
                     const semDataHtml = withoutPayment.length > 0 ? `<div style="margin-bottom:16px;border:1px solid #fed7aa;border-radius:8px;overflow:hidden">
                       <div style="background:#fff7ed;padding:10px 14px;border-bottom:1px solid #fed7aa"><p style="font-size:13px;font-weight:600;color:#c2410c;margin:0">⚠ Sem data de pagamento registada</p></div>
-                      <table style="width:100%;border-collapse:collapse"><tbody>${withoutPayment.map((p: any) => `<tr><td style="padding:6px 8px">${p.reference_month ? new Date(p.reference_month).toLocaleDateString('pt-PT', { month: 'long', year: 'numeric' }) : '—'}</td><td style="padding:6px 8px;text-align:right;font-weight:600">${(p.amount ?? 0).toFixed(2)} €</td></tr>`).join('')}</tbody></table>
+                      <table style="width:100%;border-collapse:collapse"><tbody>${withoutPayment.map((p: any) => `<tr><td style="padding:6px 8px">${getMonthLabel(p.reference_month)}</td><td style="padding:6px 8px;text-align:right;font-weight:600">${(p.amount ?? 0).toFixed(2)} €</td></tr>`).join('')}</tbody></table>
                     </div>` : ''
 
                     const html = `<!DOCTYPE html><html lang="pt"><head><meta charset="UTF-8">
@@ -1854,9 +1852,7 @@ export default function RelatoriosPage() {
                                       <tr key={p.id} className="border-b border-gray-50 last:border-0 hover:bg-gray-50">
                                         <td className="py-2 px-4 text-gray-500 text-xs w-8">↳</td>
                                         <td className="py-2 px-4 text-gray-700">
-                                          {p.reference_month
-                                            ? new Date(p.reference_month).toLocaleDateString('pt-PT', { month: 'long', year: 'numeric' })
-                                            : '—'}
+                                          {getMonthLabel(p.reference_month)}
                                         </td>
                                         <td className="py-2 px-4">
                                           <span className={`inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full ${
@@ -1890,7 +1886,7 @@ export default function RelatoriosPage() {
                                     {withoutPayment.map((p: any) => (
                                       <tr key={p.id} className="border-b border-gray-50 last:border-0">
                                         <td className="py-2 px-4 text-gray-700">
-                                          {p.reference_month ? new Date(p.reference_month).toLocaleDateString('pt-PT', { month: 'long', year: 'numeric' }) : '—'}
+                                          {getMonthLabel(p.reference_month)}
                                         </td>
                                         <td className="py-2 px-4 text-gray-600">{p.lease?.tenant?.name ?? '—'} · {p.lease?.space?.ref ?? '—'}</td>
                                         <td className="py-2 px-4 text-right font-semibold text-gray-900">{fmt(p.amount ?? 0)}</td>
@@ -1944,7 +1940,7 @@ export default function RelatoriosPage() {
                   <div key={p.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-100">
                     <div>
                       <p className="text-sm font-medium text-gray-800">
-                        {p.reference_month ? new Date(p.reference_month).toLocaleDateString('pt-PT', { month: 'long', year: 'numeric' }) : '—'}
+                        {getMonthLabel(p.reference_month)}
                       </p>
                       <p className="text-xs text-gray-400">
                         {p.payment_date ? formatDate(p.payment_date) : '—'} · {p.payment_method === 'dinheiro' ? 'Dinheiro' : 'Banco'}

@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Tenant, Lease, Space } from '@/lib/types'
 import { X, Upload, FileText, Loader2, Sparkles } from 'lucide-react'
-import { formatCurrency, openStorageDocument, slugifyFilename } from '@/lib/utils'
+import { formatCurrency, openStorageDocument, slugifyFilename, getMonthLabel } from '@/lib/utils'
 import { logAccess } from '@/lib/logAccess'
 import { useFileDrop } from '@/lib/useFileDrop'
 
@@ -333,7 +333,7 @@ export default function LeaseModal({ tenant, onClose, onSaved }: Props) {
               <div className="space-y-1">
                 {rentHistory.map((h, i) => (
                   <div key={h.id} className="flex justify-between items-center text-sm py-1.5 px-3 rounded-lg bg-gray-50 border border-gray-100">
-                    <span className="text-gray-600">{new Date(h.effective_date + 'T00:00:00').toLocaleDateString('pt-PT', { month: 'long', year: 'numeric' })}</span>
+                    <span className="text-gray-600">{getMonthLabel(h.effective_date)}</span>
                     <span className={`font-medium ${i === 0 ? 'text-emerald-700' : 'text-gray-500'}`}>{formatCurrency(h.monthly_rent)}</span>
                   </div>
                 ))}

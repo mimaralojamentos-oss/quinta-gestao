@@ -5,7 +5,7 @@ import { Suspense, useEffect, useState, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { Expense } from '@/lib/types'
-import { formatCurrency, formatDate, categoryLabel, matchesSearch, openStorageDocument, deleteExpenseSafely } from '@/lib/utils'
+import { formatCurrency, formatDate, categoryLabel, matchesSearch, openStorageDocument, deleteExpenseSafely, getMonthLabel } from '@/lib/utils'
 import { Plus, Search, Trash2, X, SlidersHorizontal, Eye, ChevronDown as ChevronDownIcon, Copy, CopyPlus } from 'lucide-react'
 import ExpenseModal from './ExpenseModal'
 import CopiarDespesasModal from './CopiarDespesasModal'
@@ -249,8 +249,7 @@ function DespesasContent() {
     const d = new Date()
     for (let i = 0; i < 24; i++) {
       const val = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-      const label = d.toLocaleDateString('pt-PT', { month: 'long', year: 'numeric' })
-      opts.push({ val, label: label.charAt(0).toUpperCase() + label.slice(1) })
+      opts.push({ val, label: getMonthLabel(val) })
       d.setMonth(d.getMonth() - 1)
     }
     return opts

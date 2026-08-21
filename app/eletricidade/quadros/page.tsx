@@ -3,7 +3,7 @@
 import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
-import { formatCurrency, formatDate, normalizeText, openStorageDocument } from '@/lib/utils'
+import { formatCurrency, formatDate, normalizeText, openStorageDocument, formatMonthShort } from '@/lib/utils'
 import { Plus, Zap, Trash2, X, ChevronDown, ChevronRight, Upload, Loader2, RefreshCw, CheckCircle, AlertCircle, BarChart2, Eye, Search } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import { useFileDrop, mergeUniqueFiles } from '@/lib/useFileDrop'
@@ -253,7 +253,7 @@ export default function QuadrosPage() {
 
     const data = months.map(month => {
       const point: Record<string, any> = {
-        month: new Date(month + '-01').toLocaleDateString('pt-PT', { month: 'short', year: '2-digit' })
+        month: formatMonthShort(month)
       }
       for (const meter of meters) {
         const meterReadings = readings[meter.id] ?? []
