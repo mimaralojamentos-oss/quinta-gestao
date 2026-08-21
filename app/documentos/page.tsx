@@ -4,7 +4,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import Link from 'next/link'
 import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
-import { formatCurrency, formatDate, formatDateTime, normalizeText, getTenantName, getSpaceRef, openStorageDocument } from '@/lib/utils'
+import { formatCurrency, formatDate, formatDateTime, normalizeText, getTenantName, getSpaceRef, openStorageDocument, deleteExpenseSafely } from '@/lib/utils'
 import { Search, FileText, Eye, FolderOpen, Trash2, X, Plus, Upload, Loader2, CheckCircle, AlertCircle, Edit2, Filter, ChevronDown, ChevronUp, Zap } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import { logAccess } from '@/lib/logAccess'
@@ -305,8 +305,7 @@ async function handleSaveEdit() {
         'Como agora é uma receita, essa despesa deixa de fazer sentido. Queres apagá-la?'
       )
       if (apagar) {
-        await supabase.from('expenses').delete().eq('id', editDoc.expense_id)
-        await supabase.from('documents').update({ expense_id: null }).eq('id', editDoc.id)
+        await deleteExpenseSafely(supabase, editDoc.expense_id)
       }
     }
 
@@ -470,8 +469,7 @@ async function handleSaveEdit() {
     const { doc } = deleteConfirm
     try {
       if (deleteExpense && doc.expense_id) {
-        await supabase.from('cash_fund_movements').delete().eq('source_id', doc.expense_id)
-        await supabase.from('expenses').delete().eq('id', doc.expense_id)
+        await deleteExpenseSafely(supabase, doc.expense_id)
       } else if (doc.expense_id) {
         await supabase.from('expenses').update({ invoice_id: null }).eq('id', doc.expense_id)
       }
@@ -523,10 +521,8 @@ async function handleSaveEdit() {
 
     // A despesa associada só é tocada se o utilizador tiver dito que sim.
     if (apagarDespesa && doc.expense_id) {
-      await supabase.from('cash_fund_movements').delete().eq('source_id', doc.expense_id)
-      await supabase.from('documents').update({ expense_id: null }).eq('id', doc.id)
-      const { error: errDespesa } = await supabase.from('expenses').delete().eq('id', doc.expense_id)
-      if (errDespesa) { setErroTipo(`Tipo alterado, mas a despesa não foi apagada: ${errDespesa.message}`); setAGuardarTipo(false); return }
+      const erroDespesa = await deleteExpenseSafely(supabase, doc.expense_id)
+      if (erroDespesa) { setErroTipo(`Tipo alterado, mas a despesa não foi apagada: ${erroDespesa}`); setAGuardarTipo(false); return }
     }
 
     await logAccess({

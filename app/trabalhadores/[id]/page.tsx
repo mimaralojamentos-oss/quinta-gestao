@@ -3,7 +3,7 @@
 import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState, use } from 'react'
 import { createClient } from '@/lib/supabase-client'
-import { formatCurrency, formatDate, openStorageDocument, slugifyFilename } from '@/lib/utils'
+import { formatCurrency, formatDate, openStorageDocument, slugifyFilename, deleteExpenseSafely } from '@/lib/utils'
 
 import {
   calcularConta, calcularHoras, formatarHoras, tarifaDoDia, ehDiaEspecial,
@@ -356,9 +356,8 @@ export default function TrabalhadorPage({ params }: { params: Promise<{ id: stri
     )) return
 
     if (p.expense_id) {
-      await supabase.from('cash_fund_movements').delete().eq('source_id', p.expense_id)
-      await supabase.from('documents').update({ expense_id: null }).eq('expense_id', p.expense_id)
-      await supabase.from('expenses').delete().eq('id', p.expense_id)
+      const erroDespesa = await deleteExpenseSafely(supabase, p.expense_id)
+      if (erroDespesa) { alert(`Não foi possível apagar: ${erroDespesa}`); return }
     }
     const { error } = await supabase.from('worker_payments').delete().eq('id', p.id)
     if (error) { alert(`Não foi possível apagar: ${error.message}`); return }

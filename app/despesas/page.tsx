@@ -5,7 +5,7 @@ import { Suspense, useEffect, useState, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { Expense } from '@/lib/types'
-import { formatCurrency, formatDate, categoryLabel, matchesSearch, openStorageDocument } from '@/lib/utils'
+import { formatCurrency, formatDate, categoryLabel, matchesSearch, openStorageDocument, deleteExpenseSafely } from '@/lib/utils'
 import { Plus, Search, Trash2, X, SlidersHorizontal, Eye, ChevronDown as ChevronDownIcon, Copy, CopyPlus } from 'lucide-react'
 import ExpenseModal from './ExpenseModal'
 import CopiarDespesasModal from './CopiarDespesasModal'
@@ -169,9 +169,9 @@ function DespesasContent() {
     setDeleting(true)
     const { expense } = deleteConfirm
     try {
-      await supabase.from('cash_fund_movements').delete().eq('source_id', expense.id)
       if (deleteInvoice && documents[expense.id]) { const doc = documents[expense.id]; await supabase.storage.from('documents').remove([doc.file_path]); await supabase.from('documents').delete().eq('id', doc.id) }
-      await supabase.from('expenses').delete().eq('id', expense.id)
+      const erro = await deleteExpenseSafely(supabase, expense.id)
+      if (erro) throw new Error(erro)
       await logAccess({ action: 'apagar', page: '/despesas', details: `Apagou despesa "${expense.description}" (${formatCurrency(expense.amount)})` })
     } catch (e: any) { console.error('Erro ao apagar:', e) }
     setDeleting(false); setDeleteConfirm(null); fetchAll()

@@ -130,6 +130,26 @@ export async function openStorageDocument(supabase: any, path: string): Promise<
 }
 
 /**
+ * Apaga uma despesa em segurança, sempre pela mesma ordem:
+ *   1. apaga o movimento de caixa que ela tenha gerado (se foi paga em dinheiro)
+ *   2. desliga TODOS os documentos que apontem para ela (não só "o documento atual")
+ *   3. só depois apaga a própria despesa
+ *
+ * Sem isto — e já aconteceu — é fácil ficar um movimento de caixa ou um
+ * documento a apontar para uma despesa que já não existe.
+ *
+ * Devolve null se correu tudo bem, ou a mensagem de erro do último passo
+ * que falhou.
+ */
+export async function deleteExpenseSafely(supabase: any, expenseId: string): Promise<string | null> {
+  await supabase.from('cash_fund_movements').delete().eq('source_id', expenseId)
+  const { error: docError } = await supabase.from('documents').update({ expense_id: null }).eq('expense_id', expenseId)
+  if (docError) return docError.message
+  const { error } = await supabase.from('expenses').delete().eq('id', expenseId)
+  return error?.message ?? null
+}
+
+/**
  * Limpa um texto para poder ser usado num nome de ficheiro: tira acentos e
  * troca por "_" tudo o que não seja letra, número (e, se `allowDot`, ponto).
  * Ao contrário de `normalizeText`, preserva maiúsculas/minúsculas — é para
