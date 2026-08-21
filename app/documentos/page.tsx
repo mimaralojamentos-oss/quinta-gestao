@@ -12,6 +12,7 @@ import { useFileDrop, mergeUniqueFiles } from '@/lib/useFileDrop'
 import SelectedFilesList from '@/components/SelectedFilesList'
 import ManualDocumentModal from '@/components/ManualDocumentModal'
 import SortIcon from '@/components/SortIcon'
+import { useSort } from '@/lib/useSort'
 
 interface Document {
   id: string
@@ -164,8 +165,7 @@ export default function DocumentosPage() {
   const [filterBanco, setFilterBanco] = useState('all')
   const [showFilters, setShowFilters] = useState(false)
 
-  const [sortField, setSortField] = useState<SortField>('carregado')
-  const [sortDir, setSortDir] = useState<SortDir>('desc')
+  const { sortField, sortDir, handleSort } = useSort<SortField>('carregado', 'desc')
 
   const [showUpload, setShowUpload] = useState(false)
   const [showManualModal, setShowManualModal] = useState(false)
@@ -261,11 +261,6 @@ export default function DocumentosPage() {
     }
     setCreatingExpense(false)
     setCreateExpenseConfirm(null)
-  }
-
-  function handleSort(field: SortField) {
-    if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
-    else { setSortField(field); setSortDir('asc') }
   }
 
   function openEditModal(doc: Document) {

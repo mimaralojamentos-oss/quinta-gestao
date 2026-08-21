@@ -13,6 +13,7 @@ import EmailComposer from '@/components/EmailComposer'
 import { logAccess } from '@/lib/logAccess'
 import { buildAppliedAdvanceMap, appliedAdvanceFor } from '@/lib/advanceCredit'
 import SortIcon from '@/components/SortIcon'
+import { useSort } from '@/lib/useSort'
 import Link from 'next/link'
 
 interface TenantWithLease extends Tenant {
@@ -54,8 +55,7 @@ export default function InquilinosPage() {
   const [filterSpaceType, setFilterSpaceType] = useState<'all' | 'pavilhao' | 'habitacao' | 'loja'>('all')
   const [filterDebt, setFilterDebt] = useState<'all' | 'com_divida' | 'sem_divida'>('all')
   const [filterContract, setFilterContract] = useState<'all' | '30dias' | '60dias' | '90dias' | '180dias' | 'expirado'>('all')
-  const [sortField, setSortField] = useState<SortField>('spaces')
-  const [sortDir, setSortDir] = useState<SortDir>('asc')
+  const { sortField, sortDir, handleSort } = useSort<SortField>('spaces', 'asc')
   const [showTenantModal, setShowTenantModal] = useState(false)
   const [showLeaseModal, setShowLeaseModal] = useState(false)
   const [editTenant, setEditTenant] = useState<Tenant | null>(null)
@@ -286,11 +286,6 @@ export default function InquilinosPage() {
 
   function getTotalRemainingDebts(): number {
     return debts.reduce((s, d) => s + getRemainingDebt(d), 0)
-  }
-
-  function handleSort(field: SortField) {
-    if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
-    else { setSortField(field); setSortDir('asc') }
   }
 
   function toggleSpace(ref: string) {

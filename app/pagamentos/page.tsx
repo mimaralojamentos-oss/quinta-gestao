@@ -9,6 +9,7 @@ import PaymentModal from './PaymentModal'
 import AdvancePaymentModal from './AdvancePaymentModal'
 import { useAuth } from '@/lib/auth-context'
 import SortIcon from '@/components/SortIcon'
+import { useSort } from '@/lib/useSort'
 
 interface LeaseWithDetails {
   id: string
@@ -79,8 +80,7 @@ export default function PagamentosPage() {
   const [filterDebtMax, setFilterDebtMax] = useState('')
 
   // Ordenação
-  const [sortField, setSortField] = useState<SortField>(null)
-  const [sortDir, setSortDir] = useState<SortDir>('asc')
+  const { sortField, sortDir, handleSort } = useSort<SortField>(null, 'asc')
   const [allSpaceRefs, setAllSpaceRefs] = useState<string[]>([])
 
   useEffect(() => {
@@ -157,11 +157,6 @@ export default function PagamentosPage() {
   function changeMonth(delta: number) {
     const d = new Date(currentMonth); d.setMonth(d.getMonth() + delta)
     setCurrentMonth(d.toISOString().slice(0, 10))
-  }
-
-  function handleSort(field: SortField) {
-    if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
-    else { setSortField(field); setSortDir('asc') }
   }
 
   function toggleSpace(ref: string) {

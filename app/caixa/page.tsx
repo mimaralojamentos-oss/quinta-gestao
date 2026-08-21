@@ -10,6 +10,7 @@ import CashModal from './CashModal'
 import TransferModal from './TransferModal'
 import { useAuth } from '@/lib/auth-context'
 import SortIcon from '@/components/SortIcon'
+import { useSort } from '@/lib/useSort'
 
 const supabase = createClient()
 
@@ -33,8 +34,7 @@ export default function CaixaPage() {
   const [search, setSearch] = useState('')
 
   // ordenação
-  const [sortField, setSortField] = useState<SortField>('movement_date')
-  const [sortDir, setSortDir] = useState<SortDir>('desc')
+  const { sortField, sortDir, handleSort } = useSort<SortField>('movement_date', 'desc')
 
   const today = new Date()
   const currentMonthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`
@@ -70,11 +70,6 @@ export default function CaixaPage() {
     if (!confirm('Tens a certeza que queres apagar este movimento?')) return
     await supabase.from('cash_fund_movements').delete().eq('id', id)
     fetchData()
-  }
-
-  function handleSort(field: SortField) {
-    if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
-    else { setSortField(field); setSortDir('asc') }
   }
 
   const monthOptions = useMemo(() => {

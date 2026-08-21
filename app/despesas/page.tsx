@@ -12,6 +12,7 @@ import CopiarDespesasModal from './CopiarDespesasModal'
 import { useAuth } from '@/lib/auth-context'
 import { logAccess } from '@/lib/logAccess'
 import SortIcon from '@/components/SortIcon'
+import { useSort } from '@/lib/useSort'
 
 interface DeleteConfirm {
   expense: any
@@ -66,8 +67,7 @@ function DespesasContent() {
   const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirm | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [showMoreFilters, setShowMoreFilters] = useState(false)
-  const [sortField, setSortField] = useState<SortField>('expense_date')
-  const [sortDir, setSortDir] = useState<SortDir>('desc')
+  const { sortField, sortDir, handleSort } = useSort<SortField>('expense_date', 'desc')
   const [togglingPayment, setTogglingPayment] = useState<string | null>(null)
 
   const [search, setSearch] = useState('')
@@ -131,11 +131,6 @@ function DespesasContent() {
     const cash = expensesData.filter((e: any) => e.payment_method === 'dinheiro').reduce((s: number, e: any) => s + e.amount, 0)
     setSummary({ total, cash, bank: total - cash })
     setLoading(false)
-  }
-
-  function handleSort(field: SortField) {
-    if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
-    else { setSortField(field); setSortDir('asc') }
   }
 
   async function handlePaymentMethodToggle(expense: any) {
