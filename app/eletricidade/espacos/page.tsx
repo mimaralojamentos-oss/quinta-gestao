@@ -320,7 +320,7 @@ export default function QuadrosEspacosPage() {
         <td style="font-family:monospace">${r.reading_value ?? '—'}</td>
         <td style="font-family:monospace;color:#888">${r.previous_value ?? '—'}</td>
         <td>${r.kwh_consumed != null ? Number(r.kwh_consumed).toFixed(2) + ' kWh' : '—'}</td>
-        <td style="font-weight:600">${r.amount_calculated != null ? r.amount_calculated.toFixed(2) + ' €' : '—'}</td>
+        <td style="font-weight:600">${r.amount_calculated != null ? formatCurrency(r.amount_calculated) : '—'}</td>
         <td><span style="padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;${
           r.waived ? 'background:#dbeafe;color:#1d4ed8'
           : r.charged ? 'background:#d1fae5;color:#065f46'
@@ -399,8 +399,8 @@ export default function QuadrosEspacosPage() {
   </table>
 
   <div class="totals${accumulated > 0 ? ' acum' : ''}">
-    <div><label>Total Cobrado</label><span>${totalCobrado.toFixed(2)} €</span></div>
-    ${accumulated > 0 ? `<div><label>Valor em Acumulado (por cobrar)</label><span>${accumulated.toFixed(2)} €</span></div>` : ''}
+    <div><label>Total Cobrado</label><span>${formatCurrency(totalCobrado)}</span></div>
+    ${accumulated > 0 ? `<div><label>Valor em Acumulado (por cobrar)</label><span>${formatCurrency(accumulated)}</span></div>` : ''}
   </div>
 
   <div class="signature">

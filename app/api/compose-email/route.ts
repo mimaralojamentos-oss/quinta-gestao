@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { requireRole } from '@/lib/require-role'
 import { EMAIL_CONTEXT_LABELS, type EmailContextData } from '@/lib/emailConfig'
+import { formatCurrency } from '@/lib/utils'
 
 // Redige o corpo e o assunto de um e-mail a partir do contexto da área
 // onde foi pedido (renda em atraso, eletricidade, dívida, etc.).
@@ -20,17 +21,15 @@ export async function POST(request: Request) {
 
     const contextLabel = EMAIL_CONTEXT_LABELS[data.context] ?? 'Assunto geral'
 
-    const eur = (v: number) => `${Number(v).toFixed(2).replace('.', ',')} €`
-
     const detalhe = (data.items ?? []).length > 0
       ? `\nDetalhe das rubricas (usa-as TODAS no e-mail, uma por linha, com o respetivo valor):\n` +
-        (data.items ?? []).map(i => `- [${i.grupo}] ${i.descricao}: ${eur(i.valor)}`).join('\n')
+        (data.items ?? []).map(i => `- [${i.grupo}] ${i.descricao}: ${formatCurrency(i.valor)}`).join('\n')
       : ''
 
     const factos = [
       `Destinatário: ${data.tenantName}`,
       data.spaceRef ? `Espaço arrendado: ${data.spaceRef}` : null,
-      data.amount != null ? `Valor total: ${eur(data.amount)}` : null,
+      data.amount != null ? `Valor total: ${formatCurrency(data.amount)}` : null,
       data.periods && data.periods.length > 0 ? `Períodos em causa: ${data.periods.join(', ')}` : null,
       data.date ? `Data relevante: ${data.date}` : null,
       data.extraNotes ? `Instruções adicionais do remetente: ${data.extraNotes}` : null,

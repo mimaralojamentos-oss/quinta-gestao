@@ -3,7 +3,7 @@
 import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase-client'
-import { formatDate, getMonthLabel } from '@/lib/utils'
+import { formatDate, getMonthLabel, formatCurrency } from '@/lib/utils'
 import { BarChart3, TrendingUp, Home, FileText, Calendar, ChevronDown, ChevronUp, Edit2, X, Save, ClipboardList, Download, Loader2, Receipt, Mail, AlertTriangle, Printer } from 'lucide-react'
 import EmailComposer from '@/components/EmailComposer'
 import { buildAppliedAdvanceMap, appliedAdvanceFor } from '@/lib/advanceCredit'
@@ -1734,7 +1734,7 @@ export default function RelatoriosPage() {
                           <td style="padding:6px 8px;color:#6b7280;font-size:12px">↳ ${mes}</td>
                           <td style="padding:6px 8px"><span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:12px;color:${tipoColor}">${tipoLabel}</span></td>
                           <td style="padding:6px 8px;color:#6b7280;font-size:12px;font-style:italic">${p.notes ?? ''}</td>
-                          <td style="padding:6px 8px;text-align:right;font-weight:600;font-size:13px">${(p.amount ?? 0).toFixed(2)} €</td>
+                          <td style="padding:6px 8px;text-align:right;font-weight:600;font-size:13px">${formatCurrency(p.amount ?? 0)}</td>
                         </tr>`
                       }).join('')
                       const dateStr = formatDate(g.date)
@@ -1745,7 +1745,7 @@ export default function RelatoriosPage() {
                             <p style="font-size:13px;font-weight:700;color:#0f766e;margin:0">${dateStr} · ${methodStr}</p>
                             <p style="font-size:11px;color:#0d9488;margin:2px 0 0">${g.tenant} · ${g.space}</p>
                           </div>
-                          <p style="font-size:15px;font-weight:700;color:#0f766e;margin:0">${g.total.toFixed(2)} €</p>
+                          <p style="font-size:15px;font-weight:700;color:#0f766e;margin:0">${formatCurrency(g.total)}</p>
                         </div>
                         <table style="width:100%;border-collapse:collapse"><tbody>${rows}</tbody></table>
                       </div>`
@@ -1753,7 +1753,7 @@ export default function RelatoriosPage() {
 
                     const semDataHtml = withoutPayment.length > 0 ? `<div style="margin-bottom:16px;border:1px solid #fed7aa;border-radius:8px;overflow:hidden">
                       <div style="background:#fff7ed;padding:10px 14px;border-bottom:1px solid #fed7aa"><p style="font-size:13px;font-weight:600;color:#c2410c;margin:0">⚠ Sem data de pagamento registada</p></div>
-                      <table style="width:100%;border-collapse:collapse"><tbody>${withoutPayment.map((p: any) => `<tr><td style="padding:6px 8px">${getMonthLabel(p.reference_month)}</td><td style="padding:6px 8px;text-align:right;font-weight:600">${(p.amount ?? 0).toFixed(2)} €</td></tr>`).join('')}</tbody></table>
+                      <table style="width:100%;border-collapse:collapse"><tbody>${withoutPayment.map((p: any) => `<tr><td style="padding:6px 8px">${getMonthLabel(p.reference_month)}</td><td style="padding:6px 8px;text-align:right;font-weight:600">${formatCurrency(p.amount ?? 0)}</td></tr>`).join('')}</tbody></table>
                     </div>` : ''
 
                     const html = `<!DOCTYPE html><html lang="pt"><head><meta charset="UTF-8">
@@ -1776,12 +1776,12 @@ export default function RelatoriosPage() {
                       <div class="meta"><p>Emitido em: <strong>${today}</strong></p></div>
                     </div>
                     <div class="summary">
-                      <div class="summary-item"><label>Total Recebido</label><span>${pagamentos.total.toFixed(2)} €</span></div>
+                      <div class="summary-item"><label>Total Recebido</label><span>${formatCurrency(pagamentos.total)}</span></div>
                       <div class="summary-item"><label>Eventos de Pagamento</label><span>${groups.length}</span></div>
                       <div class="summary-item"><label>Registos</label><span>${pagamentos.payments.length}</span></div>
                     </div>
                     ${groupsHtml}${semDataHtml}
-                    <div class="footer"><span>Documento gerado automaticamente</span><span>Total: ${pagamentos.total.toFixed(2)} €</span></div>
+                    <div class="footer"><span>Documento gerado automaticamente</span><span>Total: ${formatCurrency(pagamentos.total)}</span></div>
                     <script>window.onload=()=>window.print()</script>
                     </body></html>`
 

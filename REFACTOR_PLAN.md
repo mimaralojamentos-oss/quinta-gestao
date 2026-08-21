@@ -10,7 +10,7 @@
 - [x] **Passo 4** — `handleSort` → hook `useSort` (item 15) — commit feito
 - [x] **Passo 5** — Apagar despesa com segurança → helper único (item 1) — commit feito
 - [x] **Passo 6** — Datas por extenso → `getMonthLabel`/`formatMonthShort` (item 14) — commit feito. Levantamento de órfãos pedido no fim do Passo 5: 0 encontrados (24 movimentos de caixa por despesa, 167 documentos com expense_id, todos com destino válido).
-- [ ] Passo 7 — Moeda em templates → `formatCurrency` (item 19)
+- [x] **Passo 7** — Moeda em templates → `formatCurrency` (item 19) — commit feito
 - [ ] Passo 8 — Categorias de despesa → lista única + corrigir `types.ts` + `despesas/page.tsx` (itens 2, 11)
 - [ ] Passo 9 — Etiquetas de tipo de pagamento → lista única (item 13)
 - [ ] Passo 10 — `getDebtRemaining` → helper único (item 12)
@@ -186,6 +186,11 @@ Decidido: passa a existir em todo o lado, sempre como aviso que pode ser ignorad
 
 **P7 — Passo 6: formato de "Mês Ano" — manter o texto atual ("julho de 2026") ou unificar com o resto da app ("Julho 2026")?**
 Decidido em 2026-08-21: unificar para "Julho 2026" (o formato que `getMonthLabel` já usa no Dashboard, Alertas, Pagamentos, etc.). O texto muda visivelmente nestes 10 sítios (perde a palavra "de"), decisão consciente para corrigir a inconsistência já existente na app e o bug de fuso horário escondido por trás de `toLocaleDateString`. Aplicado também ao gráfico de `eletricidade/quadros/page.tsx`, cujo eixo mostrava "07/26" em vez de um nome de mês (bug do ambiente, não intencional) — passa a mostrar "Jul 2026".
+
+**P8 — Passo 7: formato de moeda manual ("1234.50 €") vs `formatCurrency` ("1 234,50 €")?**
+Decidido em 2026-08-21: mesmo critério do Passo 6 — unificar com `formatCurrency`. O texto muda nestes 8 sítios (`relatorios.tsx` x5, `eletricidade/espacos.tsx` x3): vírgula decimal em vez de ponto, e espaço a separar milhares em valores acima de 1000€. O helper `eur()` local em `api/compose-email/route.ts` já produzia texto idêntico ao `formatCurrency` para valores pequenos — só diverge (sem separador de milhares) em valores grandes, por isso foi unificado também.
+
+Nota à parte (não corrigida neste passo, fora de âmbito): `app/relatorios/page.tsx` tem uma terceira forma de mostrar moeda, `fmt()` (linha ~727, usa `toLocaleString` em vez de `Intl.NumberFormat`) — produz o mesmo resultado que `formatCurrency`, só o caminho de código é diferente. Fica registado para uma limpeza futura, não fazia parte do que este passo cobria.
 
 ---
 
