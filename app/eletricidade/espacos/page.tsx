@@ -3,7 +3,7 @@
 import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase-client'
-import { formatCurrency, formatDate, matchesSearch } from '@/lib/utils'
+import { formatCurrency, formatDate, matchesSearch, getTenantName } from '@/lib/utils'
 import { Zap, Trash2, X, ChevronDown, ChevronRight, Settings, Save, Pencil, Search, Printer } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import { logAccess } from '@/lib/logAccess'
@@ -192,12 +192,6 @@ export default function QuadrosEspacosPage() {
     setFilterSpaces(prev => prev.includes(ref) ? prev.filter(r => r !== ref) : [...prev, ref])
   }
 
-  function getTenantName(tenant: any): string {
-    if (!tenant) return ''
-    if (Array.isArray(tenant)) return tenant[0]?.name ?? ''
-    return tenant.name ?? ''
-  }
-
   async function openResetModal(space: Space) {
     setResetLoading(true)
     setResetConfirm(false)
@@ -316,7 +310,7 @@ export default function QuadrosEspacosPage() {
 
   function printElectricity(space: Space) {
     const spaceReadings = readings[space.id] ?? []
-    const tenantName = getTenantName(space.tenant)
+    const tenantName = getTenantName(space.tenant, '')
     const accumulated = getAccumulatedAmount(space.id)
     const today = new Date().toLocaleDateString('pt-PT')
 
@@ -822,7 +816,7 @@ export default function QuadrosEspacosPage() {
     .reduce((s, r) => s + (r.amount_calculated ?? 0), 0)
 
   const filteredSpaces = spaces.filter(space => {
-    const matchesTenant = !filterTenant || matchesSearch(getTenantName(space.tenant), filterTenant)
+    const matchesTenant = !filterTenant || matchesSearch(getTenantName(space.tenant, ''), filterTenant)
     const matchesSpace = filterSpaces.length === 0 || filterSpaces.includes(space.ref)
     return matchesTenant && matchesSpace
   })
@@ -983,7 +977,7 @@ export default function QuadrosEspacosPage() {
               const lastReading = spaceReadings[0]
               const isOpen = expanded[space.id]
               const accumulated = getAccumulatedAmount(space.id)
-              const tenantName = getTenantName(space.tenant)
+              const tenantName = getTenantName(space.tenant, '')
 
               return (
                 <div key={space.id} className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">

@@ -4,7 +4,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import Link from 'next/link'
 import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
-import { formatCurrency, formatDate, formatDateTime, normalizeText } from '@/lib/utils'
+import { formatCurrency, formatDate, formatDateTime, normalizeText, getTenantName, getSpaceRef } from '@/lib/utils'
 import { Search, FileText, Eye, FolderOpen, Trash2, X, Plus, Upload, Loader2, CheckCircle, AlertCircle, Edit2, Filter, ChevronDown, ChevronUp, Zap } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import { logAccess } from '@/lib/logAccess'
@@ -261,18 +261,6 @@ export default function DocumentosPage() {
     }
     setCreatingExpense(false)
     setCreateExpenseConfirm(null)
-  }
-
-  function getTenantName(tenant: any): string {
-    if (!tenant) return '—'
-    if (Array.isArray(tenant)) return tenant[0]?.name ?? '—'
-    return tenant.name ?? '—'
-  }
-
-  function getSpaceRef(space: any): string {
-    if (!space) return '—'
-    if (Array.isArray(space)) return space[0]?.ref ?? '—'
-    return space.ref ?? '—'
   }
 
   function handleSort(field: SortField) {

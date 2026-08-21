@@ -104,6 +104,20 @@ export function categoryLabel(cat: string): string {
   return map[cat] ?? cat
 }
 
+/** Nome do inquilino a partir de um valor de join do Supabase (pode vir como objeto ou como array). */
+export function getTenantName(tenant: any, fallback: string = '—'): string {
+  if (!tenant) return fallback
+  if (Array.isArray(tenant)) return tenant[0]?.name ?? fallback
+  return tenant.name ?? fallback
+}
+
+/** Referência do espaço a partir de um valor de join do Supabase (pode vir como objeto ou como array). */
+export function getSpaceRef(space: any, fallback: string = '—'): string {
+  if (!space) return fallback
+  if (Array.isArray(space)) return space[0]?.ref ?? fallback
+  return space.ref ?? fallback
+}
+
 /**
  * Versão comparável de um texto para pesquisas: sem acentos e em minúsculas.
  *
