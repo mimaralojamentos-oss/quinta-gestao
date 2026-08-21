@@ -3,7 +3,7 @@
 import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState, Fragment } from 'react'
 import { createClient } from '@/lib/supabase-client'
-import { formatCurrency, formatDate, normalizeText } from '@/lib/utils'
+import { formatCurrency, formatDate, normalizeText, openStorageDocument } from '@/lib/utils'
 import { useAuth } from '@/lib/auth-context'
 import { logAccess } from '@/lib/logAccess'
 
@@ -101,9 +101,7 @@ export default function FornecedoresPage() {
 
   /** Abre o ficheiro original numa janela nova, com link temporário. */
   async function abrirDocumento(filePath: string) {
-    const { data, error } = await supabase.storage.from('documents').createSignedUrl(filePath, 60)
-    if (error || !data?.signedUrl) { alert('Não foi possível abrir o documento.'); return }
-    window.open(data.signedUrl, '_blank')
+    await openStorageDocument(supabase, filePath)
   }
 
   function abrirEquivalencia(raw: string, nomeAtual: string) {

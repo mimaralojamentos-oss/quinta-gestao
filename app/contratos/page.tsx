@@ -3,7 +3,7 @@
 import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
-import { formatCurrency, formatDate, matchesSearch } from '@/lib/utils'
+import { formatCurrency, formatDate, matchesSearch, openStorageDocument } from '@/lib/utils'
 
 import {
   ScrollText, Download, AlertTriangle, CheckCircle,
@@ -121,8 +121,7 @@ export default function ContratosPage() {
   }
 
   async function downloadContract(path: string) {
-    const { data } = await supabase.storage.from('documents').createSignedUrl(path, 60)
-    if (data?.signedUrl) window.open(data.signedUrl, '_blank')
+    await openStorageDocument(supabase, path)
   }
 
   const filtered = rows.filter(r => {

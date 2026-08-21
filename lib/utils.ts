@@ -119,6 +119,17 @@ export function getSpaceRef(space: any, fallback: string = '—'): string {
 }
 
 /**
+ * Abre um ficheiro do bucket 'documents' numa nova aba, com um link
+ * temporário válido por 60 segundos. Se não conseguir gerar o link (ex.:
+ * o ficheiro já não existe no storage), avisa em vez de falhar em silêncio.
+ */
+export async function openStorageDocument(supabase: any, path: string): Promise<void> {
+  const { data, error } = await supabase.storage.from('documents').createSignedUrl(path, 60)
+  if (error || !data?.signedUrl) { alert('Não foi possível abrir o documento.'); return }
+  window.open(data.signedUrl, '_blank')
+}
+
+/**
  * Versão comparável de um texto para pesquisas: sem acentos e em minúsculas.
  *
  * Serve para "rogerio" encontrar "Rogério", "joao" encontrar "João" e

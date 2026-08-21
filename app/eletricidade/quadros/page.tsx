@@ -3,7 +3,7 @@
 import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
-import { formatCurrency, formatDate, normalizeText } from '@/lib/utils'
+import { formatCurrency, formatDate, normalizeText, openStorageDocument } from '@/lib/utils'
 import { Plus, Zap, Trash2, X, ChevronDown, ChevronRight, Upload, Loader2, RefreshCw, CheckCircle, AlertCircle, BarChart2, Eye, Search } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import { useFileDrop, mergeUniqueFiles } from '@/lib/useFileDrop'
@@ -199,8 +199,7 @@ export default function QuadrosPage() {
   }
 
   async function openDocument(doc: Document) {
-    const { data } = await supabase.storage.from('documents').createSignedUrl(doc.file_path, 60)
-    if (data?.signedUrl) window.open(data.signedUrl, '_blank')
+    await openStorageDocument(supabase, doc.file_path)
   }
 
   const filteredDocs = documents.filter(d => {

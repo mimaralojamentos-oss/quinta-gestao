@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Tenant, Lease, Space } from '@/lib/types'
 import { X, Upload, FileText, Loader2, Sparkles } from 'lucide-react'
-import { formatCurrency } from '@/lib/utils'
+import { formatCurrency, openStorageDocument } from '@/lib/utils'
 import { logAccess } from '@/lib/logAccess'
 import { useFileDrop } from '@/lib/useFileDrop'
 
@@ -212,8 +212,7 @@ export default function LeaseModal({ tenant, onClose, onSaved }: Props) {
 
   async function downloadContract() {
     if (!existingLease?.contract_file_path) return
-    const { data } = await supabase.storage.from('documents').createSignedUrl(existingLease.contract_file_path, 60)
-    if (data?.signedUrl) window.open(data.signedUrl, '_blank')
+    await openStorageDocument(supabase, existingLease.contract_file_path)
   }
 
   return (

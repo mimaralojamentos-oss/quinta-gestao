@@ -3,7 +3,7 @@
 import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState, use } from 'react'
 import { createClient } from '@/lib/supabase-client'
-import { formatCurrency, formatDate } from '@/lib/utils'
+import { formatCurrency, formatDate, openStorageDocument } from '@/lib/utils'
 
 import {
   calcularConta, calcularHoras, formatarHoras, tarifaDoDia, ehDiaEspecial,
@@ -370,8 +370,7 @@ export default function TrabalhadorPage({ params }: { params: Promise<{ id: stri
   async function abrirRecibo(documentId: string) {
     const { data: doc } = await supabase.from('documents').select('file_path').eq('id', documentId).maybeSingle()
     if (!doc?.file_path) { alert('Recibo não encontrado.'); return }
-    const { data } = await supabase.storage.from('documents').createSignedUrl(doc.file_path, 60)
-    if (data?.signedUrl) window.open(data.signedUrl, '_blank')
+    await openStorageDocument(supabase, doc.file_path)
   }
 
   useEffect(() => { carregar() }, [id])

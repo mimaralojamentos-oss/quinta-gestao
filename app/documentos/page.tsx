@@ -4,7 +4,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import Link from 'next/link'
 import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
-import { formatCurrency, formatDate, formatDateTime, normalizeText, getTenantName, getSpaceRef } from '@/lib/utils'
+import { formatCurrency, formatDate, formatDateTime, normalizeText, getTenantName, getSpaceRef, openStorageDocument } from '@/lib/utils'
 import { Search, FileText, Eye, FolderOpen, Trash2, X, Plus, Upload, Loader2, CheckCircle, AlertCircle, Edit2, Filter, ChevronDown, ChevronUp, Zap } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import { logAccess } from '@/lib/logAccess'
@@ -466,8 +466,7 @@ async function handleSaveEdit() {
   }
 
   async function openDoc(path: string) {
-    const { data } = await supabase.storage.from('documents').createSignedUrl(path, 60)
-    if (data?.signedUrl) window.open(data.signedUrl, '_blank')
+    await openStorageDocument(supabase, path)
   }
 
   async function handleDeleteConfirm(deleteExpense: boolean) {

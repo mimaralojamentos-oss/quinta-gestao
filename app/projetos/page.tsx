@@ -3,7 +3,7 @@
 import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { formatCurrency, formatDate, matchesSearch } from '@/lib/utils'
+import { formatCurrency, formatDate, matchesSearch, openStorageDocument } from '@/lib/utils'
 import { Plus, Search, FolderOpen, X, FileText, Eye, FolderInput } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import ProjectModal from './ProjectModal'
@@ -140,8 +140,7 @@ export default function ProjetosPage() {
   }
 
   async function openDocument(filePath: string) {
-    const { data } = await supabase.storage.from('documents').createSignedUrl(filePath, 60)
-    if (data?.signedUrl) window.open(data.signedUrl, '_blank')
+    await openStorageDocument(supabase, filePath)
   }
 
   async function moveExpense(expenseId: string, newProjectId: string | null) {

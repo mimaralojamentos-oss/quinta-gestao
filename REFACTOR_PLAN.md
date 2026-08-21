@@ -5,7 +5,7 @@
 ## Progresso
 
 - [x] **Passo 1** — `getTenantName`/`getSpaceRef` → `lib/utils.ts` (item 16) — commit feito
-- [ ] Passo 2 — Abrir documento do storage → helper único (item 17)
+- [x] **Passo 2** — Abrir documento do storage → helper único (item 17) — commit feito
 - [ ] Passo 3 — Nome de ficheiro sem acentos → helper único (item 18)
 - [ ] Passo 4 — `handleSort` → hook `useSort` (item 15)
 - [ ] Passo 5 — Apagar despesa com segurança → helper único (item 1)
