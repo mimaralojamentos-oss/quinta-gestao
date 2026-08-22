@@ -348,11 +348,11 @@ export default function QuadrosPage() {
       if (!doc.amount || !doc.doc_date || doc.expense_id) return
       const { data: newExpense } = await supabase.from('expenses').insert({
         expense_date: doc.doc_date,
-        category: 'eletricidade',
+        category: 'edp',
         type: 'pontual',
         description: doc.items_summary ?? doc.supplier_name ?? 'Fatura EDP',
         amount: doc.amount,
-        payment_method: 'transferencia',
+        payment_method: 'banco',
         supplier: doc.supplier_name ?? null,
         notes: `Criado automaticamente a partir do documento ${doc.doc_number ?? ''}`.trim(),
       }).select().single()

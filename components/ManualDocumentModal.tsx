@@ -230,6 +230,7 @@ export default function ManualDocumentModal({ onClose, onSaved }: Props) {
       if (docErr) { setError('Erro ao criar documento: ' + docErr.message); setSaving(false); return }
 
       // 5. Create expense (optional)
+      let newExpenseId: string | null = null
       if (form.tipo === 'despesa' && form.createExpense && form.amount && parseFloat(form.amount) > 0) {
         const { data: newExpense, error: expErr } = await supabase.from('expenses').insert({
           expense_date: form.doc_date,
@@ -244,11 +245,15 @@ export default function ManualDocumentModal({ onClose, onSaved }: Props) {
         }).select().single()
 
         if (!expErr && newExpense) {
+          newExpenseId = newExpense.id
           await supabase.from('documents').update({ expense_id: newExpense.id }).eq('id', newDoc.id)
         }
       }
 
       // 6. Add to Fundo de Maneio (optional)
+      // O movimento tem de apontar para a despesa (quando existe), nunca para
+      // o documento — é pela despesa que o resto da app localiza e limpa este
+      // movimento (ex: ao apagar a despesa).
       if (form.addToFundo && form.amount && parseFloat(form.amount) > 0) {
         const isSaida = form.tipo === 'despesa'
         const amtVal = parseFloat(form.amount)
@@ -257,8 +262,8 @@ export default function ManualDocumentModal({ onClose, onSaved }: Props) {
           description: `${docTitle} — ${form.supplier}`,
           amount: isSaida ? -Math.abs(amtVal) : Math.abs(amtVal),
           type: isSaida ? 'saida' : 'entrada',
-          source: 'documento_manual',
-          source_id: newDoc.id,
+          source: newExpenseId ? 'despesa' : 'documento_manual',
+          source_id: newExpenseId ?? newDoc.id,
           notes: form.description || null,
         })
       }
@@ -424,8 +429,6 @@ export default function ManualDocumentModal({ onClose, onSaved }: Props) {
                     <select className="input text-sm" value={form.payment_method} onChange={e => set('payment_method', e.target.value)}>
                       <option value="dinheiro">Dinheiro</option>
                       <option value="banco">Transferência / Banco</option>
-                      <option value="cartao">Cartão</option>
-                      <option value="cheque">Cheque</option>
                     </select>
                   </div>
                 )}
