@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, categoryLabel, getMonthLabel } from '@/lib/utils'
 import { logAccess } from '@/lib/logAccess'
+import { CASH_FUND_START_DATE } from '@/lib/bankExpense'
 import { X, Copy, AlertTriangle, Loader2 } from 'lucide-react'
 
 const supabase = createClient()
@@ -175,8 +176,9 @@ export default function CopiarDespesasModal({ defaultTarget, onClose, onCopied }
       if (error) { setErro(`Erro ao copiar "${e.description}": ${error.message}`); setCopiando(false); return }
 
       // Pago em dinheiro → tem de sair do fundo de maneio, tal como
-      // acontece quando se cria uma despesa nova à mão.
-      if (nova && e.payment_method === 'dinheiro') {
+      // acontece quando se cria uma despesa nova à mão. Só a partir do início
+      // do fundo de maneio (CASH_FUND_START_DATE) — datas anteriores não mexem no fundo.
+      if (nova && e.payment_method === 'dinheiro' && dataNova >= CASH_FUND_START_DATE) {
         await supabase.from('cash_fund_movements').insert({
           movement_date: dataNova,
           description: `💸 ${e.description}${e.supplier ? ` — ${e.supplier}` : ''}`,

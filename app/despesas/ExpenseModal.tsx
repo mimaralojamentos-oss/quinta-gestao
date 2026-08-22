@@ -8,6 +8,7 @@ import { formatCurrency, formatDate, matchesSearch } from '@/lib/utils'
 import { EXPENSE_CATEGORIES } from '@/lib/expenseCategories'
 import { logAccess } from '@/lib/logAccess'
 import { useFileDrop } from '@/lib/useFileDrop'
+import { CASH_FUND_START_DATE } from '@/lib/bankExpense'
 
 const supabase = createClient()
 
@@ -167,7 +168,7 @@ export default function ExpenseModal({ expense, duplicateFrom, onClose, onSaved 
       const { data: existingCash } = await supabase
         .from('cash_fund_movements').select('id').eq('source_id', expense.id).single()
 
-      if (form.payment_method === 'dinheiro') {
+      if (form.payment_method === 'dinheiro' && form.expense_date >= CASH_FUND_START_DATE) {
         if (existingCash) {
           await supabase.from('cash_fund_movements').update({
             amount: -Math.abs(parseFloat(form.amount)),
@@ -184,11 +185,14 @@ export default function ExpenseModal({ expense, duplicateFrom, onClose, onSaved 
             notes: form.notes || null,
           })
         }
-      } else {
+      } else if (form.payment_method !== 'dinheiro') {
+        // Deixou de ser pago em dinheiro: o movimento de caixa deixa de fazer sentido.
         if (existingCash) {
           await supabase.from('cash_fund_movements').delete().eq('id', existingCash.id)
         }
       }
+      // Continua "dinheiro" mas com data anterior ao início do fundo de maneio:
+      // não cria nem apaga nada — um movimento antigo que já existisse fica como está.
 
       await logAccess({ action: 'editar', page: '/despesas', details: `Editou despesa "${form.description}" (${formatCurrency(parseFloat(form.amount))})` })
 
@@ -198,7 +202,7 @@ export default function ExpenseModal({ expense, duplicateFrom, onClose, onSaved 
         .from('expenses').insert(payload).select().single()
       if (err) { setError(err.message); setSaving(false); return }
 
-      if (form.payment_method === 'dinheiro' && newExpense) {
+      if (form.payment_method === 'dinheiro' && newExpense && form.expense_date >= CASH_FUND_START_DATE) {
         await supabase.from('cash_fund_movements').insert({
           movement_date: form.expense_date,
           description: `💸 ${form.description}${form.supplier ? ` — ${form.supplier}` : ''}`,

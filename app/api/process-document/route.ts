@@ -5,8 +5,7 @@ import { createHash } from 'crypto'
 import { requireRole } from '@/lib/require-role'
 import { checkFileSize } from '@/lib/fileUpload'
 import { meterReadingExists } from '@/lib/meterReadings'
-
-const CASH_FUND_START_DATE = '2026-06-01'
+import { CASH_FUND_START_DATE } from '@/lib/bankExpense'
 
 export async function POST(request: Request) {
   const auth = await requireRole(['admin', 'coadmin', 'electrician'])
