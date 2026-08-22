@@ -4,6 +4,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, formatDate, normalizeText, openStorageDocument, formatMonthShort } from '@/lib/utils'
+import { meterReadingExists } from '@/lib/meterReadings'
 import { Plus, Zap, Trash2, X, ChevronDown, ChevronRight, Upload, Loader2, RefreshCw, CheckCircle, AlertCircle, BarChart2, Eye, Search } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import { useFileDrop, mergeUniqueFiles } from '@/lib/useFileDrop'
@@ -286,6 +287,8 @@ export default function QuadrosPage() {
 
   async function saveReading() {
     if (!showReadingModal || !readingForm.reading_date || !readingForm.reading_value) return
+    const jaExiste = await meterReadingExists(supabase, showReadingModal, readingForm.reading_date, readingForm.invoice_number || null)
+    if (jaExiste && !confirm('Já existe uma leitura para este quadro nesta data (ou com este nº de fatura). Registar mesmo assim?')) return
     setSaving(true)
     await supabase.from('meter_readings').insert({
       meter_id: showReadingModal,
@@ -381,8 +384,8 @@ export default function QuadrosPage() {
         await ensureExpense(doc)
         results.push({ fileName: doc.original_name ?? doc.file_path, status: 'error', error: 'Quadro não identificado' }); continue
       }
-      const { data: existingReading } = await supabase.from('meter_readings').select('id').eq('meter_id', matchedMeter.id).eq('reading_date', doc.doc_date).single()
-      if (existingReading) {
+      const jaExiste = await meterReadingExists(supabase, matchedMeter.id, doc.doc_date, doc.doc_number)
+      if (jaExiste) {
         await ensureExpense(doc)
         results.push({ fileName: doc.original_name ?? doc.file_path, status: 'duplicate', meterName: matchedMeter.name }); continue
       }

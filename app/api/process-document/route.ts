@@ -4,6 +4,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { createHash } from 'crypto'
 import { requireRole } from '@/lib/require-role'
 import { checkFileSize } from '@/lib/fileUpload'
+import { meterReadingExists } from '@/lib/meterReadings'
 
 const CASH_FUND_START_DATE = '2026-06-01'
 
@@ -305,24 +306,9 @@ IMPORTANTE sobre o valor ("amount"):
         const readingDate = extracted.edp_reading_date ?? extracted.doc_date ?? null
 
         if (readingDate) {
-          const { data: existingReading } = await supabase
-            .from('meter_readings').select('id')
-            .eq('meter_id', meter.id)
-            .eq('reading_date', readingDate)
-            .maybeSingle()
+          const jaExiste = await meterReadingExists(supabase, meter.id, readingDate, extracted.doc_number)
 
-          // Também evita duplicar pelo nº da fatura, caso a data mude
-          let duplicateByInvoice = null
-          if (!existingReading && extracted.doc_number) {
-            const { data } = await supabase
-              .from('meter_readings').select('id')
-              .eq('meter_id', meter.id)
-              .eq('invoice_number', extracted.doc_number)
-              .maybeSingle()
-            duplicateByInvoice = data
-          }
-
-          if (!existingReading && !duplicateByInvoice) {
+          if (!jaExiste) {
             await supabase.from('meter_readings').insert({
               meter_id: meter.id,
               reading_date: readingDate,

@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency, formatDate, formatDateTime, normalizeText, getTenantName, getSpaceRef, openStorageDocument, deleteExpenseSafely } from '@/lib/utils'
+import { meterReadingExists } from '@/lib/meterReadings'
 import { EXPENSE_CATEGORIES } from '@/lib/expenseCategories'
 import { Search, FileText, Eye, FolderOpen, Trash2, X, Plus, Upload, Loader2, CheckCircle, AlertCircle, Edit2, Filter, ChevronDown, ChevronUp, Zap } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
@@ -372,9 +373,8 @@ async function handleSaveEdit() {
     setLinkingToQuadro(true)
     const readingDate = linkDoc.doc_date
     if (!readingDate) { setLinkingToQuadro(false); return }
-    const { data: existing } = await supabase.from('meter_readings').select('id')
-      .eq('meter_id', selectedMeterId).eq('reading_date', readingDate).maybeSingle()
-    if (existing) { setLinkDone('duplicate'); setLinkingToQuadro(false); return }
+    const jaExiste = await meterReadingExists(supabase, selectedMeterId, readingDate, linkDoc.doc_number)
+    if (jaExiste) { setLinkDone('duplicate'); setLinkingToQuadro(false); return }
     const { error: insertErr } = await supabase.from('meter_readings').insert({
       meter_id: selectedMeterId,
       reading_date: readingDate,
