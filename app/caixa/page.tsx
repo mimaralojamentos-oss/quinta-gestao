@@ -40,7 +40,9 @@ export default function CaixaPage() {
   const currentMonthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`
   const [selectedMonth, setSelectedMonth] = useState<string>(currentMonthStr)
 
-  const cashStartDate = process.env.NEXT_PUBLIC_CASH_FUND_START_DATE ?? null
+  // Valor por omissão igual ao de produção — a variável de ambiente só serve
+  // para poder mudar a data sem mexer no código, nunca para desligar o filtro.
+  const cashStartDate = process.env.NEXT_PUBLIC_CASH_FUND_START_DATE ?? '2026-05-31'
 
   async function fetchData() {
     setLoading(true)
