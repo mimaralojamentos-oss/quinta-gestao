@@ -320,7 +320,7 @@ async function handleSaveEdit() {
           description: editForm.items_summary || editForm.supplier_name || 'Receita',
           amount: valor,
           income_date: editForm.doc_date,
-          category: 'energia_solar',
+          category: editForm.category || 'energia_solar',
           document_id: editDoc.id,
           notes: editForm.doc_number ? `Documento nº ${editForm.doc_number}` : 'Convertido de despesa para receita',
         })
