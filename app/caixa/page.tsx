@@ -15,6 +15,7 @@ import { useSort } from '@/lib/useSort'
 const supabase = createClient()
 
 type SourceFilter = 'all' | 'manual' | 'renda' | 'despesa' | 'documento' | 'transferencia_banco'
+type TypeFilter = 'all' | 'entrada' | 'saida'
 type SortField = 'movement_date' | 'description' | 'type' | 'source' | 'amount' | 'notes'
 type SortDir = 'asc' | 'desc'
 
@@ -31,6 +32,7 @@ export default function CaixaPage() {
 
   // filtros
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all')
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>('all')
   const [search, setSearch] = useState('')
 
   // ordenação
@@ -85,6 +87,10 @@ export default function CaixaPage() {
   const filtered = useMemo(() => {
     const list = movements.filter(m => {
       if (sourceFilter !== 'all' && (m as any).source !== sourceFilter) return false
+      // Sinal do valor, não o campo `type` — as transferências para o banco têm
+      // type: 'transferencia' mas são dinheiro a sair da caixa (amount negativo).
+      if (typeFilter === 'entrada' && m.amount <= 0) return false
+      if (typeFilter === 'saida' && m.amount >= 0) return false
       if (search && !matchesSearch(m.description, search)) return false
       if (selectedMonth !== 'all' && m.movement_date?.slice(0, 7) !== selectedMonth) return false
       return true
@@ -102,7 +108,7 @@ export default function CaixaPage() {
       if (valA > valB) return sortDir === 'asc' ? 1 : -1
       return 0
     })
-  }, [movements, sourceFilter, search, selectedMonth, sortField, sortDir])
+  }, [movements, sourceFilter, typeFilter, search, selectedMonth, sortField, sortDir])
 
   // Saldo total real (sempre sobre todos os movimentos)
   const balance = movements.reduce((s, m) => s + m.amount, 0)
@@ -132,6 +138,12 @@ export default function CaixaPage() {
     { key: 'despesa', label: '💸 Despesa' },
     { key: 'documento', label: '📄 Documento' },
     { key: 'transferencia_banco', label: '🏦 Transferência' },
+  ]
+
+  const TYPE_FILTERS = [
+    { key: 'all', label: 'Todos' },
+    { key: 'entrada', label: '↑ Entradas' },
+    { key: 'saida', label: '↓ Saídas' },
   ]
 
   const thClass = 'px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide cursor-pointer select-none hover:text-gray-700 whitespace-nowrap'
@@ -254,6 +266,16 @@ export default function CaixaPage() {
                 </button>
               ))}
             </div>
+            <div className="w-px h-5 bg-gray-200" />
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-xs font-semibold text-gray-500">Tipo:</span>
+              {TYPE_FILTERS.map(f => (
+                <button key={f.key} onClick={() => setTypeFilter(f.key as TypeFilter)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${typeFilter === f.key ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+                  {f.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Linha 2: Pesquisa */}
@@ -270,8 +292,8 @@ export default function CaixaPage() {
                 </button>
               )}
             </div>
-            {(sourceFilter !== 'all' || selectedMonth !== currentMonthStr || search) && (
-              <button onClick={() => { setSourceFilter('all'); setSelectedMonth(currentMonthStr); setSearch('') }}
+            {(sourceFilter !== 'all' || typeFilter !== 'all' || selectedMonth !== currentMonthStr || search) && (
+              <button onClick={() => { setSourceFilter('all'); setTypeFilter('all'); setSelectedMonth(currentMonthStr); setSearch('') }}
                 className="text-xs text-red-500 hover:text-red-700 font-medium">
                 Limpar filtros
               </button>
