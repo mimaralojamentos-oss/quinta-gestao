@@ -5,7 +5,8 @@ import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, categoryLabel, getMonthLabel } from '@/lib/utils'
 import { logAccess } from '@/lib/logAccess'
 import { createExpense } from '@/lib/createExpense'
-import { X, Copy, AlertTriangle, Loader2 } from 'lucide-react'
+import { findSimilarExpenses, type ExpenseCandidate } from '@/lib/expenseDuplicates'
+import { X, Copy, AlertTriangle, Loader2, ArrowLeft } from 'lucide-react'
 
 const supabase = createClient()
 
@@ -31,8 +32,15 @@ interface Linha {
   selecionada: boolean
   /** Valor editável — começa igual ao da despesa original. */
   valor: string
-  /** Já existe uma despesa igual no mês de destino. */
-  duplicada: boolean
+}
+
+/** Uma linha selecionada que parece já existir no mês de destino (mesmo valor, data próxima). */
+interface DuplicataRevisao {
+  linhaId: string
+  descricao: string
+  similares: ExpenseCandidate[]
+  /** Copiar mesmo assim — false por omissão, para não duplicar sem dar por isso. */
+  manter: boolean
 }
 
 /** Primeiro e último dia de um mês 'AAAA-MM'. */
@@ -51,11 +59,6 @@ export function dataNoMes(dataOriginal: string, mesDestino: string): string {
   const [ano, m] = mesDestino.split('-').map(Number)
   const ultimoDia = new Date(ano, m, 0).getDate()
   return `${mesDestino}-${String(Math.min(dia, ultimoDia)).padStart(2, '0')}`
-}
-
-/** Chave para detetar repetições: descrição + fornecedor, ignorando maiúsculas. */
-function chaveDespesa(e: any): string {
-  return `${String(e.description ?? '').trim().toLowerCase()}__${String(e.supplier ?? '').trim().toLowerCase()}`
 }
 
 /** Mês anterior a 'AAAA-MM'. */
@@ -89,7 +92,10 @@ export default function CopiarDespesasModal({ defaultTarget, onClose, onCopied }
   const [linhas, setLinhas] = useState<Linha[]>([])
   const [carregando, setCarregando] = useState(true)
   const [copiando, setCopiando] = useState(false)
+  const [verificando, setVerificando] = useState(false)
   const [erro, setErro] = useState('')
+  /** Não-nulo enquanto a janela de revisão de duplicados está aberta. */
+  const [revisaoDuplicados, setRevisaoDuplicados] = useState<DuplicataRevisao[] | null>(null)
 
   const meses = opcoesDeMes()
   const mesmoMes = origem === destino
@@ -98,34 +104,22 @@ export default function CopiarDespesasModal({ defaultTarget, onClose, onCopied }
     setCarregando(true); setErro('')
 
     const o = limitesDoMes(origem)
-    const d = limitesDoMes(destino)
 
-    const [origemRes, destinoRes] = await Promise.all([
-      supabase.from('expenses').select('*')
-        .gte('expense_date', o.de).lte('expense_date', o.ate)
-        .order('expense_date', { ascending: true }),
-      supabase.from('expenses').select('description, supplier')
-        .gte('expense_date', d.de).lte('expense_date', d.ate),
-    ])
+    const origemRes = await supabase.from('expenses').select('*')
+      .gte('expense_date', o.de).lte('expense_date', o.ate)
+      .order('expense_date', { ascending: true })
 
-    if (origemRes.error || destinoRes.error) {
-      setErro(origemRes.error?.message ?? destinoRes.error?.message ?? 'Erro ao carregar')
+    if (origemRes.error) {
+      setErro(origemRes.error.message)
       setCarregando(false)
       return
     }
 
-    const jaExistem = new Set((destinoRes.data ?? []).map(chaveDespesa))
-
-    setLinhas((origemRes.data ?? []).map(e => {
-      const duplicada = jaExistem.has(chaveDespesa(e))
-      return {
-        origem: e,
-        // As repetidas vêm desmarcadas, para não duplicar sem dar por isso.
-        selecionada: !duplicada,
-        valor: String(e.amount ?? ''),
-        duplicada,
-      }
-    }))
+    setLinhas((origemRes.data ?? []).map(e => ({
+      origem: e,
+      selecionada: true,
+      valor: String(e.amount ?? ''),
+    })))
     setCarregando(false)
   }
 
@@ -147,13 +141,58 @@ export default function CopiarDespesasModal({ defaultTarget, onClose, onCopied }
 
   const totalSelecionado = selecionadas.reduce((s, l) => s + (parseFloat(l.valor) || 0), 0)
 
-  async function copiar() {
+  /**
+   * Verifica duplicados (mesmo valor, data próxima — a mesma verificação
+   * usada no resto da app) entre as linhas selecionadas e o que já existe no
+   * mês de destino. Se encontrar alguma coisa suspeita, mostra UMA janela de
+   * revisão em vez de criar logo — sem fila de popups, uma decisão só.
+   */
+  async function iniciarCopia() {
     if (mesmoMes || selecionadas.length === 0) return
+    setErro(''); setVerificando(true)
+
+    const revisao: DuplicataRevisao[] = []
+    for (const linha of selecionadas) {
+      const valor = parseFloat(linha.valor)
+      if (!valor || valor <= 0) continue
+      const dataNova = dataNoMes(linha.origem.expense_date, destino)
+      const similares = await findSimilarExpenses(supabase, parseFloat(valor.toFixed(2)), dataNova)
+      if (similares.length > 0) {
+        revisao.push({ linhaId: linha.origem.id, descricao: linha.origem.description, similares, manter: false })
+      }
+    }
+
+    setVerificando(false)
+
+    if (revisao.length > 0) {
+      setRevisaoDuplicados(revisao)
+      return
+    }
+
+    await copiar(selecionadas.map(l => l.origem.id))
+  }
+
+  function alternarManterDuplicado(linhaId: string) {
+    setRevisaoDuplicados(prev => prev?.map(r => r.linhaId === linhaId ? { ...r, manter: !r.manter } : r) ?? null)
+  }
+
+  async function confirmarComRevisao() {
+    if (!revisaoDuplicados) return
+    const excluidas = new Set(revisaoDuplicados.filter(r => !r.manter).map(r => r.linhaId))
+    const idsParaCopiar = selecionadas.map(l => l.origem.id).filter(id => !excluidas.has(id))
+    setRevisaoDuplicados(null)
+    if (idsParaCopiar.length > 0) await copiar(idsParaCopiar)
+  }
+
+  async function copiar(idsParaCopiar: string[]) {
     setCopiando(true); setErro('')
 
     let criadas = 0
+    let totalCriado = 0
 
-    for (const linha of selecionadas) {
+    for (const id of idsParaCopiar) {
+      const linha = linhas.find(l => l.origem.id === id)
+      if (!linha) continue
       const e = linha.origem
       const valor = parseFloat(linha.valor)
       if (!valor || valor <= 0) continue
@@ -176,12 +215,13 @@ export default function CopiarDespesasModal({ defaultTarget, onClose, onCopied }
       if (error) { setErro(`Erro ao copiar "${e.description}": ${error}`); setCopiando(false); return }
 
       criadas += 1
+      totalCriado += valor
     }
 
     await logAccess({
       action: 'criar',
       page: '/despesas',
-      details: `Copiou ${criadas} despesa(s) de ${getMonthLabel(origem)} para ${getMonthLabel(destino)} — total ${formatCurrency(totalSelecionado)}`,
+      details: `Copiou ${criadas} despesa(s) de ${getMonthLabel(origem)} para ${getMonthLabel(destino)} — total ${formatCurrency(totalCriado)}`,
     })
 
     setCopiando(false)
@@ -189,6 +229,54 @@ export default function CopiarDespesasModal({ defaultTarget, onClose, onCopied }
   }
 
   useEffect(() => { carregar() }, [origem, destino])
+
+  if (revisaoDuplicados) {
+    return (
+      <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+        <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+
+          <div className="flex items-center justify-between p-5 border-b border-gray-100">
+            <div>
+              <h2 className="font-semibold text-lg text-gray-900">⚠️ Possíveis despesas repetidas</h2>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Estas despesas parecem já existir em {getMonthLabel(destino)} (mesmo valor, data próxima). Vêm desmarcadas — marca as que queres copiar mesmo assim.
+              </p>
+            </div>
+            <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-5 space-y-3">
+            {revisaoDuplicados.map(r => (
+              <label key={r.linhaId} className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5 cursor-pointer">
+                <input type="checkbox" className="w-4 h-4 accent-emerald-600 cursor-pointer mt-0.5"
+                  checked={r.manter} onChange={() => alternarManterDuplicado(r.linhaId)} />
+                <div className="text-sm">
+                  <p className="font-medium text-gray-800">{r.descricao}</p>
+                  {r.similares.map(s => (
+                    <p key={s.id} className="text-xs text-amber-700 mt-0.5">
+                      Já existe: {s.description} — {formatCurrency(s.amount)} em {s.expense_date}
+                    </p>
+                  ))}
+                </div>
+              </label>
+            ))}
+          </div>
+
+          <div className="border-t border-gray-100 p-4 flex items-center justify-end gap-3">
+            <button className="btn-secondary" onClick={() => setRevisaoDuplicados(null)} disabled={copiando}>
+              <ArrowLeft className="w-4 h-4" /> Voltar
+            </button>
+            <button className="btn-primary" onClick={confirmarComRevisao} disabled={copiando}>
+              {copiando
+                ? <><Loader2 className="w-4 h-4 animate-spin" /> A copiar...</>
+                : <><Copy className="w-4 h-4" /> Confirmar e copiar</>}
+            </button>
+          </div>
+
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
@@ -265,18 +353,13 @@ export default function CopiarDespesasModal({ defaultTarget, onClose, onCopied }
                 </thead>
                 <tbody className="divide-y divide-gray-50">
                   {linhas.map(l => (
-                    <tr key={l.origem.id} className={l.duplicada ? 'bg-amber-50/50' : 'hover:bg-gray-50 transition-colors'}>
+                    <tr key={l.origem.id} className="hover:bg-gray-50 transition-colors">
                       <td className="table-cell">
                         <input type="checkbox" className="w-4 h-4 accent-emerald-600 cursor-pointer"
                           checked={l.selecionada} onChange={() => alternar(l.origem.id)} />
                       </td>
                       <td className="table-cell">
                         <p className="font-medium text-gray-800">{l.origem.description}</p>
-                        {l.duplicada && (
-                          <p className="text-xs text-amber-700 font-medium mt-0.5">
-                            ⚠️ Já existe em {getMonthLabel(destino)}
-                          </p>
-                        )}
                       </td>
                       <td className="table-cell text-xs text-gray-600">{categoryLabel(l.origem.category)}</td>
                       <td className="table-cell text-xs text-gray-600">{l.origem.supplier ?? '—'}</td>
@@ -307,11 +390,13 @@ export default function CopiarDespesasModal({ defaultTarget, onClose, onCopied }
             )}
           </div>
           <div className="flex gap-3">
-            <button className="btn-secondary" onClick={onClose} disabled={copiando}>Cancelar</button>
-            <button className="btn-primary" onClick={copiar}
-              disabled={copiando || mesmoMes || selecionadas.length === 0}>
+            <button className="btn-secondary" onClick={onClose} disabled={copiando || verificando}>Cancelar</button>
+            <button className="btn-primary" onClick={iniciarCopia}
+              disabled={copiando || verificando || mesmoMes || selecionadas.length === 0}>
               {copiando
                 ? <><Loader2 className="w-4 h-4 animate-spin" /> A copiar...</>
+                : verificando
+                ? <><Loader2 className="w-4 h-4 animate-spin" /> A verificar...</>
                 : <><Copy className="w-4 h-4" /> Copiar {selecionadas.length} despesa(s)</>}
             </button>
           </div>

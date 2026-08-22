@@ -17,7 +17,7 @@
 - [x] **Passo 11** — Critério de duplicado em leituras de contador → unificar (item 6) — commit feito
 - [x] **Passo 12** — Cálculo "rendas em falta mês a mês" → função única (item 7) — commit feito
 - [x] **Passo 13** — Corrigir `ManualDocumentModal` (item 3) e faturas de eletricidade (item 4) — commit feito
-- [ ] Passo 14 — Criação de despesas → `createExpense()` único (item 9) — **ronda final em curso (Temas A-D), ver nota abaixo**
+- [x] **Passo 14** — Criação de despesas → `createExpense()` único (item 9) — commit feito (ronda final em 4 temas, ver nota abaixo)
 - [x] **Passo 15** — Criação de receitas → `createIncome()` único (item 10) — commit feito, ver nota sobre o âmbito
 - [ ] Passo 16 — Alocação automática de pagamentos → unificar (item 8)
 
@@ -233,6 +233,8 @@ O que cada sítio já fazia de forma diferente (textos de `notes`/descrição do
 **Aviso de duplicados (P6)** — usa `findSimilarExpenses()` (criada no Tema B) antes de criar, com `confirm()`, aplicado nos fluxos manuais de um-a-um: `documentos/page.tsx`, `ExpenseModal.tsx`, `ManualDocumentModal.tsx`, `BankMatchModal.tsx`, `trabalhadores/[id]/page.tsx`. **Sem aviso** em 3 sítios, por decisão já tomada ou por continuar a valer o mesmo raciocínio do P6 para fluxos automáticos:
 - `api/process-document/route.ts` e `lib/bankExpense.ts` — fluxos automáticos, já tinham a sua própria lógica de reaproveitar despesa órfã (Tema B), P6 diz para manter o comportamento atual.
 - `CopiarDespesasModal.tsx` e `eletricidade/quadros/page.tsx` (`ensureExpense`, chamado num ciclo de importação em lote) — correm em ciclo sobre várias despesas de uma vez; um `confirm()` por despesa criaria uma fila de popups, o mesmo problema que motivou o Tema D. `CopiarDespesasModal.tsx` vai ganhar o resumo único do Tema D; `ensureExpense` não tinha esse pedido explícito, mas fica com a mesma lógica (sem aviso aqui) até se decidir se também precisa de um resumo — sinalizado, não decidido sozinho para além do que já foi dito.
+
+**Tema D — Copiar Despesas: resumo único de duplicados.** O ecrã já tinha alguma deteção de repetições (por descrição+fornecedor iguais), mas usava um critério diferente do resto da app e mostrava-a só como uma marca de água na tabela principal (linha a amarelo, checkbox pré-desmarcada), sem um momento de decisão dedicado. Substituído pelo critério do Tema C (mesmo valor, data próxima, via `findSimilarExpenses`) e por uma janela de revisão dedicada: ao clicar "Copiar", primeiro verifica as despesas selecionadas contra o que já existe no mês de destino; se encontrar alguma suspeita, mostra UMA janela só com essas (as outras seguem em frente sem interrupção), com checkboxes para escolher quais copiar mesmo assim — sem fila de popups, uma decisão só. Se não houver suspeitas, copia logo, como antes.
 
 **Passo 8 — nota sobre estilo visual preservado.** A app tinha 2 estilos diferentes para mostrar a categoria: os formulários de criar/editar despesa (sem emoji, ex. "Eletricidade (EDP)") e o filtro da página de Despesas (com emoji, ex. "⚡ Eletricidade"). Em vez de unificar os dois (o que mudaria texto onde não havia bug), `lib/expenseCategories.ts` guarda os dois rótulos lado a lado (`label` e `filterLabel`) — cada sítio continua a mostrar exatamente o que mostrava antes, exceto "administracao", que estava mesmo em falta no filtro e nas cores da página de Despesas (o bug confirmado com dados reais: 10 despesas). Essa categoria ganha agora uma cor própria (cinza-azulado) em vez de cair na cor "outros" por omissão.
 
