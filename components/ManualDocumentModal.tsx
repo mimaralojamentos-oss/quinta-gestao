@@ -6,6 +6,8 @@ import { X, Download, CheckCircle, Loader2 } from 'lucide-react'
 import { logAccess } from '@/lib/logAccess'
 import { slugifyFilename } from '@/lib/utils'
 import { CASH_FUND_START_DATE } from '@/lib/bankExpense'
+import { createExpense } from '@/lib/createExpense'
+import { findSimilarExpenses } from '@/lib/expenseDuplicates'
 
 interface Props {
   onClose: () => void
@@ -233,20 +235,30 @@ export default function ManualDocumentModal({ onClose, onSaved }: Props) {
       // 5. Create expense (optional)
       let newExpenseId: string | null = null
       if (form.tipo === 'despesa' && form.createExpense && form.amount && parseFloat(form.amount) > 0) {
-        const { data: newExpense, error: expErr } = await supabase.from('expenses').insert({
-          expense_date: form.doc_date,
-          category: 'outros',
-          type: 'pontual',
-          description: form.title || form.description,
-          amount: parseFloat(form.amount),
-          payment_method: form.payment_method,
-          supplier: form.supplier || null,
-          notes: `Criado via Documento Manual — ${autoDocNum}`,
-        }).select().single()
+        const valorDespesa = parseFloat(form.amount)
+        const similares = await findSimilarExpenses(supabase, valorDespesa, form.doc_date)
+        const prosseguir = similares.length === 0 || confirm(
+          `Já existe uma despesa parecida (mesmo valor, data próxima):\n\n${
+            similares.map(s => `• ${s.expense_date} — ${s.description} (${s.amount.toFixed(2)}€)`).join('\n')
+          }\n\nCriar mesmo assim?`
+        )
 
-        if (!expErr && newExpense) {
-          newExpenseId = newExpense.id
-          await supabase.from('documents').update({ expense_id: newExpense.id }).eq('id', newDoc.id)
+        if (prosseguir) {
+          const { expense: newExpense } = await createExpense(supabase, {
+            expense_date: form.doc_date,
+            category: 'outros',
+            type: 'pontual',
+            description: form.title || form.description,
+            amount: valorDespesa,
+            payment_method: form.payment_method as 'dinheiro' | 'banco',
+            supplier: form.supplier || null,
+            notes: `Criado via Documento Manual — ${autoDocNum}`,
+            documentId: newDoc.id,
+            // O movimento de caixa desta despesa é controlado pela checkbox
+            // "Adicionar ao Fundo de Maneio" mais abaixo, não automaticamente.
+            skipCashMovement: true,
+          })
+          if (newExpense) newExpenseId = newExpense.id
         }
       }
 

@@ -17,6 +17,8 @@ import { mergeCategories, normalizeCategory } from '@/lib/incomeCategories'
 import { buildRentPaymentPlan, DESTINOS, type RentPaymentPlan, type DestinoPagamento } from '@/lib/rentPaymentPlan'
 import DestinoPagamentoPicker from '@/components/DestinoPagamentoPicker'
 import { logAccess } from '@/lib/logAccess'
+import { createExpense } from '@/lib/createExpense'
+import { findSimilarExpenses } from '@/lib/expenseDuplicates'
 
 const supabase = createClient()
 
@@ -277,23 +279,32 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
     if (!newExpense.description.trim()) { setNewExpenseError('A descrição é obrigatória'); return }
     if (!valor || valor <= 0) { setNewExpenseError('Indica um valor válido'); return }
 
+    const valorArredondado = parseFloat(valor.toFixed(2))
+    const similares = await findSimilarExpenses(supabase, valorArredondado, newExpense.expense_date)
+    if (similares.length > 0) {
+      const lista = similares.map(s => `• ${formatDate(s.expense_date)} — ${s.description} (${formatCurrency(s.amount)})`).join('\n')
+      if (!confirm(`Já existe uma despesa parecida (mesmo valor, data próxima):\n\n${lista}\n\nCriar mesmo assim?`)) return
+    }
+
     setSavingNewExpense(true); setNewExpenseError('')
 
-    const { data, error } = await supabase.from('expenses').insert({
+    // Saiu do banco, por isso nunca mexe no fundo de maneio. Não grava
+    // bank_transaction_id — quem faz a ligação é o fluxo normal de gravação,
+    // para não ficar uma despesa presa se o operador mudar de ideias.
+    const { expense: data, error } = await createExpense(supabase, {
       expense_date: newExpense.expense_date,
       category: newExpense.category,
       type: 'pontual',
       description: newExpense.description.trim(),
-      amount: parseFloat(valor.toFixed(2)),
-      // Saiu do banco, por isso nunca mexe no fundo de maneio.
+      amount: valorArredondado,
       payment_method: 'banco',
       supplier: newExpense.supplier.trim() || null,
       notes: [newExpense.notes.trim(), `Registo manual criado na reconciliação bancária de ${formatDate(tx.transaction_date)} — sem documento de compra`]
         .filter(Boolean).join(' · '),
-    }).select().single()
+    })
 
     setSavingNewExpense(false)
-    if (error) { setNewExpenseError(error.message); return }
+    if (error || !data) { setNewExpenseError(error ?? 'Erro desconhecido'); return }
 
     await logAccess({
       action: 'criar',

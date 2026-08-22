@@ -7,6 +7,8 @@ import { supabase } from '@/lib/supabase'
 import { formatCurrency, formatDate, formatDateTime, normalizeText, getTenantName, getSpaceRef, openStorageDocument, deleteExpenseSafely } from '@/lib/utils'
 import { meterReadingExists } from '@/lib/meterReadings'
 import { EXPENSE_CATEGORIES } from '@/lib/expenseCategories'
+import { createExpense } from '@/lib/createExpense'
+import { findSimilarExpenses } from '@/lib/expenseDuplicates'
 import { Search, FileText, Eye, FolderOpen, Trash2, X, Plus, Upload, Loader2, CheckCircle, AlertCircle, Edit2, Filter, ChevronDown, ChevronUp, Zap } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import { logAccess } from '@/lib/logAccess'
@@ -247,20 +249,31 @@ export default function DocumentosPage() {
 
   async function handleCreateExpense(doc: Document) {
     setCreatingExpense(true)
-    const { data: newExpense } = await supabase.from('expenses').insert({
-      expense_date: doc.doc_date ?? new Date().toISOString().slice(0, 10),
+    const expense_date = doc.doc_date ?? new Date().toISOString().slice(0, 10)
+    const amount = doc.amount ?? 0
+
+    const similares = await findSimilarExpenses(supabase, amount, expense_date)
+    if (similares.length > 0) {
+      const lista = similares.map(s => `• ${formatDate(s.expense_date)} — ${s.description} (${formatCurrency(s.amount)})`).join('\n')
+      if (!confirm(`Já existe uma despesa parecida (mesmo valor, data próxima):\n\n${lista}\n\nCriar mesmo assim?`)) {
+        setCreatingExpense(false)
+        setCreateExpenseConfirm(null)
+        return
+      }
+    }
+
+    const { expense: newExpense } = await createExpense(supabase, {
+      expense_date,
       category: doc.category ?? 'outros',
       type: 'pontual',
       description: doc.items_summary ?? doc.supplier_name ?? doc.original_name ?? 'Despesa',
-      amount: doc.amount ?? 0,
+      amount,
       payment_method: 'banco',
       supplier: doc.supplier_name ?? null,
       notes: doc.doc_number ? `Criado manualmente — Documento nº ${doc.doc_number}` : 'Criado manualmente a partir de documento',
-    }).select().single()
-    if (newExpense) {
-      await supabase.from('documents').update({ expense_id: newExpense.id }).eq('id', doc.id)
-      await fetchAll()
-    }
+      documentId: doc.id,
+    })
+    if (newExpense) await fetchAll()
     setCreatingExpense(false)
     setCreateExpenseConfirm(null)
   }

@@ -12,7 +12,8 @@ import {
 } from '@/lib/ponto'
 import { useAuth } from '@/lib/auth-context'
 import { logAccess } from '@/lib/logAccess'
-import { CASH_FUND_START_DATE } from '@/lib/bankExpense'
+import { createExpense } from '@/lib/createExpense'
+import { findSimilarExpenses } from '@/lib/expenseDuplicates'
 import {
   ChevronLeft, Copy, Check, Plus, Trash2, Pencil, X, Loader2,
   Banknote, RefreshCw, Link2, FileText,
@@ -265,9 +266,16 @@ export default function TrabalhadorPage({ params }: { params: Promise<{ id: stri
     const numero = novoNumeroRecibo()
     const descricao = `Pagamento a ${worker.name} — trabalho${notas ? ` (${notas})` : ''}`
 
+    const similares = await findSimilarExpenses(supabase, valor, data)
+    if (similares.length > 0) {
+      const lista = similares.map(s => `• ${formatDate(s.expense_date)} — ${s.description} (${formatCurrency(s.amount)})`).join('\n')
+      if (!confirm(`Já existe uma despesa parecida (mesmo valor, data próxima):\n\n${lista}\n\nRegistar mesmo assim?`)) return
+    }
+
     try {
-      // 1. Despesa, paga em dinheiro
-      const { data: despesa, error: errDespesa } = await supabase.from('expenses').insert({
+      // 1. Despesa, paga em dinheiro (cria também a saída do fundo de maneio,
+      // a partir do início do fundo de maneio)
+      const { expense: despesa, error: errDespesa } = await createExpense(supabase, {
         expense_date: data,
         category: 'pessoal',
         type: 'pontual',
@@ -276,21 +284,10 @@ export default function TrabalhadorPage({ params }: { params: Promise<{ id: stri
         payment_method: 'dinheiro',
         supplier: worker.name,
         notes: `Folha de ponto — recibo ${numero}`,
-      }).select().single()
-      if (errDespesa) throw new Error(`ao criar a despesa: ${errDespesa.message}`)
-
-      // 2. Saída do fundo de maneio (só a partir do início do fundo de maneio)
-      if (data >= CASH_FUND_START_DATE) {
-        await supabase.from('cash_fund_movements').insert({
-          movement_date: data,
-          description: `💸 ${descricao}`,
-          amount: -Math.abs(valor),
-          type: 'saida',
-          source: 'despesa',
-          source_id: despesa.id,
-          notes: notas || null,
-        })
-      }
+        cashMovementDescription: `💸 ${descricao}`,
+        cashMovementNotes: notas || null,
+      })
+      if (errDespesa || !despesa) throw new Error(`ao criar a despesa: ${errDespesa ?? 'erro desconhecido'}`)
 
       // 3. Recibo em PDF, guardado nos documentos
       let documentoId: string | null = null

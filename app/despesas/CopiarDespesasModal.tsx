@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, categoryLabel, getMonthLabel } from '@/lib/utils'
 import { logAccess } from '@/lib/logAccess'
-import { CASH_FUND_START_DATE } from '@/lib/bankExpense'
+import { createExpense } from '@/lib/createExpense'
 import { X, Copy, AlertTriangle, Loader2 } from 'lucide-react'
 
 const supabase = createClient()
@@ -160,35 +160,20 @@ export default function CopiarDespesasModal({ defaultTarget, onClose, onCopied }
 
       const dataNova = dataNoMes(e.expense_date, destino)
 
-      const { data: nova, error } = await supabase.from('expenses').insert({
+      // De propósito: faturas e documentos NÃO são copiados.
+      const { error } = await createExpense(supabase, {
         expense_date: dataNova,
         category: e.category,
         type: e.type,
         description: e.description,
         amount: parseFloat(valor.toFixed(2)),
-        payment_method: e.payment_method,
+        payment_method: e.payment_method as 'dinheiro' | 'banco',
         supplier: e.supplier ?? null,
         notes: e.notes ?? null,
         project_id: e.project_id ?? null,
-        // De propósito: faturas e documentos NÃO são copiados.
-      }).select().single()
+      })
 
-      if (error) { setErro(`Erro ao copiar "${e.description}": ${error.message}`); setCopiando(false); return }
-
-      // Pago em dinheiro → tem de sair do fundo de maneio, tal como
-      // acontece quando se cria uma despesa nova à mão. Só a partir do início
-      // do fundo de maneio (CASH_FUND_START_DATE) — datas anteriores não mexem no fundo.
-      if (nova && e.payment_method === 'dinheiro' && dataNova >= CASH_FUND_START_DATE) {
-        await supabase.from('cash_fund_movements').insert({
-          movement_date: dataNova,
-          description: `💸 ${e.description}${e.supplier ? ` — ${e.supplier}` : ''}`,
-          amount: -Math.abs(parseFloat(valor.toFixed(2))),
-          type: 'saida',
-          source: 'despesa',
-          source_id: nova.id,
-          notes: e.notes ?? null,
-        })
-      }
+      if (error) { setErro(`Erro ao copiar "${e.description}": ${error}`); setCopiando(false); return }
 
       criadas += 1
     }

@@ -9,6 +9,8 @@ import { EXPENSE_CATEGORIES } from '@/lib/expenseCategories'
 import { logAccess } from '@/lib/logAccess'
 import { useFileDrop } from '@/lib/useFileDrop'
 import { CASH_FUND_START_DATE } from '@/lib/bankExpense'
+import { createExpense } from '@/lib/createExpense'
+import { findSimilarExpenses } from '@/lib/expenseDuplicates'
 
 const supabase = createClient()
 
@@ -198,19 +200,21 @@ export default function ExpenseModal({ expense, duplicateFrom, onClose, onSaved 
 
     } else {
       // Nova despesa
-      const { data: newExpense, error: err } = await supabase
-        .from('expenses').insert(payload).select().single()
-      if (err) { setError(err.message); setSaving(false); return }
-
-      if (form.payment_method === 'dinheiro' && newExpense && form.expense_date >= CASH_FUND_START_DATE) {
-        await supabase.from('cash_fund_movements').insert({
-          movement_date: form.expense_date,
-          description: `💸 ${form.description}${form.supplier ? ` — ${form.supplier}` : ''}`,
-          amount: -Math.abs(parseFloat(form.amount)),
-          type: 'saida', source: 'despesa', source_id: newExpense.id,
-          notes: form.notes || null,
-        })
+      const similares = await findSimilarExpenses(supabase, parseFloat(form.amount), form.expense_date)
+      if (similares.length > 0) {
+        const lista = similares.map(s => `• ${formatDate(s.expense_date)} — ${s.description} (${formatCurrency(s.amount)})`).join('\n')
+        if (!confirm(`Já existe uma despesa parecida (mesmo valor, data próxima):\n\n${lista}\n\nCriar mesmo assim?`)) {
+          setSaving(false)
+          return
+        }
       }
+
+      const { expense: newExpense, error: err } = await createExpense(supabase, {
+        ...payload,
+        payment_method: payload.payment_method as 'dinheiro' | 'banco',
+        documentId: selectedDocId || null,
+      })
+      if (err) { setError(err); setSaving(false); return }
 
       if (invoiceFile && newExpense) {
         const formData = new FormData()
@@ -222,10 +226,6 @@ export default function ExpenseModal({ expense, duplicateFrom, onClose, onSaved 
         if (docId) {
           await supabase.from('documents').update({ expense_id: newExpense.id }).eq('id', docId)
         }
-      }
-      // Ligar documento existente selecionado
-      if (selectedDocId && newExpense) {
-        await supabase.from('documents').update({ expense_id: newExpense.id }).eq('id', selectedDocId)
       }
 
       await logAccess({

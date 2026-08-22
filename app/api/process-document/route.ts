@@ -5,8 +5,8 @@ import { createHash } from 'crypto'
 import { requireRole } from '@/lib/require-role'
 import { checkFileSize } from '@/lib/fileUpload'
 import { meterReadingExists } from '@/lib/meterReadings'
-import { CASH_FUND_START_DATE } from '@/lib/bankExpense'
 import { findUnlinkedExpenseByAmount } from '@/lib/expenseDuplicates'
+import { createExpense } from '@/lib/createExpense'
 
 export async function POST(request: Request) {
   const auth = await requireRole(['admin', 'coadmin', 'electrician'])
@@ -358,32 +358,25 @@ IMPORTANTE sobre o valor ("amount"):
         await supabase.from('documents').update({ expense_id: existingExpense.id }).eq('id', doc.id)
         expenseId = existingExpense.id
       } else {
-        const { data: newExpense } = await supabase.from('expenses').insert({
+        // Fluxo automático — sem aviso de duplicado (já usa
+        // findUnlinkedExpenseByAmount acima para reaproveitar em vez de duplicar).
+        const { expense: newExpense } = await createExpense(supabase, {
           expense_date: extracted.doc_date,
           category: extracted.category ?? 'outros',
           type: 'pontual',
           description: extracted.items_summary ?? extracted.supplier_name ?? 'Fatura',
           amount: extracted.amount,
-          payment_method: paymentMethod,
+          payment_method: paymentMethod as 'dinheiro' | 'banco',
           supplier: extracted.supplier_name ?? null,
           notes: `Criado automaticamente a partir do documento ${extracted.doc_number ?? ''}`.trim(),
-        }).select().single()
+          documentId: doc.id,
+          cashMovementDescription: `💸 ${extracted.items_summary ?? extracted.supplier_name ?? 'Fatura'}`,
+          cashMovementNotes: null,
+        })
 
         if (newExpense) {
-          await supabase.from('documents').update({ expense_id: newExpense.id }).eq('id', doc.id)
           expenseId = newExpense.id
           autoExpense = true
-
-          if (paymentMethod === 'dinheiro' && extracted.doc_date >= CASH_FUND_START_DATE) {
-            await supabase.from('cash_fund_movements').insert({
-              movement_date: extracted.doc_date,
-              description: `💸 ${extracted.items_summary ?? extracted.supplier_name ?? 'Fatura'}`,
-              amount: -Math.abs(extracted.amount),
-              type: 'saida',
-              source: 'despesa',
-              source_id: newExpense.id,
-            })
-          }
         }
       }
     }

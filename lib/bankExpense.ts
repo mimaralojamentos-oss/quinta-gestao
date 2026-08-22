@@ -52,7 +52,8 @@ const NON_EXPENSE_TYPES = new Set([
   'outro',
 ])
 
-const CASH_FUND_START_DATE = '2026-06-01'
+import { CASH_FUND_START_DATE } from './cashFundConfig'
+import { createExpense } from './createExpense'
 
 function toISODate(value: string): string {
   return value.slice(0, 10)
@@ -200,7 +201,7 @@ export async function ensureExpenseForTransaction(
     const notesParts = [`Criado automaticamente a partir do movimento bancário de ${txDate}`]
     if (doc?.doc_number) notesParts.push(`Documento nº ${doc.doc_number}`)
 
-    const { data: newExpense, error: insertErr } = await supabase.from('expenses').insert({
+    const { expense: newExpense, error: insertErrMsg, errorCode } = await createExpense(supabase, {
       expense_date: expenseDate,
       category,
       type: 'pontual',
@@ -210,12 +211,13 @@ export async function ensureExpenseForTransaction(
       supplier,
       bank_transaction_id: tx.id,
       notes: notesParts.join(' · '),
-    }).select().single()
+      documentId: doc && !doc.expense_id ? doc.id : null,
+    })
 
     // Se falhou por violação do UNIQUE, outra execução criou-a entretanto:
     // procura-a e liga, em vez de duplicar.
-    if (insertErr) {
-      if (insertErr.code === '23505') {
+    if (!newExpense) {
+      if (errorCode === '23505') {
         const { data: raced } = await supabase
           .from('expenses').select('id').eq('bank_transaction_id', tx.id).maybeSingle()
         if (raced) {
@@ -224,16 +226,12 @@ export async function ensureExpenseForTransaction(
           return { outcome: 'already_linked', expenseId: raced.id, message: 'Despesa já tinha sido criada para este movimento' }
         }
       }
-      return { outcome: 'error', expenseId: null, message: insertErr.message }
+      return { outcome: 'error', expenseId: null, message: insertErrMsg ?? 'Erro desconhecido' }
     }
 
     await supabase.from('bank_transactions')
       .update({ confirmed_expense_id: newExpense.id })
       .eq('id', tx.id)
-
-    if (doc && !doc.expense_id) {
-      await supabase.from('documents').update({ expense_id: newExpense.id }).eq('id', doc.id)
-    }
 
     return { outcome: 'created', expenseId: newExpense.id, message: 'Despesa criada automaticamente' }
   } catch (e: any) {

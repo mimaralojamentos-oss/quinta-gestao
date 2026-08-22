@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, formatDate, normalizeText, openStorageDocument, formatMonthShort } from '@/lib/utils'
 import { meterReadingExists } from '@/lib/meterReadings'
+import { createExpense } from '@/lib/createExpense'
 import { Plus, Zap, Trash2, X, ChevronDown, ChevronRight, Upload, Loader2, RefreshCw, CheckCircle, AlertCircle, BarChart2, Eye, Search } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import { useFileDrop, mergeUniqueFiles } from '@/lib/useFileDrop'
@@ -346,7 +347,11 @@ export default function QuadrosPage() {
 
     async function ensureExpense(doc: any) {
       if (!doc.amount || !doc.doc_date || doc.expense_id) return
-      const { data: newExpense } = await supabase.from('expenses').insert({
+      // Corre num ciclo de importação em lote — sem aviso de duplicado aqui,
+      // pelo mesmo motivo do Copiar Despesas (uma fila de popups por fatura
+      // seria péssima experiência); o "ensureExpense" já só corre quando o
+      // documento ainda não tem despesa (verificação acima).
+      await createExpense(supabase, {
         expense_date: doc.doc_date,
         category: 'edp',
         type: 'pontual',
@@ -355,8 +360,8 @@ export default function QuadrosPage() {
         payment_method: 'banco',
         supplier: doc.supplier_name ?? null,
         notes: `Criado automaticamente a partir do documento ${doc.doc_number ?? ''}`.trim(),
-      }).select().single()
-      if (newExpense) await supabase.from('documents').update({ expense_id: newExpense.id }).eq('id', doc.id)
+        documentId: doc.id,
+      })
     }
 
     function matchMeter(doc: any) {
