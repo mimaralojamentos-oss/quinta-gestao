@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase'
 import { X, Download, CheckCircle, Loader2 } from 'lucide-react'
 import { logAccess } from '@/lib/logAccess'
 import { slugifyFilename } from '@/lib/utils'
+import { CASH_FUND_START_DATE } from '@/lib/bankExpense'
 
 interface Props {
   onClose: () => void
@@ -253,8 +254,9 @@ export default function ManualDocumentModal({ onClose, onSaved }: Props) {
       // 6. Add to Fundo de Maneio (optional)
       // O movimento tem de apontar para a despesa (quando existe), nunca para
       // o documento — é pela despesa que o resto da app localiza e limpa este
-      // movimento (ex: ao apagar a despesa).
-      if (form.addToFundo && form.amount && parseFloat(form.amount) > 0) {
+      // movimento (ex: ao apagar a despesa). A regra da data do fundo de
+      // maneio é a mesma para despesas e receitas em dinheiro.
+      if (form.addToFundo && form.amount && parseFloat(form.amount) > 0 && form.doc_date >= CASH_FUND_START_DATE) {
         const isSaida = form.tipo === 'despesa'
         const amtVal = parseFloat(form.amount)
         await supabase.from('cash_fund_movements').insert({

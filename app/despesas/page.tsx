@@ -14,6 +14,7 @@ import { useAuth } from '@/lib/auth-context'
 import { logAccess } from '@/lib/logAccess'
 import SortIcon from '@/components/SortIcon'
 import { useSort } from '@/lib/useSort'
+import { CASH_FUND_START_DATE } from '@/lib/bankExpense'
 
 interface DeleteConfirm {
   expense: any
@@ -140,10 +141,12 @@ function DespesasContent() {
     const newMethod = expense.payment_method === 'dinheiro' ? 'banco' : 'dinheiro'
     await supabase.from('expenses').update({ payment_method: newMethod }).eq('id', expense.id)
     const { data: existingCash } = await supabase.from('cash_fund_movements').select('id').eq('source_id', expense.id).single()
-    if (newMethod === 'dinheiro') {
+    if (newMethod === 'dinheiro' && expense.expense_date >= CASH_FUND_START_DATE) {
       if (existingCash) { await supabase.from('cash_fund_movements').update({ amount: -Math.abs(expense.amount), movement_date: expense.expense_date, description: `💸 ${expense.description}${expense.supplier ? ` — ${expense.supplier}` : ''}` }).eq('id', existingCash.id) }
       else { await supabase.from('cash_fund_movements').insert({ movement_date: expense.expense_date, description: `💸 ${expense.description}${expense.supplier ? ` — ${expense.supplier}` : ''}`, amount: -Math.abs(expense.amount), type: 'saida', source: 'despesa', source_id: expense.id }) }
-    } else { if (existingCash) await supabase.from('cash_fund_movements').delete().eq('id', existingCash.id) }
+    } else if (newMethod !== 'dinheiro') { if (existingCash) await supabase.from('cash_fund_movements').delete().eq('id', existingCash.id) }
+    // Passou a "dinheiro" mas com data anterior ao início do fundo de maneio:
+    // não cria nem apaga nada — um movimento antigo que já existisse fica como está.
     await logAccess({ action: 'editar', page: '/despesas', details: `Alterou método de pagamento da despesa "${expense.description}" para ${newMethod === 'dinheiro' ? 'Dinheiro' : 'Banco'}` })
     setExpenses(prev => prev.map(e => e.id === expense.id ? { ...e, payment_method: newMethod } : e))
     setExpenses(prev => { const total = prev.reduce((s, e) => s + e.amount, 0); const cash = prev.filter(e => e.payment_method === 'dinheiro').reduce((s, e) => s + e.amount, 0); setSummary({ total, cash, bank: total - cash }); return prev })
