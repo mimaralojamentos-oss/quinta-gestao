@@ -11,8 +11,9 @@ import LeaseModal from './LeaseModal'
 import { useAuth } from '@/lib/auth-context'
 import EmailComposer from '@/components/EmailComposer'
 import { logAccess } from '@/lib/logAccess'
-import { buildAppliedAdvanceMap, appliedAdvanceFor } from '@/lib/advanceCredit'
+import { buildAppliedAdvanceMap } from '@/lib/advanceCredit'
 import { getDebtRemaining } from '@/lib/debts'
+import { getMonthlyRentStatus } from '@/lib/rentShortfall'
 import SortIcon from '@/components/SortIcon'
 import { useSort } from '@/lib/useSort'
 import Link from 'next/link'
@@ -114,19 +115,9 @@ export default function InquilinosPage() {
     const { data: rentHistoryData } = await supabase
       .from('lease_rent_history').select('lease_id, effective_date, monthly_rent')
 
-    const getRentForMonth = (leaseId: string, monthStr: string, fallback: number): number => {
-      const aplicaveis = (rentHistoryData ?? [])
-        .filter((h: any) => h.lease_id === leaseId && h.effective_date <= `${monthStr}-01`)
-        .sort((a: any, b: any) => b.effective_date.localeCompare(a.effective_date))
-      return aplicaveis[0]?.monthly_rent ?? fallback
-    }
-
     // Adiantamentos já aplicados a rendas — contam como pagamento desse mês.
     const appliedAdvances = buildAppliedAdvanceMap(paymentsData)
 
-    const mayStart = new Date('2026-05-01')
-    const today = new Date()
-    today.setDate(1)
     const refs = [...new Set((spacesData ?? []).map(s => s.ref))].sort()
     setAllSpaceRefs(refs)
 
@@ -144,26 +135,12 @@ export default function InquilinosPage() {
       // liquidado, e a diferença em falta desaparecia da dívida.
       let missingDebt = 0
       for (const lease of leases.filter(l => l.status === 'ativo')) {
-        if (!lease.start_date) continue
-        const contractStart = new Date(lease.start_date)
-        contractStart.setDate(1)
-        const start = contractStart > mayStart ? contractStart : mayStart
-        const cursor = new Date(start)
-        while (cursor <= today) {
-          const monthStr = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`
-          const rentForMonth = getRentForMonth(lease.id, monthStr, lease.monthly_rent)
-          const registered = (paymentsData ?? [])
-            .filter(p =>
-              p.lease_id === lease.id &&
-              p.reference_month?.slice(0, 7) === monthStr &&
-              (p.tipo === 'renda' || !p.tipo)
-            )
-            .reduce((s, p) => s + (p.amount ?? 0), 0)
-
-          const credito = appliedAdvanceFor(appliedAdvances, lease.id, monthStr)
-          const shortfall = parseFloat((rentForMonth - registered - credito).toFixed(2))
+        const meses = getMonthlyRentStatus({
+          lease, payments: paymentsData ?? [], rentHistory: rentHistoryData, appliedAdvances,
+        })
+        for (const m of meses) {
+          const shortfall = parseFloat((m.rentForMonth - m.totalPaidThisMonth - m.advanceThisMonth).toFixed(2))
           if (shortfall >= 0.01) missingDebt += shortfall
-          cursor.setMonth(cursor.getMonth() + 1)
         }
       }
 

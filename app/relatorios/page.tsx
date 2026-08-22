@@ -7,7 +7,8 @@ import { formatDate, getMonthLabel, formatCurrency } from '@/lib/utils'
 import { getDebtRemaining } from '@/lib/debts'
 import { BarChart3, TrendingUp, Home, FileText, Calendar, ChevronDown, ChevronUp, Edit2, X, Save, ClipboardList, Download, Loader2, Receipt, Mail, AlertTriangle, Printer } from 'lucide-react'
 import EmailComposer from '@/components/EmailComposer'
-import { buildAppliedAdvanceMap, appliedAdvanceFor } from '@/lib/advanceCredit'
+import { buildAppliedAdvanceMap } from '@/lib/advanceCredit'
+import { getMonthlyRentStatus } from '@/lib/rentShortfall'
 
 const supabase = createClient()
 
@@ -181,13 +182,6 @@ export default function RelatoriosPage() {
         .from('lease_rent_history').select('lease_id, effective_date, monthly_rent')
         .order('effective_date', { ascending: true })
 
-      function rendaDoMes(leaseId: string, mes: string, fallback: number): number {
-        const aplicaveis = (rentHistory ?? [])
-          .filter((h: any) => h.lease_id === leaseId && h.effective_date <= `${mes}-01`)
-          .sort((a: any, b: any) => b.effective_date.localeCompare(a.effective_date))
-        return aplicaveis[0]?.monthly_rent ?? fallback
-      }
-
       // Leituras por espaço, para saber o período que cada cobrança cobre.
       // A cobrança guarda só o mês de referência; o período real é o intervalo
       // entre a leitura anterior e a leitura que gerou a cobrança.
@@ -220,10 +214,6 @@ export default function RelatoriosPage() {
       const debtPayments = debtPaymentsRes.data ?? []
       const elecCharges = elecRes.data ?? []
 
-      const mayStart = new Date('2026-05-01')
-      const hoje = new Date()
-      hoje.setDate(1)
-
       // Adiantamentos já aplicados a rendas — contam como pagamento desse mês.
       const adiantamentosAplicados = buildAppliedAdvanceMap(payments)
 
@@ -248,39 +238,27 @@ export default function RelatoriosPage() {
         // só entraram 200 €, faltam 175 € — antes o mês era dado como pago
         // só por existir um pagamento, e a diferença desaparecia da dívida.
         for (const lease of tLeases.filter(l => l.status === 'ativo')) {
-          if (!lease.start_date) continue
-          const inicio = new Date(lease.start_date)
-          inicio.setDate(1)
-          const cursor = new Date(inicio > mayStart ? inicio : mayStart)
           const espacoRef = (lease.space as any)?.ref
+          const meses = getMonthlyRentStatus({
+            lease, payments, rentHistory, appliedAdvances: adiantamentosAplicados,
+          })
 
-          while (cursor <= hoje) {
-            const mes = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`
-            const rendaMes = rendaDoMes(lease.id, mes, lease.monthly_rent)
+          for (const m of meses) {
+            const registado = m.totalPaidThisMonth + m.advanceThisMonth
+            const emFalta = parseFloat((m.rentForMonth - registado).toFixed(2))
 
-            const doMes = payments.filter(p =>
-              p.lease_id === lease.id &&
-              p.reference_month?.slice(0, 7) === mes &&
-              (p.tipo === 'renda' || !p.tipo)
-            )
-            // O crédito já formalmente aplicado a esta renda também conta como pago.
-            const credito = appliedAdvanceFor(adiantamentosAplicados, lease.id, mes)
-            const registado = doMes.reduce((s, p) => s + (p.amount ?? 0), 0) + credito
-            const emFalta = parseFloat((rendaMes - registado).toFixed(2))
-
-            if (rendaMes > 0 && emFalta >= 0.01) {
+            if (m.rentForMonth > 0 && emFalta >= 0.01) {
               parcelas.push({
                 grupo: 'Renda',
                 // O valor entre parênteses é o que FALTA, não o que já foi pago —
                 // assim bate certo com o número que aparece na coluna da direita.
-                descricao: doMes.length > 0 || credito > 0
-                  ? `Renda de ${getMonthLabel(mes)}${espacoRef ? ` · ${espacoRef}` : ''} — falta parte (${fmt(emFalta)} de ${fmt(rendaMes)})`
-                  : `Renda de ${getMonthLabel(mes)}${espacoRef ? ` · ${espacoRef}` : ''}`,
+                descricao: m.monthPayments.length > 0 || m.advanceThisMonth > 0
+                  ? `Renda de ${getMonthLabel(m.monthStr)}${espacoRef ? ` · ${espacoRef}` : ''} — falta parte (${fmt(emFalta)} de ${fmt(m.rentForMonth)})`
+                  : `Renda de ${getMonthLabel(m.monthStr)}${espacoRef ? ` · ${espacoRef}` : ''}`,
                 valor: emFalta,
-                data: `${mes}-01`,
+                data: `${m.monthStr}-01`,
               })
             }
-            cursor.setMonth(cursor.getMonth() + 1)
           }
         }
 

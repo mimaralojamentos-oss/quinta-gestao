@@ -9,8 +9,9 @@ import { logAccess } from '@/lib/logAccess'
 import { useFileDrop } from '@/lib/useFileDrop'
 import DestinoPagamentoPicker from '@/components/DestinoPagamentoPicker'
 import { type DestinoPagamento } from '@/lib/rentPaymentPlan'
-import { consumeAdvances, releaseAdvance, describeAdvanceTarget, buildAppliedAdvanceMap, appliedAdvanceFor } from '@/lib/advanceCredit'
+import { consumeAdvances, releaseAdvance, describeAdvanceTarget, buildAppliedAdvanceMap } from '@/lib/advanceCredit'
 import { getDebtRemaining } from '@/lib/debts'
+import { getMonthlyRentStatus } from '@/lib/rentShortfall'
 
 interface Props {
   tenant: Tenant | null
@@ -154,14 +155,6 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
       : { data: [] }
     const rentHistoryAll = rentHistoryRaw ?? []
 
-    const getRentForMonth = (leaseId: string, monthStr: string, fallback: number): number => {
-      const monthStart = monthStr + '-01'
-      const applicable = rentHistoryAll
-        .filter((h: any) => h.lease_id === leaseId && h.effective_date <= monthStart)
-        .sort((a: any, b: any) => b.effective_date.localeCompare(a.effective_date))
-      return applicable[0]?.monthly_rent ?? fallback
-    }
-
     // Pagamentos normais
     const { data: pays } = leaseIds.length > 0
       ? await supabase.from('rent_payments').select('*').in('lease_id', leaseIds).order('reference_month', { ascending: false })
@@ -178,22 +171,13 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
 
     // Rendas em falta
     const missingRows: PaymentRow[] = []
-    const mayStart = new Date('2026-05-01')
-    const today = new Date(); today.setDate(1)
     for (const lease of (leasesData ?? []).filter(l => l.status === 'ativo')) {
-      if (!lease.start_date) continue
-      const contractStart = new Date(lease.start_date); contractStart.setDate(1)
-      const start = contractStart > mayStart ? contractStart : mayStart
-      const cursor = new Date(start)
-      while (cursor <= today) {
-        const monthStr = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`
-        const monthPayments = enriched.filter(p => p.lease_id === lease.id && p.reference_month?.slice(0, 7) === monthStr && (p.tipo === 'renda' || !p.tipo))
-        const totalPaidThisMonth = monthPayments.reduce((s, p) => s + (p.amount ?? 0), 0)
-        // Adiantamento formalmente aplicado a esta renda — conta como pago.
-        const advanceThisMonth = appliedAdvanceFor(advanceByRentMonth, lease.id, monthStr)
+      const meses = getMonthlyRentStatus({
+        lease, payments: enriched, rentHistory: rentHistoryAll, appliedAdvances: advanceByRentMonth,
+      })
+      for (const m of meses) {
+        const { monthStr, rentForMonth, monthPayments, totalPaidThisMonth, advanceThisMonth, hasPayment } = m
         const totalCovered = parseFloat((totalPaidThisMonth + advanceThisMonth).toFixed(2))
-        const hasPayment = monthPayments.length > 0 || advanceThisMonth > 0
-        const rentForMonth = getRentForMonth(lease.id, monthStr, lease.monthly_rent)
 
         // A renda foi paga só com crédito, sem nenhum pagamento em dinheiro:
         // é preciso uma linha para o mês não ficar em branco.
@@ -227,7 +211,6 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
             notes: `Pagamento parcial — faltam ${formatCurrency(shortfall)}`
           })
         }
-        cursor.setMonth(cursor.getMonth() + 1)
       }
     }
 
