@@ -8,6 +8,7 @@ import { useParams, useRouter } from 'next/navigation'
 import { ArrowLeft, Save, Plus, Trash2, Phone, Mail, User, Home, FileText, Zap } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import { logAccess } from '@/lib/logAccess'
+import { getDebtRemaining } from '@/lib/debts'
 
 interface Tenant {
   id: string
@@ -177,12 +178,7 @@ export default function TenantDetailPage() {
     setContacts(prev => prev.map((c, i) => i === index ? { ...c, [field]: value } : c))
   }
 
-  function getRemainingDebt(debt: Debt): number {
-    const paid = (debt.payments ?? []).reduce((s, p) => s + p.amount, 0)
-    return Math.max(0, debt.original_amount - paid)
-  }
-
-  const totalManualDebt = debts.reduce((s, d) => s + getRemainingDebt(d), 0)
+  const totalManualDebt = debts.reduce((s, d) => s + getDebtRemaining(d), 0)
   const activeLease = leases.find(l => l.status === 'ativo')
 
   if (loading) {
@@ -385,7 +381,7 @@ export default function TenantDetailPage() {
             ) : (
               <div className="space-y-3">
                 {debts.map(debt => {
-                  const remaining = getRemainingDebt(debt)
+                  const remaining = getDebtRemaining(debt)
                   const paid = (debt.payments ?? []).reduce((s, p) => s + p.amount, 0)
                   const isSettled = remaining === 0
                   return (

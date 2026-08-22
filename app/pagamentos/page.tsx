@@ -11,6 +11,7 @@ import { useAuth } from '@/lib/auth-context'
 import SortIcon from '@/components/SortIcon'
 import { useSort } from '@/lib/useSort'
 import { PAYMENT_TYPE_LABELS } from '@/lib/paymentTypes'
+import { getDebtRemaining } from '@/lib/debts'
 
 interface LeaseWithDetails {
   id: string
@@ -122,10 +123,7 @@ export default function PagamentosPage() {
       }
 
       const tenantDebts = (debtsData ?? []).filter(d => d.tenant_id === l.tenant?.id)
-      const manualDebt = tenantDebts.reduce((sum, d) => {
-        const paid = (debtPaymentsData ?? []).filter(p => p.debt_id === d.id).reduce((s, p) => s + p.amount, 0)
-        return sum + Math.max(0, d.original_amount - paid)
-      }, 0)
+      const manualDebt = tenantDebts.reduce((sum, d) => sum + getDebtRemaining(d, debtPaymentsData ?? []), 0)
 
       const elecDebt = (elecCharges ?? []).filter(c => c.lease_id === l.id).reduce((s, c) => s + Math.max(0, c.amount - (c.amount_paid ?? 0)), 0)
 

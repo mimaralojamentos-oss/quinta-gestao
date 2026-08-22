@@ -10,6 +10,7 @@ import { useFileDrop } from '@/lib/useFileDrop'
 import DestinoPagamentoPicker from '@/components/DestinoPagamentoPicker'
 import { type DestinoPagamento } from '@/lib/rentPaymentPlan'
 import { consumeAdvances, releaseAdvance, describeAdvanceTarget, buildAppliedAdvanceMap, appliedAdvanceFor } from '@/lib/advanceCredit'
+import { getDebtRemaining } from '@/lib/debts'
 
 interface Props {
   tenant: Tenant | null
@@ -233,8 +234,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
     // Dívidas manuais
     const { data: debtsData } = await supabase.from('debts').select('*, payments:debt_payments(*)').eq('tenant_id', tenant.id).order('reference_date', { ascending: false })
     const manualDebtRows: PaymentRow[] = (debtsData ?? []).map(d => {
-      const paid = (d.payments ?? []).reduce((s: number, p: any) => s + p.amount, 0)
-      const remaining = Math.max(0, d.original_amount - paid)
+      const remaining = getDebtRemaining(d)
       return {
         id: d.id,
         reference_month: d.reference_date,

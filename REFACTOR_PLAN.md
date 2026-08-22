@@ -13,7 +13,7 @@
 - [x] **Passo 7** — Moeda em templates → `formatCurrency` (item 19) — commit feito
 - [x] **Passo 8** — Categorias de despesa → lista única + corrigir `types.ts` + `despesas/page.tsx` (itens 2, 11) — commit feito
 - [x] **Passo 9** — Etiquetas de tipo de pagamento → lista única (item 13) — commit feito
-- [ ] Passo 10 — `getDebtRemaining` → helper único (item 12)
+- [x] **Passo 10** — `getDebtRemaining` → helper único (item 12) — commit feito, 1 de 7 sítios deixado de fora (ver nota abaixo)
 - [ ] Passo 11 — Critério de duplicado em leituras de contador → unificar (item 6)
 - [ ] Passo 12 — Cálculo "rendas em falta mês a mês" → função única (item 7)
 - [ ] Passo 13 — Corrigir `ManualDocumentModal` (item 3) e faturas de eletricidade (item 4)
@@ -191,6 +191,8 @@ Decidido em 2026-08-21: unificar para "Julho 2026" (o formato que `getMonthLabel
 Decidido em 2026-08-21: mesmo critério do Passo 6 — unificar com `formatCurrency`. O texto muda nestes 8 sítios (`relatorios.tsx` x5, `eletricidade/espacos.tsx` x3): vírgula decimal em vez de ponto, e espaço a separar milhares em valores acima de 1000€. O helper `eur()` local em `api/compose-email/route.ts` já produzia texto idêntico ao `formatCurrency` para valores pequenos — só diverge (sem separador de milhares) em valores grandes, por isso foi unificado também.
 
 Nota à parte (não corrigida neste passo, fora de âmbito): `app/relatorios/page.tsx` tem uma terceira forma de mostrar moeda, `fmt()` (linha ~727, usa `toLocaleString` em vez de `Intl.NumberFormat`) — produz o mesmo resultado que `formatCurrency`, só o caminho de código é diferente. Fica registado para uma limpeza futura, não fazia parte do que este passo cobria.
+
+**Passo 10 — nota: `lib/rentPaymentPlan.ts:161-163` deixado de fora, de propósito.** Os outros 6 sítios calculavam "quanto falta pagar" exatamente da mesma forma (`Math.max(0, original - pago)`). Este sétimo faz a conta de forma ligeiramente diferente: em vez de `Math.max(0, ...)`, arredonda a subtração a 2 casas decimais (`parseFloat((original - pago).toFixed(2))`) e só depois verifica se é `&lt;= 0`. Na prática dá o mesmo resultado quase sempre, mas não é garantidamente idêntico em casos extremos de arredondamento de vírgula flutuante (uma fração de cêntimo). Como as regras deste trabalho dizem para não decidir sozinho quando um sítio diverge, não toquei — fica como estava, sinalizado aqui para decidires se deve ser unificado também.
 
 **Passo 8 — nota sobre estilo visual preservado.** A app tinha 2 estilos diferentes para mostrar a categoria: os formulários de criar/editar despesa (sem emoji, ex. "Eletricidade (EDP)") e o filtro da página de Despesas (com emoji, ex. "⚡ Eletricidade"). Em vez de unificar os dois (o que mudaria texto onde não havia bug), `lib/expenseCategories.ts` guarda os dois rótulos lado a lado (`label` e `filterLabel`) — cada sítio continua a mostrar exatamente o que mostrava antes, exceto "administracao", que estava mesmo em falta no filtro e nas cores da página de Despesas (o bug confirmado com dados reais: 10 despesas). Essa categoria ganha agora uma cor própria (cinza-azulado) em vez de cair na cor "outros" por omissão.
 

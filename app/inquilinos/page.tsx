@@ -12,6 +12,7 @@ import { useAuth } from '@/lib/auth-context'
 import EmailComposer from '@/components/EmailComposer'
 import { logAccess } from '@/lib/logAccess'
 import { buildAppliedAdvanceMap, appliedAdvanceFor } from '@/lib/advanceCredit'
+import { getDebtRemaining } from '@/lib/debts'
 import SortIcon from '@/components/SortIcon'
 import { useSort } from '@/lib/useSort'
 import Link from 'next/link'
@@ -168,12 +169,7 @@ export default function InquilinosPage() {
 
       // Dívidas manuais pendentes
       const tenantDebts = (debtsData ?? []).filter(d => d.tenant_id === t.id)
-      const manualDebt = tenantDebts.reduce((sum, d) => {
-        const paid = (debtPaymentsData ?? [])
-          .filter(p => p.debt_id === d.id)
-          .reduce((s, p) => s + p.amount, 0)
-        return sum + Math.max(0, d.original_amount - paid)
-      }, 0)
+      const manualDebt = tenantDebts.reduce((sum, d) => sum + getDebtRemaining(d, debtPaymentsData ?? []), 0)
 
       // Cobranças de eletricidade por pagar
       const elecDebt = (elecChargesData ?? [])
@@ -279,13 +275,8 @@ export default function InquilinosPage() {
     fetchTenants()
   }
 
-  function getRemainingDebt(debt: Debt): number {
-    const paid = (debt.payments ?? []).reduce((s, p) => s + p.amount, 0)
-    return Math.max(0, debt.original_amount - paid)
-  }
-
   function getTotalRemainingDebts(): number {
-    return debts.reduce((s, d) => s + getRemainingDebt(d), 0)
+    return debts.reduce((s, d) => s + getDebtRemaining(d), 0)
   }
 
   function toggleSpace(ref: string) {
@@ -699,7 +690,7 @@ export default function InquilinosPage() {
                 </div>
               ) : (
                 debts.map(debt => {
-                  const remaining = getRemainingDebt(debt)
+                  const remaining = getDebtRemaining(debt)
                   const paid = (debt.payments ?? []).reduce((s, p) => s + p.amount, 0)
                   const isSettled = remaining === 0
                   return (

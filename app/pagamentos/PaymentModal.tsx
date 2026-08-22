@@ -9,6 +9,7 @@ import { X, Pencil, Trash2, AlertTriangle } from 'lucide-react'
 import { logAccess } from '@/lib/logAccess'
 import { consumeAdvances } from '@/lib/advanceCredit'
 import { PAYMENT_TYPES, PAYMENT_TYPE_LABELS } from '@/lib/paymentTypes'
+import { getDebtRemaining } from '@/lib/debts'
 
 interface Props {
   lease: any
@@ -96,8 +97,7 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
       .select('*, payments:debt_payments(*)')
       .eq('tenant_id', lease.tenant?.id)
     for (const d of debtsData ?? []) {
-      const paid = (d.payments ?? []).reduce((s: number, p: any) => s + p.amount, 0)
-      const remaining = Math.max(0, d.original_amount - paid)
+      const remaining = getDebtRemaining(d)
       if (remaining > 0) {
         items.push({
           id: `manual-${d.id}`,

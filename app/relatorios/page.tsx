@@ -4,6 +4,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatDate, getMonthLabel, formatCurrency } from '@/lib/utils'
+import { getDebtRemaining } from '@/lib/debts'
 import { BarChart3, TrendingUp, Home, FileText, Calendar, ChevronDown, ChevronUp, Edit2, X, Save, ClipboardList, Download, Loader2, Receipt, Mail, AlertTriangle, Printer } from 'lucide-react'
 import EmailComposer from '@/components/EmailComposer'
 import { buildAppliedAdvanceMap, appliedAdvanceFor } from '@/lib/advanceCredit'
@@ -307,7 +308,7 @@ export default function RelatoriosPage() {
         // Dívidas manuais
         for (const d of debts.filter(d => d.tenant_id === t.id)) {
           const pago = debtPayments.filter(p => p.debt_id === d.id).reduce((s, p) => s + p.amount, 0)
-          const emFalta = Math.max(0, d.original_amount - pago)
+          const emFalta = getDebtRemaining(d, debtPayments)
           if (emFalta > 0) {
             parcelas.push({
               grupo: 'Dívida',
