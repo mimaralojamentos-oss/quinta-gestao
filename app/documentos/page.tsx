@@ -471,8 +471,6 @@ async function handleSaveEdit() {
     try {
       if (deleteExpense && doc.expense_id) {
         await deleteExpenseSafely(supabase, doc.expense_id)
-      } else if (doc.expense_id) {
-        await supabase.from('expenses').update({ invoice_id: null }).eq('id', doc.expense_id)
       }
       if (doc.tipo === 'transferencia_interna') {
         await supabase.from('cash_fund_movements').delete().eq('source', 'documento').eq('source_id', doc.id)

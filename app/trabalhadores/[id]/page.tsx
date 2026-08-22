@@ -319,7 +319,6 @@ export default function TrabalhadorPage({ params }: { params: Promise<{ id: stri
           }).select().single()
           if (doc) {
             documentoId = doc.id
-            await supabase.from('expenses').update({ invoice_id: doc.id }).eq('id', despesa.id)
           }
         }
       } catch {

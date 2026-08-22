@@ -6,6 +6,7 @@ import { requireRole } from '@/lib/require-role'
 import { checkFileSize } from '@/lib/fileUpload'
 import { meterReadingExists } from '@/lib/meterReadings'
 import { CASH_FUND_START_DATE } from '@/lib/bankExpense'
+import { findUnlinkedExpenseByAmount } from '@/lib/expenseDuplicates'
 
 export async function POST(request: Request) {
   const auth = await requireRole(['admin', 'coadmin', 'electrician'])
@@ -348,15 +349,9 @@ IMPORTANTE sobre o valor ("amount"):
     if (!skipExpense && isFatura && doc && extracted.amount && extracted.doc_date) {
       const paymentMethod = detectPaymentMethod(file.name)
 
-      const dateFrom = new Date(extracted.doc_date); dateFrom.setDate(dateFrom.getDate() - 1)
-      const dateTo = new Date(extracted.doc_date); dateTo.setDate(dateTo.getDate() + 1)
-
-      const { data: existingExpense } = await supabase.from('expenses').select('id')
-        .eq('amount', extracted.amount)
-        .gte('expense_date', dateFrom.toISOString().slice(0, 10))
-        .lte('expense_date', dateTo.toISOString().slice(0, 10))
-        .is('invoice_id', null)
-        .limit(1).single()
+      // "Órfã" = ainda não ligada a nenhum documento via documents.expense_id
+      // (o link oficial) — não usa expenses.invoice_id, que ficou por escrever.
+      const existingExpense = await findUnlinkedExpenseByAmount(supabase, extracted.amount, extracted.doc_date, 1)
 
       if (existingExpense) {
         await supabase.from('expenses').update({ payment_method: paymentMethod }).eq('id', existingExpense.id)

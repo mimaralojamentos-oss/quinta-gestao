@@ -242,7 +242,6 @@ export default function ManualDocumentModal({ onClose, onSaved }: Props) {
           payment_method: form.payment_method,
           supplier: form.supplier || null,
           notes: `Criado via Documento Manual — ${autoDocNum}`,
-          invoice_id: newDoc.id,
         }).select().single()
 
         if (!expErr && newExpense) {
