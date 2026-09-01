@@ -331,30 +331,39 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
     setProcessingOCR(false)
   }
 
-  async function handleSaveStep1() {
-    if (!form.name.trim()) { setError('O nome é obrigatório'); return }
+  /**
+   * Devolve o id do inquilino criado/editado diretamente (em vez de só
+   * confiar no estado `newTenantId`) — quem chama a seguir pode passá-lo já
+   * ao handleSaveContract sem esperar por um novo render. Ver nota no botão
+   * "Guardar tudo" do fluxo OCR.
+   */
+  async function handleSaveStep1(): Promise<string | null> {
+    if (!form.name.trim()) { setError('O nome é obrigatório'); return null }
     setSaving(true); setError('')
     const payload = { name: form.name.trim(), phone: form.phone || null, email: form.email || null, nif: form.nif || null, notes: form.notes || null }
     if (isNew) {
       const { data, error: err } = await supabase.from('tenants').insert(payload).select().single()
       setSaving(false)
-      if (err) { setError(err.message); return }
+      if (err) { setError(err.message); return null }
       await logAccess({ action: 'criar', page: '/inquilinos', details: `Criou inquilino "${form.name.trim()}"` })
       setNewTenantId(data.id); setStep(2)
+      return data.id
     } else {
       const { error: err } = await supabase.from('tenants').update(payload).eq('id', tenant!.id)
       setSaving(false)
-      if (err) { setError(err.message); return }
+      if (err) { setError(err.message); return null }
       await logAccess({ action: 'editar', page: '/inquilinos', details: `Editou inquilino "${form.name.trim()}"` })
       onSaved()
+      return tenant!.id
     }
   }
 
-  async function handleSaveContract() {
+  async function handleSaveContract(tenantIdOverride?: string) {
     if (contractForm.skip) { onSaved(); return }
     if (!contractForm.space_id || !contractForm.monthly_rent || !contractForm.start_date) { setContractError('Espaço, renda e data de início são obrigatórios'); return }
+    const tenantId = tenantIdOverride ?? newTenantId
+    if (!tenantId) { setContractError('Não foi possível identificar o inquilino — tenta guardar de novo.'); return }
     setSavingContract(true); setContractError('')
-    const tenantId = newTenantId!
     let contractPath = null
     if (contractFile) {
       const cleanName = contractFile.name.replace(/[^a-zA-Z0-9._-]/g, '_')
@@ -1503,7 +1512,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
         {isNew && createMode === 'ocr' && step === 2 && (
           <div className="flex justify-between gap-3 mt-6 pt-4 border-t border-gray-100">
             <button className="btn-secondary flex items-center gap-1" onClick={() => setStep(1)}><ChevronLeft className="w-4 h-4" /> Voltar</button>
-            <button className="btn-primary" onClick={async () => { await handleSaveStep1(); if (newTenantId || form.name) await handleSaveContract() }} disabled={savingContract || saving}>
+            <button className="btn-primary" onClick={async () => { const id = await handleSaveStep1(); if (id) await handleSaveContract(id) }} disabled={savingContract || saving}>
               {savingContract || saving ? 'A guardar...' : 'Guardar tudo'}
             </button>
           </div>
@@ -1519,7 +1528,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
         {isNew && createMode === 'manual' && step === 2 && (
           <div className="flex justify-between gap-3 mt-6 pt-4 border-t border-gray-100">
             <button className="btn-secondary flex items-center gap-1" onClick={() => setStep(1)}><ChevronLeft className="w-4 h-4" /> Voltar</button>
-            <button className="btn-primary" onClick={handleSaveContract} disabled={savingContract}>
+            <button className="btn-primary" onClick={() => handleSaveContract()} disabled={savingContract}>
               {savingContract ? 'A guardar...' : contractForm.skip ? 'Concluir sem contrato' : 'Guardar tudo'}
             </button>
           </div>
