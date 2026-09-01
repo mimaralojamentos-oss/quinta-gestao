@@ -12,6 +12,7 @@ import { type DestinoPagamento } from '@/lib/rentPaymentPlan'
 import { consumeAdvances, releaseAdvance, describeAdvanceTarget, buildAppliedAdvanceMap } from '@/lib/advanceCredit'
 import { getDebtRemaining } from '@/lib/debts'
 import { getMonthlyRentStatus } from '@/lib/rentShortfall'
+import { getDepositShortfall } from '@/lib/depositShortfall'
 
 interface Props {
   tenant: Tenant | null
@@ -44,6 +45,7 @@ interface PaymentRow {
   isMissing?: boolean
   isManualDebt?: boolean
   isElecCharge?: boolean
+  isDeposit?: boolean
   isPartialElec?: boolean
   remainingAmount?: number
   /** Destino de um adiantamento já consumido ('renda' | 'eletricidade'). */
@@ -141,7 +143,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
     if (!tenant) return
     setLoadingPayments(true)
     const { data: leasesData } = await supabase
-      .from('leases').select('id, space:spaces(ref), monthly_rent, status, start_date')
+      .from('leases').select('id, space:spaces(ref), monthly_rent, deposit, status, start_date')
       .eq('tenant_id', tenant.id)
     setLeases(leasesData ?? [])
 
@@ -214,6 +216,27 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
       }
     }
 
+    // Caução em falta (só contratos com início a partir de 2026-09-01 — ver lib/depositShortfall.ts)
+    const depositRows: PaymentRow[] = []
+    for (const lease of (leasesData ?? []).filter(l => l.status === 'ativo')) {
+      const falta = getDepositShortfall(lease, enriched)
+      if (falta >= 0.01) {
+        depositRows.push({
+          lease_id: lease.id,
+          reference_month: lease.start_date,
+          amount: falta,
+          payment_date: null,
+          payment_method: null,
+          tipo: 'caucao',
+          lease,
+          isMissing: false,
+          isManualDebt: false,
+          isElecCharge: false,
+          isDeposit: true,
+        })
+      }
+    }
+
     // Dívidas manuais
     const { data: debtsData } = await supabase.from('debts').select('*, payments:debt_payments(*)').eq('tenant_id', tenant.id).order('reference_date', { ascending: false })
     const manualDebtRows: PaymentRow[] = (debtsData ?? []).map(d => {
@@ -270,7 +293,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
       }
     }
 
-    const allRows = [...enriched, ...missingRows, ...manualDebtRows, ...elecChargeRows]
+    const allRows = [...enriched, ...missingRows, ...depositRows, ...manualDebtRows, ...elecChargeRows]
       .sort((a, b) => {
         // 1. Mês descendente
         const monthDiff = b.reference_month.localeCompare(a.reference_month)
@@ -499,7 +522,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
     await fetchPayments()
   }
 
-  // totalDebt inclui: rendas em falta + dívidas manuais + eletricidade por pagar, deduzindo adiantamentos disponíveis (crédito do inquilino)
+  // totalDebt inclui: rendas em falta + caução em falta + dívidas manuais + eletricidade por pagar, deduzindo adiantamentos disponíveis (crédito do inquilino)
   const totalAdvance = payments
     .filter(p => p.tipo === 'adiantamento' && !p.used)
     .reduce((sum, p) => sum + (p.amount ?? 0), 0)
@@ -527,8 +550,10 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
     const includeDebts = destino === 'auto' || destino === 'dividas'
 
     // 1ª PRIORIDADE: Rendas vencidas (do mais antigo para o mais recente, pagamento parcial permitido)
+    // A caução em falta fica de fora de propósito — não entra na alocação
+    // automática, só aparece nos ecrãs de apresentação de dívida.
     const rendas = includeRenda ? payments
-      .filter(p => !p.payment_date && !p.isManualDebt && !p.isElecCharge)
+      .filter(p => !p.payment_date && !p.isManualDebt && !p.isElecCharge && !p.isDeposit)
       .sort((a, b) => (a.reference_month ?? '').localeCompare(b.reference_month ?? '')) : []
     for (const item of rendas) {
       if (remaining <= 0) break
@@ -1369,6 +1394,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                           p.tipo === 'adiantamento' ? (p.used ? 'border-gray-100 bg-gray-50' : 'border-purple-200 bg-purple-50')
                           : isPago || isLiquidada ? 'border-gray-100 bg-white'
                           : p.isMissing ? 'border-orange-200 bg-orange-50'
+                          : p.isDeposit ? 'border-blue-200 bg-blue-50'
                           : p.isElecCharge ? 'border-red-200 bg-red-50'
                           : p.isManualDebt ? 'border-red-200 bg-red-50'
                           : 'border-red-100 bg-red-50'
@@ -1401,6 +1427,8 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                             ) : (
                               <p className="text-xs text-purple-600 font-medium">💰 Crédito do inquilino · pago em {formatDate(p.payment_date!)} · {p.payment_method}</p>
                             )
+                          ) : p.isDeposit ? (
+                            <p className="text-xs text-blue-700 font-medium">🔒 Caução em falta</p>
                           ) : p.isManualDebt ? (
                             <p className="text-xs text-gray-600">{p.notes}</p>
                           ) : p.isElecCharge ? (
@@ -1441,6 +1469,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                           <span className={`font-semibold text-sm ${
                             p.tipo === 'adiantamento' ? (p.used ? 'text-gray-400' : 'text-purple-700')
                             : isPago || isLiquidada ? 'text-gray-900'
+                            : p.isDeposit ? 'text-blue-700'
                             : 'text-red-600'
                           }`}>
                             {p.tipo === 'adiantamento' && !p.used ? '+' : ''}{formatCurrency(p.displayAmount ?? p.amount)}
@@ -1523,12 +1552,14 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
           ? payments
               .filter(p => !p.payment_date || (p as any).isPartialElec)
               .map(p => ({
-                grupo: p.isElecCharge ? 'Eletricidade' : p.isManualDebt ? 'Dívida' : 'Renda',
+                grupo: p.isElecCharge ? 'Eletricidade' : p.isManualDebt ? 'Dívida' : p.isDeposit ? 'Caução' : 'Renda',
                 descricao: p.isElecCharge
                   ? `Eletricidade de ${formatDate(p.reference_month)}`
                   : p.isManualDebt
                     ? (p.notes ?? 'Dívida')
-                    : `Renda de ${formatDate(p.reference_month)}`,
+                    : p.isDeposit
+                      ? 'Caução em falta'
+                      : `Renda de ${formatDate(p.reference_month)}`,
                 valor: (p as any).isPartialElec ? ((p as any).remainingAmount ?? 0) : (p.amount ?? 0),
               }))
               .filter(i => i.valor > 0)

@@ -14,6 +14,7 @@ import { logAccess } from '@/lib/logAccess'
 import { buildAppliedAdvanceMap } from '@/lib/advanceCredit'
 import { getDebtRemaining } from '@/lib/debts'
 import { getMonthlyRentStatus } from '@/lib/rentShortfall'
+import { getDepositShortfall } from '@/lib/depositShortfall'
 import SortIcon from '@/components/SortIcon'
 import { useSort } from '@/lib/useSort'
 import Link from 'next/link'
@@ -153,12 +154,17 @@ export default function InquilinosPage() {
         .filter(c => leaseIds.includes(c.lease_id))
         .reduce((sum, c) => sum + Math.max(0, (c.amount ?? 0) - (c.amount_paid ?? 0)), 0)
 
+      // Caução em falta (só contratos com início a partir de 2026-09-01 — ver lib/depositShortfall.ts)
+      const depositDebt = leases
+        .filter(l => l.status === 'ativo')
+        .reduce((sum, l) => sum + getDepositShortfall(l, paymentsData ?? []), 0)
+
       // Adiantamentos disponíveis (crédito do inquilino)
       const totalAdvance = (paymentsData ?? [])
         .filter(p => leaseIds.includes(p.lease_id) && p.tipo === 'adiantamento' && !p.used)
         .reduce((sum, p) => sum + (p.amount ?? 0), 0)
 
-      return { ...t, leases, spaces, debt: explicitDebt + missingDebt + manualDebt + elecDebt - totalAdvance }
+      return { ...t, leases, spaces, debt: explicitDebt + missingDebt + manualDebt + elecDebt + depositDebt - totalAdvance }
     })
     setTenants(tenantsWithData)
     setLoading(false)
