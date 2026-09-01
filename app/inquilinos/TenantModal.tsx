@@ -4,11 +4,11 @@ import { supabase } from '@/lib/supabase'
 import { Tenant } from '@/lib/types'
 import { X, User, Home, FileText, Plus, Trash2, Pencil, ChevronRight, ChevronLeft, Upload, Loader2, Sparkles, Printer, ReceiptText, Banknote, Mail } from 'lucide-react'
 import EmailComposer from '@/components/EmailComposer'
-import { formatCurrency, formatDate, getCurrentMonth } from '@/lib/utils'
+import { formatCurrency, formatDate, getCurrentMonth, getMonthLabel } from '@/lib/utils'
 import { logAccess } from '@/lib/logAccess'
 import { useFileDrop } from '@/lib/useFileDrop'
 import DestinoPagamentoPicker from '@/components/DestinoPagamentoPicker'
-import { type DestinoPagamento } from '@/lib/rentPaymentPlan'
+import { buildRentPaymentPlan, applyRentPaymentPlan, type DestinoPagamento, type RentPaymentPlan } from '@/lib/rentPaymentPlan'
 import { consumeAdvances, releaseAdvance, describeAdvanceTarget, buildAppliedAdvanceMap } from '@/lib/advanceCredit'
 import { getDebtRemaining } from '@/lib/debts'
 import { getMonthlyRentStatus } from '@/lib/rentShortfall'
@@ -119,6 +119,10 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
     destino: 'auto',
   })
   const [savingRecebimento, setSavingRecebimento] = useState(false)
+  // Distribuição deste recebimento em concreto — calculada pelo motor único
+  // (lib/rentPaymentPlan.ts), à medida que o valor é escrito.
+  const [recebimentoPlan, setRecebimentoPlan] = useState<RentPaymentPlan | null>(null)
+  const [recebimentoPlanLoading, setRecebimentoPlanLoading] = useState(false)
   const [applyingAdvanceKey, setApplyingAdvanceKey] = useState<string | null>(null)
   const [releasingAdvanceId, setReleasingAdvanceId] = useState<string | null>(null)
 
@@ -545,177 +549,61 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
       return sum + (p.amount ?? 0)
     }, 0) - totalAdvance
 
-  /**
-   * Distribui o valor recebido. `destino` diz o que pode ser tocado:
-   * por omissão segue a ordem habitual, mas o utilizador pode dizer que
-   * aquele dinheiro é só para a luz ou só para dívidas.
-   */
-  function computeAllocation(totalAmount: number, destino: DestinoPagamento = 'auto') {
-    let remaining = totalAmount
-    const result: Array<{ item: PaymentRow; paying: number }> = []
+  // Calcula a distribuição deste recebimento em concreto, à medida que o
+  // valor é escrito — o mesmo motor único usado no banco e em /pagamentos.
+  useEffect(() => {
+    let cancelado = false
 
-    const includeRenda = destino === 'auto' || destino === 'renda'
-    const includeElec = destino === 'auto' || destino === 'luz'
-    const includeDebts = destino === 'auto' || destino === 'dividas'
-
-    // 1ª PRIORIDADE: Rendas vencidas (do mais antigo para o mais recente, pagamento parcial permitido)
-    // A caução em falta fica de fora de propósito — não entra na alocação
-    // automática, só aparece nos ecrãs de apresentação de dívida.
-    const rendas = includeRenda ? payments
-      .filter(p => !p.payment_date && !p.isManualDebt && !p.isElecCharge && !p.isDeposit)
-      .sort((a, b) => (a.reference_month ?? '').localeCompare(b.reference_month ?? '')) : []
-    for (const item of rendas) {
-      if (remaining <= 0) break
-      const paying = parseFloat(Math.min(remaining, item.amount).toFixed(2))
-      result.push({ item, paying })
-      remaining = parseFloat((remaining - paying).toFixed(2))
-    }
-
-    // 2ª PRIORIDADE: Eletricidade (pagamento parcial permitido)
-    if (includeElec && remaining > 0) {
-      const elec = payments
-        .filter(p => !p.payment_date && p.isElecCharge)
-        .sort((a, b) => (a.reference_month ?? '').localeCompare(b.reference_month ?? ''))
-      for (const item of elec) {
-        if (remaining <= 0) break
-        const owed = item.remainingAmount ?? item.amount
-        const paying = parseFloat(Math.min(remaining, owed).toFixed(2))
-        result.push({ item, paying })
-        remaining = parseFloat((remaining - paying).toFixed(2))
+    async function calcular() {
+      const total = parseFloat(recebimentoForm.amount)
+      const activeLease = leases.find((l: any) => l.status === 'ativo') ?? leases[0]
+      if (!showRecebimentoForm || !total || total <= 0 || !activeLease) { setRecebimentoPlan(null); return }
+      setRecebimentoPlanLoading(true)
+      try {
+        const resultado = await buildRentPaymentPlan(supabase, {
+          leaseId: activeLease.id,
+          tenantId: tenant?.id,
+          amount: total,
+          destino: recebimentoForm.destino,
+          soRendaMonth: getCurrentMonth(),
+        })
+        if (!cancelado) setRecebimentoPlan(resultado)
+      } finally {
+        if (!cancelado) setRecebimentoPlanLoading(false)
       }
     }
-
-    // 3ª PRIORIDADE: Outras dívidas manuais (do mais antigo para o mais recente, parcial permitido)
-    if (includeDebts && remaining > 0) {
-      const debts = payments
-        .filter(p => p.isManualDebt && p.payment_date !== 'liquidada' && !p.payment_date)
-        .sort((a, b) => (a.reference_month ?? '').localeCompare(b.reference_month ?? ''))
-      for (const item of debts) {
-        if (remaining <= 0) break
-        const owed = item.remainingAmount ?? item.amount
-        const paying = parseFloat(Math.min(remaining, owed).toFixed(2))
-        result.push({ item, paying })
-        remaining = parseFloat((remaining - paying).toFixed(2))
-      }
-    }
-
-    return { allocation: result, leftover: parseFloat(remaining.toFixed(2)) }
-  }
+    calcular()
+    return () => { cancelado = true }
+  }, [showRecebimentoForm, recebimentoForm.amount, recebimentoForm.destino, leases, tenant?.id])
 
   async function handleSaveRecebimento() {
     const total = parseFloat(recebimentoForm.amount)
-    if (!total || total <= 0) return
+    if (!total || total <= 0 || !recebimentoPlan) return
     setSavingRecebimento(true)
-    const { allocation, leftover } = computeAllocation(total, recebimentoForm.destino)
 
-    const isCash = recebimentoForm.method === 'dinheiro'
     const activeLease = leases.find((l: any) => l.status === 'ativo') ?? leases[0]
     const spaceRef = activeLease?.space?.ref ?? ''
     const tenantName = tenant?.name ?? ''
 
-    for (const { item, paying } of allocation) {
-      if (item.isElecCharge && item.id) {
-        const owed = item.remainingAmount ?? item.amount
-        const isPaidFull = paying >= owed
-        if (isPaidFull) {
-          await supabase.from('electricity_charges').update({
-            paid: true,
-            payment_date: recebimentoForm.date,
-            payment_method: recebimentoForm.method,
-            amount_paid: item.amount,
-          }).eq('id', item.id)
-        } else {
-          // Pagamento parcial — acumula amount_paid sem marcar como pago
-          const alreadyPaid = (item.amount ?? 0) - owed
-          const newAmountPaid = parseFloat((alreadyPaid + paying).toFixed(2))
-          await supabase.from('electricity_charges').update({
-            amount_paid: newAmountPaid,
-          }).eq('id', item.id)
-        }
-        // Fundo de Maneio
-        if (isCash) {
-          await supabase.from('cash_fund_movements').insert({
-            movement_date: recebimentoForm.date,
-            description: `⚡ Eletricidade ${item.reference_month.slice(0, 7)}${!isPaidFull ? ' (parcial)' : ''} — ${spaceRef} (${tenantName})`,
-            amount: paying,
-            type: 'entrada',
-            source: 'renda',
-            source_id: item.id,
-          })
-        }
-      } else if (item.isManualDebt && item.id) {
-        // Registar pagamento de dívida manual
-        const { data: debtPayment } = await supabase.from('debt_payments').insert({
-          debt_id: item.id,
-          amount: paying,
-          payment_date: recebimentoForm.date,
-          payment_method: recebimentoForm.method,
-        }).select().single()
-        // Fundo de Maneio
-        if (isCash) {
-          await supabase.from('cash_fund_movements').insert({
-            movement_date: recebimentoForm.date,
-            description: `⚠️ ${item.notes ?? 'Dívida'} — ${tenantName}`,
-            amount: paying,
-            type: 'entrada',
-            source: 'divida',
-            source_id: item.id,
-          })
-        }
-      } else {
-        // Registar pagamento de renda
-        const leaseId = item.lease_id ?? item.lease?.id
-        if (!leaseId) continue
-        const monthLabel = item.reference_month.slice(0, 7)
-        const { data: newPayment } = await supabase.from('rent_payments').insert({
-          lease_id: leaseId,
-          reference_month: item.reference_month.slice(0, 7) + '-01',
-          amount: paying,
-          payment_date: recebimentoForm.date,
-          payment_method: recebimentoForm.method,
-          tipo: 'renda',
-          notes: paying < item.amount ? 'Pagamento parcial' : null,
-        }).select().single()
-        // Fundo de Maneio
-        if (isCash && newPayment) {
-          await supabase.from('cash_fund_movements').insert({
-            movement_date: recebimentoForm.date,
-            description: `🏠 Renda ${monthLabel} — ${spaceRef} (${tenantName})`,
-            amount: paying,
-            type: 'entrada',
-            source: 'renda',
-            source_id: newPayment.id,
-          })
-        }
-      }
+    const result = await applyRentPaymentPlan(supabase, recebimentoPlan, {
+      leaseId: activeLease.id,
+      tenantId: tenant?.id,
+      paymentDate: recebimentoForm.date,
+      paymentMethod: recebimentoForm.method,
+      spaceRef,
+      tenantName,
+    })
+
+    if (result.error) {
+      alert(`Erro ao registar o recebimento: ${result.error}`)
+      setSavingRecebimento(false)
+      return
     }
 
-    if (leftover > 0.01) {
-      const leaseId = activeLease?.id
-      if (leaseId) {
-        const monthLabel = recebimentoForm.date.slice(0, 7)
-        const { data: advPayment } = await supabase.from('rent_payments').insert({
-          lease_id: leaseId,
-          reference_month: monthLabel + '-01',
-          amount: leftover,
-          payment_date: recebimentoForm.date,
-          payment_method: recebimentoForm.method,
-          tipo: 'adiantamento',
-          notes: 'Excedente (adiantamento)',
-        }).select().single()
-        // Fundo de Maneio
-        if (isCash && advPayment) {
-          await supabase.from('cash_fund_movements').insert({
-            movement_date: recebimentoForm.date,
-            description: `💰 Adiantamento ${monthLabel} — ${spaceRef} (${tenantName})`,
-            amount: leftover,
-            type: 'entrada',
-            source: 'renda',
-            source_id: advPayment.id,
-          })
-        }
-      }
-    }
+    await logAccess({
+      action: 'criar', page: '/inquilinos',
+      details: `Registou recebimento (${formatCurrency(total)}) de ${tenantName} (${spaceRef}) — ${recebimentoPlan.summary}`,
+    })
 
     await fetchPayments()
     setShowRecebimentoForm(false)
@@ -1217,103 +1105,126 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                 </div>
               )}
 
-              {showRecebimentoForm && (() => {
-                const total = parseFloat(recebimentoForm.amount) || 0
-                const { allocation, leftover } = computeAllocation(total, recebimentoForm.destino)
-                return (
-                  <div className="border border-blue-200 bg-blue-50 rounded-xl p-4 mb-4">
-                    <h3 className="font-medium text-gray-800 mb-3">💰 Registar Recebimento</h3>
-                    <div className="grid grid-cols-2 gap-3 mb-3">
-                      <div>
-                        <label className="label">Data do recebimento</label>
-                        <input className="input" type="date" value={recebimentoForm.date}
-                          onChange={e => setRecebimentoForm(f => ({ ...f, date: e.target.value }))} />
-                      </div>
-                      <div>
-                        <label className="label">Valor recebido (€)</label>
-                        <input className="input" type="number" step="0.01" placeholder="0.00"
-                          value={recebimentoForm.amount}
-                          onChange={e => setRecebimentoForm(f => ({ ...f, amount: e.target.value }))} />
-                      </div>
+              {showRecebimentoForm && (
+                <div className="border border-blue-200 bg-blue-50 rounded-xl p-4 mb-4">
+                  <h3 className="font-medium text-gray-800 mb-3">💰 Registar Recebimento</h3>
+                  <div className="grid grid-cols-2 gap-3 mb-3">
+                    <div>
+                      <label className="label">Data do recebimento</label>
+                      <input className="input" type="date" value={recebimentoForm.date}
+                        onChange={e => setRecebimentoForm(f => ({ ...f, date: e.target.value }))} />
                     </div>
-                    <div className="mb-3">
-                      <label className="label">Método</label>
-                      <div className="grid grid-cols-2 gap-2">
-                        {['dinheiro', 'banco'].map(m => (
-                          <button key={m} onClick={() => setRecebimentoForm(f => ({ ...f, method: m }))}
-                            className={`py-2 rounded-lg border text-xs font-medium transition-colors ${recebimentoForm.method === m ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200'}`}>
-                            {m === 'dinheiro' ? '💵 Dinheiro' : '🏦 Banco'}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="mb-3">
-                      <DestinoPagamentoPicker
-                        valor={recebimentoForm.destino}
-                        onChange={d => setRecebimentoForm(f => ({ ...f, destino: d }))} />
-                    </div>
-
-                    {total > 0 && (
-                      <div className="border border-blue-200 rounded-lg overflow-hidden mb-3">
-                        <div className="bg-blue-100 px-3 py-2 text-xs font-semibold text-blue-800">
-                          Distribuição{recebimentoForm.destino !== 'auto' ? '' : ' automática'}
-                        </div>
-                        {allocation.length === 0 ? (
-                          <p className="text-xs text-gray-400 p-3 text-center">Não há valores em dívida para cobrir.</p>
-                        ) : (
-                          <div className="divide-y divide-blue-50">
-                            {allocation.map((a, i) => {
-                              const icon = a.item.isElecCharge ? '⚡' : a.item.isManualDebt ? '📋' : '🏠'
-                              const label = a.item.isElecCharge ? `Eletricidade ${a.item.reference_month?.slice(0, 7)}`
-                                : a.item.isManualDebt ? (a.item.notes ?? `Dívida ${a.item.reference_month?.slice(0, 7)}`)
-                                : `Renda ${a.item.reference_month?.slice(0, 7)}`
-                              // Quanto estava em dívida antes deste recebimento e quanto sobra depois.
-                              const emDivida = a.item.remainingAmount ?? a.item.amount
-                              const fica = parseFloat((emDivida - a.paying).toFixed(2))
-                              return (
-                                <div key={i} className="flex justify-between items-start px-3 py-2">
-                                  <span className="text-xs text-gray-700">
-                                    {icon} {label}
-                                    {a.paying < a.item.amount && <span className="text-orange-500 ml-1">(parcial)</span>}
-                                    <span className="block text-[11px] text-gray-500 mt-0.5">
-                                      Em dívida {formatCurrency(emDivida)}
-                                      {fica > 0.01
-                                        ? <span className="text-orange-600 font-medium"> · ficam {formatCurrency(fica)}</span>
-                                        : <span className="text-emerald-600 font-medium"> · fica liquidada</span>}
-                                    </span>
-                                  </span>
-                                  <span className="text-xs font-semibold">{formatCurrency(a.paying)}</span>
-                                </div>
-                              )
-                            })}
-                            {leftover > 0.01 && (
-                              <div className="flex justify-between items-center px-3 py-2 bg-purple-50">
-                                <span className="text-xs text-purple-700">💰 Excedente → adiantamento</span>
-                                <span className="text-xs font-semibold text-purple-700">{formatCurrency(leftover)}</span>
-                              </div>
-                            )}
-                            <div className="flex justify-between items-center px-3 py-2 bg-gray-50 border-t border-gray-200">
-                              <span className="text-xs font-bold text-gray-700">Total</span>
-                              <span className="text-xs font-bold">{formatCurrency(total)}</span>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    <div className="flex gap-2">
-                      <button className="btn-secondary flex-1" onClick={() => { setShowRecebimentoForm(false); setRecebimentoForm({ date: new Date().toISOString().slice(0, 10), amount: '', method: 'dinheiro', destino: 'auto' }) }}>
-                        Cancelar
-                      </button>
-                      <button onClick={handleSaveRecebimento} disabled={savingRecebimento || !recebimentoForm.amount || allocation.length === 0}
-                        className="flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium disabled:opacity-50 transition-colors">
-                        {savingRecebimento ? <Loader2 className="w-4 h-4 animate-spin" /> : <Banknote className="w-4 h-4" />}
-                        {savingRecebimento ? 'A guardar...' : 'Confirmar Recebimento'}
-                      </button>
+                    <div>
+                      <label className="label">Valor recebido (€)</label>
+                      <input className="input" type="number" step="0.01" placeholder="0.00"
+                        value={recebimentoForm.amount}
+                        onChange={e => setRecebimentoForm(f => ({ ...f, amount: e.target.value }))} />
                     </div>
                   </div>
-                )
-              })()}
+                  <div className="mb-3">
+                    <label className="label">Método</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {['dinheiro', 'banco'].map(m => (
+                        <button key={m} onClick={() => setRecebimentoForm(f => ({ ...f, method: m }))}
+                          className={`py-2 rounded-lg border text-xs font-medium transition-colors ${recebimentoForm.method === m ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200'}`}>
+                          {m === 'dinheiro' ? '💵 Dinheiro' : '🏦 Banco'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="mb-3">
+                    <DestinoPagamentoPicker
+                      valor={recebimentoForm.destino}
+                      onChange={d => setRecebimentoForm(f => ({ ...f, destino: d }))} />
+                  </div>
+
+                  {recebimentoPlanLoading && (
+                    <p className="text-xs text-gray-400 mb-3">A calcular a distribuição...</p>
+                  )}
+
+                  {recebimentoPlan && !recebimentoPlanLoading && parseFloat(recebimentoForm.amount) > 0 && (
+                    <div className="border border-blue-200 rounded-lg overflow-hidden mb-3">
+                      <div className="bg-blue-100 px-3 py-2 text-xs font-semibold text-blue-800">
+                        Distribuição{recebimentoForm.destino !== 'auto' ? '' : ' automática'}
+                      </div>
+                      {recebimentoPlan.rendaPayments.length === 0 && recebimentoPlan.electricityCharges.length === 0 && recebimentoPlan.debtPayments.length === 0 ? (
+                        <p className="text-xs text-gray-400 p-3 text-center">Não há valores em dívida para cobrir.</p>
+                      ) : (
+                        <div className="divide-y divide-blue-50">
+                          {recebimentoPlan.rendaPayments.map(rp => (
+                            <div key={rp.referenceMonth} className="flex justify-between items-start px-3 py-2">
+                              <span className="text-xs text-gray-700">
+                                🏠 Renda {getMonthLabel(rp.referenceMonth)}
+                                {!rp.fullyPaid && <span className="text-orange-500 ml-1">(parcial)</span>}
+                                {rp.creditApplied > 0 && (
+                                  <span className="block text-[11px] text-purple-600 mt-0.5">💰 crédito {formatCurrency(rp.creditApplied)} aplicado</span>
+                                )}
+                                <span className="block text-[11px] text-gray-500 mt-0.5">
+                                  Em dívida {formatCurrency(rp.owedBefore)}
+                                  {rp.remainingAfter > 0.01
+                                    ? <span className="text-orange-600 font-medium"> · ficam {formatCurrency(rp.remainingAfter)}</span>
+                                    : <span className="text-emerald-600 font-medium"> · fica liquidada</span>}
+                                </span>
+                              </span>
+                              <span className="text-xs font-semibold">{formatCurrency(rp.amount)}</span>
+                            </div>
+                          ))}
+                          {recebimentoPlan.electricityCharges.map(c => (
+                            <div key={c.id} className="flex justify-between items-start px-3 py-2">
+                              <span className="text-xs text-gray-700">
+                                ⚡ Eletricidade {c.chargeDate?.slice(0, 7) ?? ''}
+                                {c.isPartial && <span className="text-orange-500 ml-1">(parcial)</span>}
+                                <span className="block text-[11px] text-gray-500 mt-0.5">
+                                  Em dívida {formatCurrency(parseFloat((c.totalAmount - c.alreadyPaid).toFixed(2)))}
+                                  {c.remainingAfter > 0.01
+                                    ? <span className="text-orange-600 font-medium"> · ficam {formatCurrency(c.remainingAfter)}</span>
+                                    : <span className="text-emerald-600 font-medium"> · fica liquidada</span>}
+                                </span>
+                              </span>
+                              <span className="text-xs font-semibold">{formatCurrency(c.amount)}</span>
+                            </div>
+                          ))}
+                          {recebimentoPlan.debtPayments.map(d => (
+                            <div key={d.debtId} className="flex justify-between items-start px-3 py-2">
+                              <span className="text-xs text-gray-700">
+                                📋 {d.description}
+                                <span className="block text-[11px] text-gray-500 mt-0.5">
+                                  Em dívida {formatCurrency(d.remainingBefore)}
+                                  {d.remainingAfter > 0.01
+                                    ? <span className="text-orange-600 font-medium"> · ficam {formatCurrency(d.remainingAfter)}</span>
+                                    : <span className="text-emerald-600 font-medium"> · fica liquidada</span>}
+                                </span>
+                              </span>
+                              <span className="text-xs font-semibold">{formatCurrency(d.amount)}</span>
+                            </div>
+                          ))}
+                          {recebimentoPlan.adiantamento > 0.01 && (
+                            <div className="flex justify-between items-center px-3 py-2 bg-purple-50">
+                              <span className="text-xs text-purple-700">💰 Excedente → adiantamento</span>
+                              <span className="text-xs font-semibold text-purple-700">{formatCurrency(recebimentoPlan.adiantamento)}</span>
+                            </div>
+                          )}
+                          <div className="flex justify-between items-center px-3 py-2 bg-gray-50 border-t border-gray-200">
+                            <span className="text-xs font-bold text-gray-700">Total</span>
+                            <span className="text-xs font-bold">{formatCurrency(parseFloat(recebimentoForm.amount))}</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  <div className="flex gap-2">
+                    <button className="btn-secondary flex-1" onClick={() => { setShowRecebimentoForm(false); setRecebimentoForm({ date: new Date().toISOString().slice(0, 10), amount: '', method: 'dinheiro', destino: 'auto' }) }}>
+                      Cancelar
+                    </button>
+                    <button onClick={handleSaveRecebimento} disabled={savingRecebimento || recebimentoPlanLoading || !recebimentoPlan || !recebimentoForm.amount}
+                      className="flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium disabled:opacity-50 transition-colors">
+                      {savingRecebimento ? <Loader2 className="w-4 h-4 animate-spin" /> : <Banknote className="w-4 h-4" />}
+                      {savingRecebimento ? 'A guardar...' : 'Confirmar Recebimento'}
+                    </button>
+                  </div>
+                </div>
+              )}
               {showPaymentForm && (
                 <div className="border border-emerald-200 bg-emerald-50 rounded-xl p-4 mb-4">
                   <h3 className="font-medium text-gray-800 mb-3">{editingPaymentId ? '✏️ Editar Registo' : 'Novo Registo'}</h3>
