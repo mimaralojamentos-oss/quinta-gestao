@@ -372,12 +372,13 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
       await logAccess({ action: 'editar', page: '/pagamentos', details: `Editou pagamento de ${PAYMENT_TYPE_LABELS[form.tipo] ?? form.tipo} (${formatCurrency(parseFloat(form.amount))}) de ${lease.tenant?.name} (${lease.space?.ref})` })
     } else if (form.tipo === 'renda') {
       const amount = parseFloat(form.amount)
+      // 'auto': paga o(s) mês(es) mais antigo(s) em falta, não só o mês
+      // selecionado no ecrã — este separador não tem escolha de destino, por
+      // isso segue sempre o comportamento automático habitual.
       const plan = await buildRentPaymentPlan(supabase, {
         leaseId: lease.id,
         tenantId: lease.tenant?.id,
-        monthlyRent: lease.monthly_rent,
         amount,
-        referenceMonth: currentMonth,
       })
 
       if (!window.confirm(`${plan.summary}\n\nConfirmar registo deste pagamento?`)) {
@@ -388,53 +389,17 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
       const result = await applyRentPaymentPlan(supabase, plan, {
         leaseId: lease.id,
         tenantId: lease.tenant?.id,
-        referenceMonth: currentMonth,
         paymentDate: form.payment_date,
         paymentMethod: form.payment_method,
         notes: form.notes,
+        spaceRef: lease.space?.ref,
+        tenantName: lease.tenant?.name,
       })
 
-      if (form.payment_method === 'dinheiro') {
-        if (result.rendaPayment) {
-          await supabase.from('cash_fund_movements').insert({
-            movement_date: form.payment_date,
-            description: `🏠 Renda ${getMonthLabel(currentMonth)} — ${lease.space?.ref} (${lease.tenant?.name})`,
-            amount: plan.rendaAmount,
-            type: 'entrada',
-            source: 'renda',
-            source_id: result.rendaPayment.id,
-          })
-        }
-        for (const charge of plan.electricityCharges) {
-          await supabase.from('cash_fund_movements').insert({
-            movement_date: form.payment_date,
-            description: `⚡ Eletricidade ${charge.chargeDate?.slice(0, 7) ?? ''}${charge.isPartial ? ' (parcial)' : ''} — ${lease.space?.ref} (${lease.tenant?.name})`,
-            amount: charge.amount,
-            type: 'entrada',
-            source: 'eletricidade',
-            source_id: charge.id,
-          })
-        }
-        for (const dp of plan.debtPayments) {
-          await supabase.from('cash_fund_movements').insert({
-            movement_date: form.payment_date,
-            description: `⚠️ ${dp.description} — ${lease.tenant?.name}`,
-            amount: dp.amount,
-            type: 'entrada',
-            source: 'divida',
-            source_id: dp.debtId,
-          })
-        }
-        if (result.adiantamentoPayment) {
-          await supabase.from('cash_fund_movements').insert({
-            movement_date: form.payment_date,
-            description: `💰 Adiantamento — ${lease.space?.ref} (${lease.tenant?.name})`,
-            amount: plan.adiantamento,
-            type: 'entrada',
-            source: 'renda',
-            source_id: result.adiantamentoPayment.id,
-          })
-        }
+      if (result.error) {
+        setError(result.error)
+        setSaving(false)
+        return
       }
 
       await logAccess({ action: 'criar', page: '/pagamentos', details: `Registou pagamento de renda (${formatCurrency(amount)}) de ${lease.tenant?.name} (${lease.space?.ref}) — ${getMonthLabel(currentMonth)}` })

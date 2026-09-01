@@ -379,38 +379,29 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
     const lease = allLeases.find(l => l.id === tx.confirmed_lease_id)
     if (!lease) return 'no_lease'
 
-    const referenceMonth = (overrideMonth ?? tx.transaction_date.slice(0, 7)) + '-01'
-
-    const { data: existingPayments } = await supabase
-      .from('rent_payments')
-      .select('id, tipo, amount')
-      .eq('lease_id', tx.confirmed_lease_id)
-      .eq('reference_month', referenceMonth)
-
-    const existingRenda = (existingPayments ?? []).filter((p: any) => p.tipo === 'renda' || !p.tipo)
-    const alreadyPaidRenda = existingRenda.reduce((sum: number, p: any) => sum + (p.amount || 0), 0)
-
     const tenantId = tx.confirmed_tenant_id ?? lease.tenant?.id
 
     const plan = await buildRentPaymentPlan(supabase, {
       leaseId: tx.confirmed_lease_id,
       tenantId,
-      monthlyRent: lease.monthly_rent,
       amount: tx.amount,
-      referenceMonth,
-      alreadyPaidRenda,
       destino,
+      // Só é usado quando destino === 'renda' — no automático, o motor paga
+      // sempre o(s) mês(es) mais antigo(s) em falta.
+      soRendaMonth: overrideMonth ?? tx.transaction_date.slice(0, 7),
     })
 
     if (!skipConfirm && !window.confirm(`${plan.summary}\n\nConfirmar processamento deste pagamento?`)) return 'cancelled'
 
-    await applyRentPaymentPlan(supabase, plan, {
+    const result = await applyRentPaymentPlan(supabase, plan, {
       leaseId: tx.confirmed_lease_id,
       tenantId,
-      referenceMonth,
       paymentDate: tx.transaction_date,
       paymentMethod: 'banco',
+      spaceRef: lease.space?.ref,
+      tenantName: lease.tenant?.name,
     })
+    if (result.error) { alert(`Erro ao processar o pagamento: ${result.error}`); return 'cancelled' }
 
     return 'created'
   }

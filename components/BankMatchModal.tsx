@@ -10,7 +10,7 @@
 
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
-import { formatCurrency, formatDate, matchesSearch } from '@/lib/utils'
+import { formatCurrency, formatDate, matchesSearch, getMonthLabel } from '@/lib/utils'
 import { EXPENSE_CATEGORIES } from '@/lib/expenseCategories'
 import { Search, X, Sparkles, FileText, CheckCircle } from 'lucide-react'
 import { mergeCategories, normalizeCategory } from '@/lib/incomeCategories'
@@ -238,24 +238,15 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
 
       setPlanLoading(true)
       try {
-        const mes = `${referenceMonth || tx.transaction_date.slice(0, 7)}-01`
-
-        const { data: existentes } = await supabase
-          .from('rent_payments').select('amount, tipo')
-          .eq('lease_id', lease.id).eq('reference_month', mes)
-
-        const jaPago = (existentes ?? [])
-          .filter((p: any) => p.tipo === 'renda' || !p.tipo)
-          .reduce((s: number, p: any) => s + (p.amount || 0), 0)
-
         const resultado = await buildRentPaymentPlan(supabase, {
           leaseId: lease.id,
           tenantId,
-          monthlyRent: lease.monthly_rent,
           amount: tx.amount,
-          referenceMonth: mes,
-          alreadyPaidRenda: jaPago,
           destino,
+          // Só é usado quando destino === 'renda' — no automático, o motor
+          // paga sempre o(s) mês(es) mais antigo(s) em falta, seja qual for
+          // este campo.
+          soRendaMonth: referenceMonth || tx.transaction_date.slice(0, 7),
         })
 
         if (!cancelado) setPlan(resultado)
@@ -515,6 +506,11 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
                 {referenceMonth !== tx.transaction_date.slice(0, 7) && (
                   <p className="text-xs text-amber-600 mt-1">Diferente do mes da transacao ({tx.transaction_date.slice(0, 7)})</p>
                 )}
+                {destino === 'auto' && (
+                  <p className="text-xs text-gray-400 mt-1">
+                    No destino Automático este campo não é usado — paga sempre o(s) mês(es) mais antigo(s) em falta.
+                  </p>
+                )}
               </div>
 
               {/* Como o valor vai ser distribuído */}
@@ -541,18 +537,28 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
                   </p>
 
                   <div className="space-y-1.5 text-sm">
-                    <div className="flex justify-between items-start gap-2">
-                      <span className="text-gray-700">
-                        🏠 Renda
-                        <span className="text-xs text-gray-400 ml-1">
-                          {plan.rendaFullyPaid ? 'liquidada' : `de ${formatCurrency(plan.monthlyRent)}`}
+                    {plan.rendaPayments.map(rp => (
+                      <div key={rp.referenceMonth} className="flex justify-between items-start gap-2">
+                        <span className="text-gray-700">
+                          🏠 Renda {getMonthLabel(rp.referenceMonth)}
+                          <span className="text-xs text-gray-400 ml-1">
+                            {rp.fullyPaid ? 'liquidada' : `de ${formatCurrency(rp.monthlyRent)}`}
+                          </span>
+                          {rp.creditApplied > 0 && (
+                            <span className="block text-[11px] text-purple-600 mt-0.5">
+                              💰 crédito {formatCurrency(rp.creditApplied)} aplicado
+                            </span>
+                          )}
+                          <SaldoLinha emDivida={rp.owedBefore} fica={rp.remainingAfter} />
                         </span>
-                        <SaldoLinha emDivida={plan.rendaOwedBefore} fica={plan.rendaRemainingAfter} />
-                      </span>
-                      <span className={`font-medium ${plan.rendaFullyPaid ? 'text-gray-900' : 'text-amber-700'}`}>
-                        {formatCurrency(plan.rendaAmount)}
-                      </span>
-                    </div>
+                        <span className={`font-medium ${rp.fullyPaid ? 'text-gray-900' : 'text-amber-700'}`}>
+                          {formatCurrency(rp.amount)}
+                        </span>
+                      </div>
+                    ))}
+                    {destino !== 'luz' && destino !== 'dividas' && plan.rendaPayments.length === 0 && (
+                      <p className="text-xs text-gray-400">Sem meses de renda em falta.</p>
+                    )}
 
                     {plan.electricityCharges.map(c => (
                       <div key={c.id} className="flex justify-between items-start gap-2">

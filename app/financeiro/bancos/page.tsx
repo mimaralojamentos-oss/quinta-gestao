@@ -269,34 +269,26 @@ export default function BancosPage() {
     }
 
     if (type === 'renda' && lease) {
-      const mes = `${referenceMonth ?? tx.transaction_date.slice(0, 7)}-01`
-
-      const { data: existentes } = await supabase
-        .from('rent_payments').select('id, tipo, amount')
-        .eq('lease_id', lease.id).eq('reference_month', mes)
-
-      const jaPago = (existentes ?? [])
-        .filter((p: any) => p.tipo === 'renda' || !p.tipo)
-        .reduce((s: number, p: any) => s + (p.amount || 0), 0)
-
       const plan = await buildRentPaymentPlan(supabase, {
         leaseId: lease.id,
         tenantId,
-        monthlyRent: lease.monthly_rent,
         amount: tx.amount,
-        referenceMonth: mes,
-        alreadyPaidRenda: jaPago,
         destino,
+        // Só é usado quando destino === 'renda' — no automático, o motor
+        // paga sempre o(s) mês(es) mais antigo(s) em falta.
+        soRendaMonth: referenceMonth ?? tx.transaction_date.slice(0, 7),
       })
 
       if (window.confirm(`${plan.summary}\n\nConfirmar processamento deste pagamento?`)) {
-        await applyRentPaymentPlan(supabase, plan, {
+        const result = await applyRentPaymentPlan(supabase, plan, {
           leaseId: lease.id,
           tenantId,
-          referenceMonth: mes,
           paymentDate: tx.transaction_date,
           paymentMethod: 'banco',
+          spaceRef: (lease.space as any)?.ref,
+          tenantName: (lease.tenant as any)?.name,
         })
+        if (result.error) alert(`Erro ao processar o pagamento: ${result.error}`)
       }
     } else if (type === 'despesa') {
       const result = await ensureExpenseForTransaction(

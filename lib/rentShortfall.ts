@@ -41,12 +41,38 @@ export interface MonthlyRentStatus<P extends RentPaymentLike = RentPaymentLike> 
 }
 
 /**
+ * Estado de um único mês (renda aplicável, pagamentos desse mês, crédito
+ * aplicado) — usado tanto pelo ciclo de getMonthlyRentStatus como por quem
+ * precisa de olhar só para um mês específico (ex.: motor de alocação de
+ * pagamentos, no destino "Só renda").
+ */
+export function getSingleMonthRentStatus<P extends RentPaymentLike>(params: {
+  lease: { id: string; monthly_rent: number }
+  monthStr: string
+  payments: P[]
+  rentHistory?: RentHistoryEntry[] | null
+  appliedAdvances: Record<string, number>
+}): MonthlyRentStatus<P> {
+  const { lease, monthStr, payments, rentHistory, appliedAdvances } = params
+  const rentForMonth = getRentForMonth(rentHistory, lease.id, monthStr, lease.monthly_rent)
+  const monthPayments = payments.filter(p =>
+    p.lease_id === lease.id &&
+    p.reference_month?.slice(0, 7) === monthStr &&
+    (p.tipo === 'renda' || !p.tipo)
+  )
+  const totalPaidThisMonth = monthPayments.reduce((s, p) => s + (p.amount ?? 0), 0)
+  const advanceThisMonth = appliedAdvanceFor(appliedAdvances, lease.id, monthStr)
+  const hasPayment = monthPayments.length > 0 || advanceThisMonth > 0
+
+  return { monthStr, rentForMonth, monthPayments, totalPaidThisMonth, advanceThisMonth, hasPayment }
+}
+
+/**
  * Percorre mês a mês, de RENT_SHORTFALL_START_DATE (ou do início do contrato,
  * o que for mais tarde) até ao mês atual, e devolve os dados de cada mês para
- * o contrato indicado (renda aplicável, pagamentos desse mês, crédito
- * aplicado). Cada sítio que usa isto calcula o valor em falta à sua maneira
- * — os arredondamentos finais diferem ligeiramente entre sítios e não foram
- * unificados aqui, só a parte que era mesmo igual em todos.
+ * o contrato indicado. Cada sítio que usa isto calcula o valor em falta à sua
+ * maneira — os arredondamentos finais diferem ligeiramente entre sítios e não
+ * foram unificados aqui, só a parte que era mesmo igual em todos.
  */
 export function getMonthlyRentStatus<P extends RentPaymentLike>(params: {
   lease: { id: string; start_date: string | null; monthly_rent: number }
@@ -68,17 +94,7 @@ export function getMonthlyRentStatus<P extends RentPaymentLike>(params: {
   const cursor = new Date(start)
   while (cursor <= today) {
     const monthStr = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`
-    const rentForMonth = getRentForMonth(rentHistory, lease.id, monthStr, lease.monthly_rent)
-    const monthPayments = payments.filter(p =>
-      p.lease_id === lease.id &&
-      p.reference_month?.slice(0, 7) === monthStr &&
-      (p.tipo === 'renda' || !p.tipo)
-    )
-    const totalPaidThisMonth = monthPayments.reduce((s, p) => s + (p.amount ?? 0), 0)
-    const advanceThisMonth = appliedAdvanceFor(appliedAdvances, lease.id, monthStr)
-    const hasPayment = monthPayments.length > 0 || advanceThisMonth > 0
-
-    result.push({ monthStr, rentForMonth, monthPayments, totalPaidThisMonth, advanceThisMonth, hasPayment })
+    result.push(getSingleMonthRentStatus({ lease, monthStr, payments, rentHistory, appliedAdvances }))
     cursor.setMonth(cursor.getMonth() + 1)
   }
   return result
