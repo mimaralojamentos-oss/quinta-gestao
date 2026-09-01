@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS tenants (
 CREATE TABLE IF NOT EXISTS leases (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   space_id UUID REFERENCES spaces(id) ON DELETE RESTRICT,
-  tenant_id UUID REFERENCES tenants(id) ON DELETE RESTRICT,
+  tenant_id UUID REFERENCES tenants(id) ON DELETE RESTRICT NOT NULL,
   monthly_rent DECIMAL(10,2) NOT NULL,
   deposit DECIMAL(10,2),
   start_date DATE NOT NULL,
