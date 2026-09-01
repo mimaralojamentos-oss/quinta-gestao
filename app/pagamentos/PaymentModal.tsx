@@ -3,11 +3,12 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency, formatDate, getMonthLabel } from '@/lib/utils'
-import { buildRentPaymentPlan, applyRentPaymentPlan, type DestinoPagamento } from '@/lib/rentPaymentPlan'
+import { buildRentPaymentPlan, applyRentPaymentPlan, type DestinoPagamento, type RentPaymentPlan } from '@/lib/rentPaymentPlan'
 import DestinoPagamentoPicker from '@/components/DestinoPagamentoPicker'
 import { X, Pencil, Trash2, AlertTriangle } from 'lucide-react'
 import { logAccess } from '@/lib/logAccess'
-import { consumeAdvances } from '@/lib/advanceCredit'
+import { buildAppliedAdvanceMap } from '@/lib/advanceCredit'
+import { getMonthlyRentStatus } from '@/lib/rentShortfall'
 import { PAYMENT_TYPES, PAYMENT_TYPE_LABELS } from '@/lib/paymentTypes'
 import { getDebtRemaining } from '@/lib/debts'
 
@@ -40,6 +41,10 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
   const [singleDate, setSingleDate] = useState(new Date().toISOString().slice(0, 10))
   const [singleMethod, setSingleMethod] = useState('dinheiro')
   const [loadingDebts, setLoadingDebts] = useState(true)
+  // Distribuição deste pagamento em concreto — calculada pelo motor único
+  // (lib/rentPaymentPlan.ts), à medida que o valor é escrito.
+  const [plan, setPlan] = useState<RentPaymentPlan | null>(null)
+  const [planLoading, setPlanLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -54,8 +59,6 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
 
   async function fetchDebts() {
     setLoadingDebts(true)
-    const mayStart = new Date('2026-05-01')
-    const today = new Date(); today.setDate(1)
     const items: DebtItem[] = []
 
     // Todos os pagamentos de renda deste contrato
@@ -64,30 +67,26 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
       .select('*')
       .eq('lease_id', lease.id)
 
-    // Rendas em falta
+    // Rendas em falta — mesmo cálculo mês a mês usado no resto da app
+    // (lib/rentShortfall.ts), para esta lista bater sempre certo com a
+    // conta corrente do inquilino.
     if (lease.monthly_rent && lease.tenant?.id) {
-      const contractStart = new Date(lease.start_date ?? '2026-05-01')
-      contractStart.setDate(1)
-      const start = contractStart > mayStart ? contractStart : mayStart
-      const cursor = new Date(start)
-      while (cursor <= today) {
-        const monthStr = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`
-        const hasPayment = (allPayments ?? []).some(p =>
-          p.reference_month?.slice(0, 7) === monthStr &&
-          p.payment_date &&
-          (p.tipo === 'renda' || !p.tipo)
-        )
-        if (!hasPayment) {
-          items.push({
-            id: `renda-${monthStr}`,
-            type: 'renda',
-            label: `Renda ${monthStr}`,
-            originalAmount: lease.monthly_rent,
-            remainingAmount: lease.monthly_rent,
-            referenceMonth: monthStr,
-          })
-        }
-        cursor.setMonth(cursor.getMonth() + 1)
+      const { data: rentHistoryData } = await supabase
+        .from('lease_rent_history').select('lease_id, effective_date, monthly_rent').eq('lease_id', lease.id)
+      const appliedAdvances = buildAppliedAdvanceMap(allPayments ?? [])
+      const meses = getMonthlyRentStatus({ lease, payments: allPayments ?? [], rentHistory: rentHistoryData, appliedAdvances })
+
+      for (const m of meses) {
+        const owed = parseFloat(Math.max(0, m.rentForMonth - m.totalPaidThisMonth - m.advanceThisMonth).toFixed(2))
+        if (owed < 0.01) continue
+        items.push({
+          id: `renda-${m.monthStr}`,
+          type: 'renda',
+          label: `Renda ${m.monthStr}`,
+          originalAmount: m.rentForMonth,
+          remainingAmount: owed,
+          referenceMonth: m.monthStr,
+        })
       }
     }
 
@@ -152,151 +151,57 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
     setLoadingDebts(false)
   }
 
-  /**
-   * Distribui o valor recebido. `destino` limita o que pode ser tocado —
-   * por omissão segue a ordem habitual: renda, luz, dívidas.
-   */
-  function computeAllocation(total: number, destino: DestinoPagamento = 'auto') {
-    let remaining = total
-    const result: { item: DebtItem; paying: number }[] = []
+  // Calcula a distribuição deste pagamento em concreto, à medida que o valor
+  // é escrito — o mesmo motor único usado no banco e na ficha do inquilino.
+  useEffect(() => {
+    let cancelado = false
 
-    const podeRenda = destino === 'auto' || destino === 'renda'
-    const podeLuz = destino === 'auto' || destino === 'luz'
-    const podeDividas = destino === 'auto' || destino === 'dividas'
-
-    const rendas = !podeRenda ? [] : [...debtItems].filter(d => d.type === 'renda' && d.remainingAmount > 0)
-      .sort((a, b) => (a.referenceMonth ?? '').localeCompare(b.referenceMonth ?? ''))
-    const elec = !podeLuz ? [] : [...debtItems].filter(d => d.type === 'eletricidade' && d.remainingAmount > 0)
-      .sort((a, b) => (a.referenceMonth ?? '').localeCompare(b.referenceMonth ?? ''))
-    const manual = !podeDividas ? [] : [...debtItems].filter(d => d.type === 'manual' && d.remainingAmount > 0)
-
-    for (const item of rendas) {
-      if (remaining <= 0) break
-      const paying = parseFloat(Math.min(remaining, item.remainingAmount).toFixed(2))
-      result.push({ item, paying })
-      remaining = parseFloat((remaining - paying).toFixed(2))
+    async function calcular() {
+      const total = parseFloat(singleAmount)
+      if (!total || total <= 0) { setPlan(null); return }
+      setPlanLoading(true)
+      try {
+        const resultado = await buildRentPaymentPlan(supabase, {
+          leaseId: lease.id,
+          tenantId: lease.tenant?.id,
+          amount: total,
+          destino: destinoPagamento,
+          soRendaMonth: currentMonth,
+        })
+        if (!cancelado) setPlan(resultado)
+      } finally {
+        if (!cancelado) setPlanLoading(false)
+      }
     }
-    for (const item of elec) {
-      if (remaining <= 0) break
-      const paying = parseFloat(Math.min(remaining, item.remainingAmount).toFixed(2))
-      result.push({ item, paying })
-      remaining = parseFloat((remaining - paying).toFixed(2))
-    }
-    for (const item of manual) {
-      if (remaining <= 0) break
-      const paying = parseFloat(Math.min(remaining, item.remainingAmount).toFixed(2))
-      result.push({ item, paying })
-      remaining = parseFloat((remaining - paying).toFixed(2))
-    }
-
-    return { allocation: result, leftover: parseFloat(remaining.toFixed(2)) }
-  }
+    calcular()
+    return () => { cancelado = true }
+  }, [singleAmount, destinoPagamento])
 
   async function handleSaveDebts() {
     const total = parseFloat(singleAmount)
     if (!total || total <= 0) { setError('Introduz o valor recebido'); return }
+    if (!plan) { setError('Aguarda o cálculo da distribuição'); return }
     setSaving(true); setError('')
 
-    const { allocation, leftover } = computeAllocation(total, destinoPagamento)
+    const result = await applyRentPaymentPlan(supabase, plan, {
+      leaseId: lease.id,
+      tenantId: lease.tenant?.id,
+      paymentDate: singleDate,
+      paymentMethod: singleMethod,
+      spaceRef: lease.space?.ref,
+      tenantName: lease.tenant?.name,
+    })
 
-    for (const { item, paying } of allocation) {
-      const { type, referenceMonth, debtId, chargeId } = item
-
-      if (type === 'renda') {
-        const { data: newPayment } = await supabase.from('rent_payments').insert({
-          lease_id: lease.id,
-          reference_month: (referenceMonth ?? '') + '-01',
-          payment_date: singleDate,
-          amount: paying,
-          payment_method: singleMethod,
-          tipo: 'renda',
-          notes: paying < item.remainingAmount ? 'Pagamento parcial' : null,
-        }).select().single()
-        if (singleMethod === 'dinheiro' && newPayment) {
-          await supabase.from('cash_fund_movements').insert({
-            movement_date: singleDate,
-            description: `🏠 Renda ${referenceMonth} — ${lease.space?.ref} (${lease.tenant?.name})`,
-            amount: paying, type: 'entrada', source: 'renda', source_id: newPayment.id,
-          })
-        }
-        await logAccess({ action: 'criar', page: '/pagamentos', details: `Registou pagamento de ${item.label} (${formatCurrency(paying)}) de ${lease.tenant?.name} (${lease.space?.ref})` })
-
-      } else if (type === 'manual' && debtId) {
-        await supabase.from('debt_payments').insert({
-          debt_id: debtId, payment_date: singleDate, amount: paying, payment_method: singleMethod, notes: null,
-        })
-        if (singleMethod === 'dinheiro') {
-          await supabase.from('cash_fund_movements').insert({
-            movement_date: singleDate,
-            description: `⚠️ ${item.label} — ${lease.tenant?.name}`,
-            amount: paying, type: 'entrada', source: 'divida', source_id: debtId,
-          })
-        }
-        await logAccess({ action: 'criar', page: '/pagamentos', details: `Registou pagamento de "${item.label}" (${formatCurrency(paying)}) de ${lease.tenant?.name}` })
-
-      } else if (type === 'eletricidade' && chargeId) {
-        const isPaidFull = paying >= item.remainingAmount
-        if (isPaidFull) {
-          await supabase.from('electricity_charges').update({
-            paid: true, payment_date: singleDate, payment_method: singleMethod,
-            amount_paid: item.originalAmount,
-          }).eq('id', chargeId)
-        } else {
-          // Pagamento parcial — acumula amount_paid sem marcar como pago
-          const newAmountPaid = parseFloat(((item.originalAmount - item.remainingAmount) + paying).toFixed(2))
-          await supabase.from('electricity_charges').update({
-            amount_paid: newAmountPaid,
-          }).eq('id', chargeId)
-        }
-        if (singleMethod === 'dinheiro') {
-          await supabase.from('cash_fund_movements').insert({
-            movement_date: singleDate,
-            description: `⚡ ${item.label}${!isPaidFull ? ' (parcial)' : ''} — ${lease.space?.ref} (${lease.tenant?.name})`,
-            amount: paying, type: 'entrada', source: 'eletricidade', source_id: chargeId,
-          })
-        }
-        await logAccess({ action: 'criar', page: '/pagamentos', details: `Registou pagamento${!isPaidFull ? ' parcial' : ''} de ${item.label} (${formatCurrency(paying)}) de ${lease.tenant?.name} (${lease.space?.ref})` })
-      }
+    if (result.error) {
+      setError(result.error)
+      setSaving(false)
+      return
     }
 
-    // Excedente → adiantamento
-    if (leftover > 0.01) {
-      const { data: advPayment } = await supabase.from('rent_payments').insert({
-        lease_id: lease.id,
-        reference_month: singleDate.slice(0, 7) + '-01',
-        payment_date: singleDate,
-        amount: leftover,
-        payment_method: singleMethod,
-        tipo: 'adiantamento',
-        notes: 'Excedente (adiantamento)',
-      }).select().single()
-      if (singleMethod === 'dinheiro' && advPayment) {
-        await supabase.from('cash_fund_movements').insert({
-          movement_date: singleDate,
-          description: `💰 Adiantamento — ${lease.space?.ref} (${lease.tenant?.name})`,
-          amount: leftover, type: 'entrada', source: 'renda', source_id: advPayment.id,
-        })
-      }
-    }
-
-    // Aplicar o crédito do inquilino às rendas.
-    // Antes criava-se uma renda "fantasma" com a nota "Crédito de adiantamento
-    // aplicado" e o adiantamento ficava apenas marcado como usado, sem se saber
-    // onde tinha sido gasto. Agora cada adiantamento assina o mês que pagou.
-    for (const item of debtItems) {
-      const credit = item.creditApplied ?? 0
-      if (credit <= 0 || item.type !== 'renda') continue
-      const { error: advError } = await consumeAdvances(supabase, {
-        leaseId: lease.id,
-        amountNeeded: credit,
-        target: { type: 'renda', leaseId: lease.id, month: item.referenceMonth ?? '' },
-      })
-      if (advError) {
-        alert(`Erro ao aplicar o adiantamento: ${advError}`)
-        setSaving(false)
-        return
-      }
-    }
+    await logAccess({
+      action: 'criar', page: '/pagamentos',
+      details: `Registou pagamento (${formatCurrency(total)}) de ${lease.tenant?.name} (${lease.space?.ref}) — ${plan.summary}`,
+    })
 
     setSaving(false)
     onSaved()
@@ -530,41 +435,58 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
                   <DestinoPagamentoPicker valor={destinoPagamento} onChange={setDestinoPagamento} />
 
                   {/* Preview distribuição */}
-                  {parseFloat(singleAmount) > 0 && (() => {
-                    const { allocation, leftover } = computeAllocation(parseFloat(singleAmount), destinoPagamento)
-                    return (
-                      <div className="border border-blue-200 rounded-lg overflow-hidden">
-                        <div className="bg-blue-100 px-3 py-2 text-xs font-semibold text-blue-800">
-                          Distribuição{destinoPagamento !== 'auto' ? '' : ' automática'}
-                        </div>
-                        <div className="divide-y divide-blue-50">
-                          {allocation.map((a, i) => {
-                            const icon = a.item.type === 'eletricidade' ? '⚡' : a.item.type === 'manual' ? '📋' : '🏠'
-                            const isPartial = a.paying < a.item.remainingAmount
-                            return (
-                              <div key={i} className="flex justify-between items-center px-3 py-2">
-                                <span className="text-xs text-gray-700">
-                                  {icon} {a.item.label}
-                                  {isPartial && <span className="text-orange-500 ml-1">(parcial)</span>}
-                                </span>
-                                <span className="text-xs font-semibold">{formatCurrency(a.paying)}</span>
-                              </div>
-                            )
-                          })}
-                          {leftover > 0.01 && (
-                            <div className="flex justify-between items-center px-3 py-2 bg-purple-50">
-                              <span className="text-xs text-purple-700">💰 Excedente → adiantamento</span>
-                              <span className="text-xs font-semibold text-purple-700">{formatCurrency(leftover)}</span>
-                            </div>
-                          )}
-                          <div className="flex justify-between items-center px-3 py-2 bg-gray-50 border-t border-gray-200">
-                            <span className="text-xs font-bold text-gray-700">Total</span>
-                            <span className="text-xs font-bold">{formatCurrency(parseFloat(singleAmount))}</span>
+                  {planLoading && (
+                    <p className="text-xs text-gray-400">A calcular a distribuição...</p>
+                  )}
+                  {plan && !planLoading && parseFloat(singleAmount) > 0 && (
+                    <div className="border border-blue-200 rounded-lg overflow-hidden">
+                      <div className="bg-blue-100 px-3 py-2 text-xs font-semibold text-blue-800">
+                        Distribuição{destinoPagamento !== 'auto' ? '' : ' automática'}
+                      </div>
+                      <div className="divide-y divide-blue-50">
+                        {plan.rendaPayments.map(rp => (
+                          <div key={rp.referenceMonth} className="flex justify-between items-center px-3 py-2">
+                            <span className="text-xs text-gray-700">
+                              🏠 Renda {getMonthLabel(rp.referenceMonth)}
+                              {!rp.fullyPaid && <span className="text-orange-500 ml-1">(parcial)</span>}
+                              {rp.creditApplied > 0 && (
+                                <span className="block text-[11px] text-purple-600">💰 crédito {formatCurrency(rp.creditApplied)} aplicado</span>
+                              )}
+                            </span>
+                            <span className="text-xs font-semibold">{formatCurrency(rp.amount)}</span>
                           </div>
+                        ))}
+                        {plan.electricityCharges.map(c => (
+                          <div key={c.id} className="flex justify-between items-center px-3 py-2">
+                            <span className="text-xs text-gray-700">
+                              ⚡ Eletricidade {c.chargeDate?.slice(0, 7) ?? ''}
+                              {c.isPartial && <span className="text-orange-500 ml-1">(parcial)</span>}
+                            </span>
+                            <span className="text-xs font-semibold">{formatCurrency(c.amount)}</span>
+                          </div>
+                        ))}
+                        {plan.debtPayments.map(d => (
+                          <div key={d.debtId} className="flex justify-between items-center px-3 py-2">
+                            <span className="text-xs text-gray-700">
+                              📋 {d.description}
+                              {d.remainingAfter > 0.01 && <span className="text-orange-500 ml-1">(parcial)</span>}
+                            </span>
+                            <span className="text-xs font-semibold">{formatCurrency(d.amount)}</span>
+                          </div>
+                        ))}
+                        {plan.adiantamento > 0.01 && (
+                          <div className="flex justify-between items-center px-3 py-2 bg-purple-50">
+                            <span className="text-xs text-purple-700">💰 Excedente → adiantamento</span>
+                            <span className="text-xs font-semibold text-purple-700">{formatCurrency(plan.adiantamento)}</span>
+                          </div>
+                        )}
+                        <div className="flex justify-between items-center px-3 py-2 bg-gray-50 border-t border-gray-200">
+                          <span className="text-xs font-bold text-gray-700">Total</span>
+                          <span className="text-xs font-bold">{formatCurrency(parseFloat(singleAmount))}</span>
                         </div>
                       </div>
-                    )
-                  })()}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -658,7 +580,7 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
             {editingPayment ? 'Cancelar edição' : 'Cancelar'}
           </button>
           {mode === 'debts' ? (
-            <button className="btn-primary" onClick={handleSaveDebts} disabled={saving || !singleAmount || parseFloat(singleAmount) <= 0}>
+            <button className="btn-primary" onClick={handleSaveDebts} disabled={saving || planLoading || !plan || !singleAmount || parseFloat(singleAmount) <= 0}>
               {saving ? 'A guardar...' : `Guardar ${parseFloat(singleAmount) > 0 ? formatCurrency(parseFloat(singleAmount)) : ''}`}
             </button>
           ) : (
