@@ -560,6 +560,21 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
                       <p className="text-xs text-gray-400">Sem meses de renda em falta.</p>
                     )}
 
+                    {plan.caucao && (
+                      <div className="flex justify-between items-start gap-2">
+                        <span className="text-gray-700">
+                          🔒 Caução
+                          <span className="text-xs text-gray-400 ml-1">
+                            {plan.caucao.fullyPaid ? 'liquidada' : `de ${formatCurrency(plan.caucao.owedBefore)}`}
+                          </span>
+                          <SaldoLinha emDivida={plan.caucao.owedBefore} fica={plan.caucao.remainingAfter} />
+                        </span>
+                        <span className={`font-medium ${plan.caucao.fullyPaid ? 'text-gray-900' : 'text-amber-700'}`}>
+                          {formatCurrency(plan.caucao.amount)}
+                        </span>
+                      </div>
+                    )}
+
                     {plan.electricityCharges.map(c => (
                       <div key={c.id} className="flex justify-between items-start gap-2">
                         <span className="text-gray-700">

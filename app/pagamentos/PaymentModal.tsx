@@ -456,6 +456,15 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
                             <span className="text-xs font-semibold">{formatCurrency(rp.amount)}</span>
                           </div>
                         ))}
+                        {plan.caucao && (
+                          <div className="flex justify-between items-center px-3 py-2">
+                            <span className="text-xs text-gray-700">
+                              🔒 Caução
+                              {!plan.caucao.fullyPaid && <span className="text-orange-500 ml-1">(parcial)</span>}
+                            </span>
+                            <span className="text-xs font-semibold">{formatCurrency(plan.caucao.amount)}</span>
+                          </div>
+                        )}
                         {plan.electricityCharges.map(c => (
                           <div key={c.id} className="flex justify-between items-center px-3 py-2">
                             <span className="text-xs text-gray-700">

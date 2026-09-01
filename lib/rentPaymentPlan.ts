@@ -2,6 +2,7 @@ import { formatCurrency, getMonthLabel, getCurrentMonth } from './utils'
 import { getMonthlyRentStatus, getSingleMonthRentStatus } from './rentShortfall'
 import { buildAppliedAdvanceMap, consumeAdvances } from './advanceCredit'
 import { getDebtRemaining } from './debts'
+import { getDepositShortfall } from './depositShortfall'
 import { CASH_FUND_START_DATE } from './cashFundConfig'
 
 export interface ElectricityChargePlan {
@@ -42,6 +43,15 @@ export interface RendaMonthPlan {
   remainingAfter: number
 }
 
+export interface CaucaoPlan {
+  /** Quanto faltava da caução antes deste pagamento (lib/depositShortfall.ts). */
+  owedBefore: number
+  /** Dinheiro novo (deste pagamento) aplicado à caução. */
+  amount: number
+  fullyPaid: boolean
+  remainingAfter: number
+}
+
 export interface RentPaymentPlan {
   /** Um item por mês tocado — pode ser vários, quando há atraso de mais de um mês. */
   rendaPayments: RendaMonthPlan[]
@@ -49,6 +59,8 @@ export interface RentPaymentPlan {
   rendaTotal: number
   /** Soma de rendaPayments[].creditApplied — crédito de adiantamento consumido neste pagamento. */
   creditTotal: number
+  /** null quando não há caução em falta (ou o contrato não é elegível — ver lib/depositShortfall.ts). */
+  caucao: CaucaoPlan | null
   electricityCharges: ElectricityChargePlan[]
   electricityTotal: number
   debtPayments: DebtPaymentPlan[]
@@ -61,20 +73,23 @@ export interface RentPaymentPlan {
  * Para onde vai o dinheiro recebido.
  *
  * 'auto' é a ordem habitual: primeiro a renda (todos os meses em falta, do
- * mais antigo ao mais recente), depois a eletricidade em atraso, depois as
- * dívidas, e o que sobrar fica como adiantamento.
+ * mais antigo ao mais recente), depois a caução em falta, depois a
+ * eletricidade em atraso, depois as dívidas, e o que sobrar fica como
+ * adiantamento.
  *
  * As outras servem para quando o inquilino diz expressamente ao que vem —
  * "isto é para a luz" — e não se quer que o valor seja absorvido pela renda.
  * Em "Só renda", ao contrário do automático, aplica-se só ao mês escolhido
- * por quem regista o pagamento (soRendaMonth), não a todos os meses em falta.
+ * por quem regista o pagamento (soRendaMonth) — mas a caução em falta, se
+ * houver, continua a ser considerada, pela mesma razão de sempre andarem
+ * juntas (ambas dependem só do contrato, não de um mês específico).
  */
 export type DestinoPagamento = 'auto' | 'renda' | 'luz' | 'dividas'
 
 export const DESTINOS: { valor: DestinoPagamento; label: string; descricao: string }[] = [
-  { valor: 'auto', label: 'Automático', descricao: 'Renda, depois luz, depois dívidas' },
-  { valor: 'renda', label: 'Só renda', descricao: 'O que sobrar fica como adiantamento' },
-  { valor: 'luz', label: 'Só eletricidade', descricao: 'Não toca na renda do mês' },
+  { valor: 'auto', label: 'Automático', descricao: 'Renda, depois caução, depois luz, depois dívidas' },
+  { valor: 'renda', label: 'Só renda', descricao: 'Renda e caução — o que sobrar fica como adiantamento' },
+  { valor: 'luz', label: 'Só eletricidade', descricao: 'Não toca na renda nem na caução' },
   { valor: 'dividas', label: 'Só dívidas', descricao: 'Apenas dívidas em conta corrente' },
 ]
 
@@ -95,9 +110,12 @@ interface BuildPlanParams {
  *      adiantamento disponível é sempre aplicado primeiro, antes do dinheiro
  *      novo — por isso cada mês pode ficar liquidado com uma mistura dos
  *      dois.
- *   2. Eletricidade em dívida (mais antiga primeiro).
- *   3. Dívidas abertas (mais antigas primeiro, pagamento parcial permitido).
- *   4. O que sobrar fica como adiantamento (crédito do inquilino).
+ *   2. Caução em falta (lib/depositShortfall.ts — só contratos com início a
+ *      partir de 2026-09-01). O crédito de adiantamento NÃO se aplica aqui,
+ *      só à renda.
+ *   3. Eletricidade em dívida (mais antiga primeiro).
+ *   4. Dívidas abertas (mais antigas primeiro, pagamento parcial permitido).
+ *   5. O que sobrar fica como adiantamento (crédito do inquilino).
  */
 export async function buildRentPaymentPlan(supabase: any, params: BuildPlanParams): Promise<RentPaymentPlan> {
   const { leaseId, tenantId, amount, destino = 'auto' } = params
@@ -110,10 +128,11 @@ export async function buildRentPaymentPlan(supabase: any, params: BuildPlanParam
 
   const rendaPayments: RendaMonthPlan[] = []
   let creditTotal = 0
+  let caucao: CaucaoPlan | null = null
 
   if (podeRenda) {
     const { data: lease } = await supabase
-      .from('leases').select('id, monthly_rent, start_date').eq('id', leaseId).single()
+      .from('leases').select('id, monthly_rent, deposit, start_date').eq('id', leaseId).single()
 
     if (lease) {
       const { data: allPayments } = await supabase
@@ -167,6 +186,16 @@ export async function buildRentPaymentPlan(supabase: any, params: BuildPlanParam
           creditTotal = parseFloat((creditTotal + creditApplied).toFixed(2))
         }
       }
+
+      // 2ª prioridade: caução em falta. O crédito de adiantamento não se
+      // aplica aqui — é sempre só para a renda.
+      const caucaoOwed = getDepositShortfall(lease, payments)
+      if (caucaoOwed >= 0.01) {
+        const aplicar = parseFloat(Math.max(0, Math.min(remaining, caucaoOwed)).toFixed(2))
+        remaining = parseFloat((remaining - aplicar).toFixed(2))
+        const remainingAfter = parseFloat((caucaoOwed - aplicar).toFixed(2))
+        caucao = { owedBefore: caucaoOwed, amount: aplicar, fullyPaid: remainingAfter <= 0.01, remainingAfter }
+      }
     }
   }
 
@@ -184,6 +213,11 @@ export async function buildRentPaymentPlan(supabase: any, params: BuildPlanParam
   }
   if (creditTotal > 0) {
     lines.push(`Crédito usado: ${formatCurrency(creditTotal)}`)
+  }
+  if (caucao) {
+    lines.push(caucao.fullyPaid
+      ? `Caução: ${formatCurrency(caucao.amount)} ✅`
+      : `Caução: ${formatCurrency(caucao.amount)} de ${formatCurrency(caucao.owedBefore)} ⚠️`)
   }
 
   const electricityCharges: ElectricityChargePlan[] = []
@@ -267,7 +301,7 @@ export async function buildRentPaymentPlan(supabase: any, params: BuildPlanParam
   }
 
   return {
-    rendaPayments, rendaTotal, creditTotal,
+    rendaPayments, rendaTotal, creditTotal, caucao,
     electricityCharges, electricityTotal,
     debtPayments, debtTotal,
     adiantamento,
@@ -334,6 +368,31 @@ export async function applyRentPaymentPlan(supabase: any, plan: RentPaymentPlan,
         type: 'entrada',
         source: 'renda',
         source_id: newPayment.id,
+      })
+    }
+  }
+
+  if (plan.caucao && plan.caucao.amount > 0) {
+    const { data: caucaoPayment, error: caucaoErr } = await supabase.from('rent_payments').insert({
+      lease_id: leaseId,
+      reference_month: paymentDate.slice(0, 7) + '-01',
+      payment_date: paymentDate,
+      amount: plan.caucao.amount,
+      payment_method: paymentMethod,
+      tipo: 'caucao',
+      notes: !plan.caucao.fullyPaid ? 'Pagamento parcial' : (notes || null),
+    }).select().single()
+
+    if (caucaoErr) return { rendaPayments, adiantamentoPayment: null, error: caucaoErr.message }
+
+    if (cashOk && caucaoPayment) {
+      await supabase.from('cash_fund_movements').insert({
+        movement_date: paymentDate,
+        description: `🔒 Caução${quemTexto ? ` — ${quemTexto}` : ''}`,
+        amount: plan.caucao.amount,
+        type: 'entrada',
+        source: 'renda',
+        source_id: caucaoPayment.id,
       })
     }
   }
