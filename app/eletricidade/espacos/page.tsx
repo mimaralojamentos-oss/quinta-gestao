@@ -666,32 +666,58 @@ export default function QuadrosEspacosPage() {
   }
 
   /**
-   * Converte uma leitura já registada em oferta.
-   *
-   * Se já tinha gerado cobrança, essa cobrança é apagada da conta corrente do
-   * inquilino — exceto se já tiver sido paga, caso em que a operação é
-   * recusada para não fazer desaparecer dinheiro que entrou.
+   * Procura a cobrança de eletricidade correspondente a uma leitura: primeiro
+   * pela ligação direta (reading_id), e só depois pela data (leituras
+   * antigas não têm reading_id). Devolve null se a leitura nunca gerou
+   * cobrança.
    */
-  async function marcarComoOferta(reading: Reading, spaceRef: string) {
-    // Procura a cobrança correspondente: primeiro pela ligação direta,
-    // e só depois pela data (leituras antigas não têm reading_id).
-    let cobranca: any = null
-
+  async function encontrarCobrancaDaLeitura(reading: Reading): Promise<any | null> {
     const { data: porLigacao } = await supabase
       .from('electricity_charges').select('id, amount, paid, payment_date')
       .eq('reading_id', reading.id).maybeSingle()
-    cobranca = porLigacao
+    if (porLigacao) return porLigacao
 
-    if (!cobranca) {
-      const { data: lease } = await supabase
-        .from('leases').select('id').eq('space_id', reading.space_id).eq('status', 'ativo').maybeSingle()
-      if (lease) {
-        const { data: porData } = await supabase
-          .from('electricity_charges').select('id, amount, paid, payment_date')
-          .eq('lease_id', lease.id).eq('charge_date', reading.reading_date).maybeSingle()
-        cobranca = porData
-      }
+    const { data: lease } = await supabase
+      .from('leases').select('id').eq('space_id', reading.space_id).eq('status', 'ativo').maybeSingle()
+    if (!lease) return null
+
+    const { data: porData } = await supabase
+      .from('electricity_charges').select('id, amount, paid, payment_date')
+      .eq('lease_id', lease.id).eq('charge_date', reading.reading_date).maybeSingle()
+    return porData
+  }
+
+  /**
+   * Grava a oferta: apaga a cobrança associada (se houver e não estiver
+   * paga) e marca a leitura como waived. Não pede confirmação nem faz
+   * logAccess — isso fica a cargo de quem chama, porque cada sítio tem o seu
+   * próprio texto (motivo por prompt vs. confirmação direta).
+   */
+  async function confirmarOferta(reading: Reading, cobranca: any | null, motivo: string | null): Promise<boolean> {
+    if (cobranca) {
+      const { error } = await supabase.from('electricity_charges').delete().eq('id', cobranca.id)
+      if (error) { alert(`Erro ao apagar a cobrança: ${error.message}`); return false }
     }
+
+    const { error: updateError } = await supabase.from('electricity_readings').update({
+      waived: true,
+      waived_reason: motivo,
+      charged: false,
+      accumulated: false,
+      amount_calculated: reading.amount_calculated,
+    }).eq('id', reading.id)
+
+    if (updateError) { alert(`Erro ao marcar como oferta: ${updateError.message}`); return false }
+    return true
+  }
+
+  /**
+   * Converte uma leitura já registada em oferta, a partir da linha do
+   * histórico (link "não cobrar"). Pede o motivo por prompt, como já
+   * acontecia.
+   */
+  async function marcarComoOferta(reading: Reading, spaceRef: string) {
+    const cobranca = await encontrarCobrancaDaLeitura(reading)
 
     if (cobranca?.paid) {
       alert(
@@ -714,20 +740,8 @@ export default function QuadrosEspacosPage() {
     )
     if (motivo === null) return
 
-    if (cobranca) {
-      const { error } = await supabase.from('electricity_charges').delete().eq('id', cobranca.id)
-      if (error) { alert(`Erro ao apagar a cobrança: ${error.message}`); return }
-    }
-
-    const { error: updateError } = await supabase.from('electricity_readings').update({
-      waived: true,
-      waived_reason: motivo.trim() || null,
-      charged: false,
-      accumulated: false,
-      amount_calculated: reading.amount_calculated,
-    }).eq('id', reading.id)
-
-    if (updateError) { alert(`Erro ao marcar como oferta: ${updateError.message}`); return }
+    const ok = await confirmarOferta(reading, cobranca, motivo.trim() || null)
+    if (!ok) return
 
     await logAccess({
       action: 'editar',
@@ -737,6 +751,51 @@ export default function QuadrosEspacosPage() {
         (motivo.trim() ? ` · ${motivo.trim()}` : ''),
     })
 
+    fetchAll()
+  }
+
+  /**
+   * "🎁 Oferecer valor", no modal Editar Última Leitura — perdoa o acumulado
+   * de um inquilino que sai, para a conta ficar a zeros para o próximo.
+   * Confirmação direta (sem pedir motivo), com o valor bem visível.
+   */
+  async function handleOferecerValor() {
+    if (!editReadingModal) return
+    const reading = editReadingModal
+    const valor = reading.amount_calculated ?? 0
+    if (valor <= 0) return
+
+    const cobranca = await encontrarCobrancaDaLeitura(reading)
+
+    if (cobranca?.paid) {
+      alert(
+        `⚠️ Esta cobrança de ${formatCurrency(cobranca.amount)} já foi paga pelo inquilino` +
+        `${cobranca.payment_date ? ` em ${formatDate(cobranca.payment_date)}` : ''}.\n\n` +
+        `Não é possível oferecer um valor já pago, porque isso faria desaparecer dinheiro ` +
+        `que entrou e as contas deixavam de bater certo.`
+      )
+      return
+    }
+
+    if (!confirm(
+      `Oferecer ${formatCurrency(valor)} acumulados?\n\n` +
+      `A conta fica a zeros e este valor não será cobrado a ninguém.`
+    )) return
+
+    setSaving(true)
+    const ok = await confirmarOferta(reading, cobranca, null)
+    setSaving(false)
+    if (!ok) return
+
+    const space = spaces.find(s => s.id === reading.space_id)
+    await logAccess({
+      action: 'editar',
+      page: '/eletricidade/espacos',
+      details: `Ofereceu ${formatCurrency(valor)} acumulados no ${space?.ref ?? ''} (leitura de ${formatDate(reading.reading_date)})` +
+        (cobranca ? ` — cobrança de ${formatCurrency(cobranca.amount)} apagada` : ''),
+    })
+
+    setEditReadingModal(null)
     fetchAll()
   }
 
@@ -1454,6 +1513,13 @@ export default function QuadrosEspacosPage() {
                 <button onClick={handleCobrarAgora} disabled={saving}
                   className="w-full py-2.5 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50">
                   {saving ? 'A processar...' : '✓ Cobrar agora'}
+                </button>
+              )}
+              {!editReadingModal.charged && (editReadingModal.amount_calculated ?? 0) > 0 && (
+                <button onClick={handleOferecerValor} disabled={saving}
+                  className="w-full py-2.5 rounded-lg border border-blue-300 bg-blue-50 text-blue-700 text-sm font-medium hover:bg-blue-100 disabled:opacity-50"
+                  title="Perdoar este valor — não é cobrado a ninguém e a conta fica a zeros">
+                  {saving ? 'A processar...' : '🎁 Oferecer valor'}
                 </button>
               )}
               <button onClick={saveEditReading} disabled={saving || !editForm.reading_value}
