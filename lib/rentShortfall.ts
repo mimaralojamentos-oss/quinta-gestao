@@ -69,13 +69,19 @@ export function getSingleMonthRentStatus<P extends RentPaymentLike>(params: {
 
 /**
  * Percorre mês a mês, de RENT_SHORTFALL_START_DATE (ou do início do contrato,
- * o que for mais tarde) até ao mês atual, e devolve os dados de cada mês para
- * o contrato indicado. Cada sítio que usa isto calcula o valor em falta à sua
- * maneira — os arredondamentos finais diferem ligeiramente entre sítios e não
- * foram unificados aqui, só a parte que era mesmo igual em todos.
+ * o que for mais tarde) até ao mês atual OU ao fim do contrato — o que vier
+ * primeiro —, e devolve os dados de cada mês para o contrato indicado. Cada
+ * sítio que usa isto calcula o valor em falta à sua maneira — os
+ * arredondamentos finais diferem ligeiramente entre sítios e não foram
+ * unificados aqui, só a parte que era mesmo igual em todos.
+ *
+ * Regra do fim de contrato (end_date), sem pro-rata: um mês conta se o dia 1
+ * desse mês for <= end_date. Sair a 31/08 → agosto é o último mês devido;
+ * sair a 15/09 → setembro ainda conta por inteiro (não há divisão pelo
+ * número de dias). Contratos sem end_date não são afetados por esta regra.
  */
 export function getMonthlyRentStatus<P extends RentPaymentLike>(params: {
-  lease: { id: string; start_date: string | null; monthly_rent: number }
+  lease: { id: string; start_date: string | null; end_date?: string | null; monthly_rent: number }
   payments: P[]
   rentHistory?: RentHistoryEntry[] | null
   appliedAdvances: Record<string, number>
@@ -89,10 +95,11 @@ export function getMonthlyRentStatus<P extends RentPaymentLike>(params: {
   const start = contractStart > startCutoff ? contractStart : startCutoff
   const today = new Date()
   today.setDate(1)
+  const end = lease.end_date ? new Date(lease.end_date) : null
 
   const result: MonthlyRentStatus<P>[] = []
   const cursor = new Date(start)
-  while (cursor <= today) {
+  while (cursor <= today && (!end || cursor <= end)) {
     const monthStr = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`
     result.push(getSingleMonthRentStatus({ lease, monthStr, payments, rentHistory, appliedAdvances }))
     cursor.setMonth(cursor.getMonth() + 1)

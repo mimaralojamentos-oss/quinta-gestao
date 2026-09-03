@@ -132,7 +132,7 @@ export async function buildRentPaymentPlan(supabase: any, params: BuildPlanParam
 
   if (podeRenda) {
     const { data: lease } = await supabase
-      .from('leases').select('id, monthly_rent, deposit, start_date').eq('id', leaseId).single()
+      .from('leases').select('id, monthly_rent, deposit, start_date, end_date').eq('id', leaseId).single()
 
     if (lease) {
       const { data: allPayments } = await supabase
@@ -148,8 +148,13 @@ export async function buildRentPaymentPlan(supabase: any, params: BuildPlanParam
         .filter((p: any) => p.tipo === 'adiantamento' && !p.used)
         .reduce((s: number, p: any) => s + (p.amount ?? 0), 0)
 
+      // No "Só renda", o mês escolhido também não pode ir além do fim do
+      // contrato — um pagamento nunca pode ser distribuído para depois de o
+      // inquilino sair (mesma regra do dia 1 <= end_date do getMonthlyRentStatus).
+      const soRendaMonth = (params.soRendaMonth ?? getCurrentMonth()).slice(0, 7)
+      const soRendaAlemDoFim = !!lease.end_date && `${soRendaMonth}-01` > lease.end_date
       const meses: string[] = destino === 'renda'
-        ? [(params.soRendaMonth ?? getCurrentMonth()).slice(0, 7)]
+        ? (soRendaAlemDoFim ? [] : [soRendaMonth])
         : getMonthlyRentStatus({ lease, payments, rentHistory: rentHistoryData, appliedAdvances }).map(m => m.monthStr)
 
       for (const monthStr of meses) {

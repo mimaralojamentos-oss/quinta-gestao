@@ -147,7 +147,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
     if (!tenant) return
     setLoadingPayments(true)
     const { data: leasesData } = await supabase
-      .from('leases').select('id, space:spaces(ref), monthly_rent, deposit, status, start_date')
+      .from('leases').select('id, space:spaces(ref), monthly_rent, deposit, status, start_date, end_date')
       .eq('tenant_id', tenant.id)
     setLeases(leasesData ?? [])
 

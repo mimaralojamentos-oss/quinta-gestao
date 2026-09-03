@@ -169,7 +169,7 @@ export default function RelatoriosPage() {
     try {
       const [tenantsRes, leasesRes, paymentsRes, debtsRes, debtPaymentsRes, elecRes] = await Promise.all([
         supabase.from('tenants').select('id, name, email'),
-        supabase.from('leases').select('id, tenant_id, monthly_rent, start_date, status, space_id, space:spaces(ref)'),
+        supabase.from('leases').select('id, tenant_id, monthly_rent, start_date, end_date, status, space_id, space:spaces(ref)'),
         supabase.from('rent_payments').select('id, lease_id, reference_month, payment_date, amount, tipo, used, applied_to_type, applied_to_month, applied_to_lease_id'),
         supabase.from('debts').select('id, tenant_id, description, original_amount, reference_date'),
         supabase.from('debt_payments').select('debt_id, amount'),
