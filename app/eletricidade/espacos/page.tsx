@@ -560,7 +560,12 @@ export default function QuadrosEspacosPage() {
 
     const { data: newCharge, error: chargeError } = await supabase.from('electricity_charges').insert({
       lease_id: editLeaseId,
-      charge_date: new Date().toISOString().slice(0, 10),
+      // Data da leitura (não a de hoje) e reading_id sempre preenchidos — é
+      // assim que uma oferta mais tarde consegue encontrar esta cobrança e
+      // apagá-la (encontrarCobrancaDaLeitura). Sem isto a cobrança fica
+      // órfã se a leitura vier a ser oferecida.
+      charge_date: editReadingModal.reading_date,
+      reading_id: editReadingModal.id,
       reference_month: editReadingModal.reading_date.slice(0, 7) + '-01',
       units: editReadingModal.kwh_consumed,
       amount: remaining,
@@ -673,7 +678,7 @@ export default function QuadrosEspacosPage() {
    */
   async function encontrarCobrancaDaLeitura(reading: Reading): Promise<any | null> {
     const { data: porLigacao } = await supabase
-      .from('electricity_charges').select('id, amount, paid, payment_date')
+      .from('electricity_charges').select('id, amount, amount_paid, paid, payment_date')
       .eq('reading_id', reading.id).maybeSingle()
     if (porLigacao) return porLigacao
 
@@ -682,9 +687,27 @@ export default function QuadrosEspacosPage() {
     if (!lease) return null
 
     const { data: porData } = await supabase
-      .from('electricity_charges').select('id, amount, paid, payment_date')
+      .from('electricity_charges').select('id, amount, amount_paid, paid, payment_date')
       .eq('lease_id', lease.id).eq('charge_date', reading.reading_date).maybeSingle()
     return porData
+  }
+
+  /**
+   * Uma cobrança "tem pagamento" quando está totalmente paga (paid) OU
+   * quando já tem uma parte paga (amount_paid > 0, pagamento parcial) — nos
+   * dois casos apagá-la faria desaparecer dinheiro que já entrou.
+   */
+  function cobrancaTemPagamento(cobranca: any): boolean {
+    return !!cobranca && (cobranca.paid || (cobranca.amount_paid ?? 0) > 0)
+  }
+
+  function avisoCobrancaPaga(cobranca: any, motivo: string): string {
+    const jaPago = cobranca.paid ? cobranca.amount : (cobranca.amount_paid ?? 0)
+    return `⚠️ Esta cobrança já tem ${formatCurrency(jaPago)} pago pelo inquilino` +
+      `${cobranca.payment_date ? ` em ${formatDate(cobranca.payment_date)}` : ''}` +
+      `${!cobranca.paid ? ' (pagamento parcial)' : ''}.\n\n` +
+      `${motivo}\n\n` +
+      `Se queres mesmo devolver o valor, regista um adiantamento a favor do inquilino.`
   }
 
   /**
@@ -719,14 +742,8 @@ export default function QuadrosEspacosPage() {
   async function marcarComoOferta(reading: Reading, spaceRef: string) {
     const cobranca = await encontrarCobrancaDaLeitura(reading)
 
-    if (cobranca?.paid) {
-      alert(
-        `⚠️ Esta cobrança de ${formatCurrency(cobranca.amount)} já foi paga pelo inquilino` +
-        `${cobranca.payment_date ? ` em ${formatDate(cobranca.payment_date)}` : ''}.\n\n` +
-        `Não é possível transformá-la em oferta, porque isso faria desaparecer dinheiro ` +
-        `que entrou e as contas deixavam de bater certo.\n\n` +
-        `Se queres mesmo devolver o valor, regista um adiantamento a favor do inquilino.`
-      )
+    if (cobrancaTemPagamento(cobranca)) {
+      alert(avisoCobrancaPaga(cobranca, 'Não é possível transformá-la em oferta, porque isso faria desaparecer dinheiro que entrou e as contas deixavam de bater certo.'))
       return
     }
 
@@ -767,13 +784,8 @@ export default function QuadrosEspacosPage() {
 
     const cobranca = await encontrarCobrancaDaLeitura(reading)
 
-    if (cobranca?.paid) {
-      alert(
-        `⚠️ Esta cobrança de ${formatCurrency(cobranca.amount)} já foi paga pelo inquilino` +
-        `${cobranca.payment_date ? ` em ${formatDate(cobranca.payment_date)}` : ''}.\n\n` +
-        `Não é possível oferecer um valor já pago, porque isso faria desaparecer dinheiro ` +
-        `que entrou e as contas deixavam de bater certo.`
-      )
+    if (cobrancaTemPagamento(cobranca)) {
+      alert(avisoCobrancaPaga(cobranca, 'Não é possível oferecer um valor já (parcialmente) pago, porque isso faria desaparecer dinheiro que entrou e as contas deixavam de bater certo.'))
       return
     }
 
