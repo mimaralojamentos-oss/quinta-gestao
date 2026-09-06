@@ -504,6 +504,66 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
     await fetchPayments()
   }
 
+  // Aplica o crédito do inquilino a uma cobrança de eletricidade em falta
+  // (por pagar ou com pagamento parcial). Mesma mecânica da renda — o
+  // dinheiro não volta a entrar, só se regista que o crédito saiu e foi
+  // para esta cobrança — por isso não cria movimento no Fundo de Maneio.
+  async function handleApplyAdvanceToElec(row: PaymentRow) {
+    const leaseId = row.lease_id ?? row.lease?.id
+    if (!leaseId || !row.id) { alert('Esta cobrança não tem contrato associado.'); return }
+
+    const owed = row.remainingAmount ?? row.amount
+    const disponivel = availableAdvanceForLease(leaseId)
+    const aplicar = parseFloat(Math.min(disponivel, owed).toFixed(2))
+    if (aplicar <= 0) return
+
+    const sobra = parseFloat((owed - aplicar).toFixed(2))
+    const aviso = sobra > 0.01
+      ? `\n\nDepois disto continuam em falta ${formatCurrency(sobra)} nesta cobrança de eletricidade.`
+      : '\n\nEsta cobrança de eletricidade fica completa.'
+
+    if (!confirm(
+      `Usar ${formatCurrency(aplicar)} do adiantamento do inquilino para pagar a eletricidade?` +
+      `\n\nCrédito disponível: ${formatCurrency(disponivel)}` + aviso
+    )) return
+
+    setApplyingAdvanceKey(`${leaseId}__elec-${row.id}`)
+    const { applied, error } = await consumeAdvances(supabase, {
+      leaseId,
+      amountNeeded: aplicar,
+      target: { type: 'eletricidade', chargeId: row.id },
+    })
+    setApplyingAdvanceKey(null)
+
+    if (error) { alert(`Não foi possível aplicar o adiantamento: ${error}`); return }
+    if (applied <= 0) { alert('Não havia crédito disponível para aplicar.'); return }
+
+    const jaPago = parseFloat((row.amount - owed).toFixed(2))
+    const novoAmountPaid = parseFloat((jaPago + applied).toFixed(2))
+    const ficaCompleta = novoAmountPaid >= row.amount - 0.01
+
+    const { error: chargeError } = await supabase.from('electricity_charges').update({
+      amount_paid: novoAmountPaid,
+      paid: ficaCompleta,
+      ...(ficaCompleta ? { payment_date: new Date().toISOString().slice(0, 10) } : {}),
+      notes: ficaCompleta
+        ? 'Pago com adiantamento'
+        : `Pago parcialmente com adiantamento (${formatCurrency(novoAmountPaid)} de ${formatCurrency(row.amount)})`,
+    }).eq('id', row.id)
+
+    if (chargeError) {
+      alert(`O crédito foi aplicado, mas houve um erro ao atualizar a cobrança de eletricidade: ${chargeError.message}`)
+      return
+    }
+
+    await logAccess({
+      action: 'editar',
+      page: '/inquilinos',
+      details: `Aplicou adiantamento (${formatCurrency(applied)}) à eletricidade de "${tenant?.name}"`,
+    })
+    await fetchPayments()
+  }
+
   // Devolve um adiantamento já aplicado ao crédito disponível do inquilino.
   // O total em dívida não muda: o valor sai da renda e volta ao crédito.
   async function handleReleaseAdvance(p: PaymentRow) {
@@ -1317,12 +1377,15 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                   {payments.map((p, i) => {
                     const isLiquidada = p.isManualDebt && p.payment_date === 'liquidada'
                     const isPago = !p.isManualDebt && ((!!p.payment_date && p.payment_date !== 'liquidada') || !!p.isAdvanceOnly)
-                    // Crédito disponível para cobrir esta renda em falta
-                    const creditoDisponivel = p.isMissing && !p.isManualDebt && !p.isElecCharge
+                    // Crédito disponível para cobrir esta renda, ou esta cobrança de eletricidade, em falta
+                    const isUnpaidElec = p.isElecCharge && !p.payment_date
+                    const creditoDisponivel = (p.isMissing && !p.isManualDebt && !p.isElecCharge) || isUnpaidElec
                       ? availableAdvanceForLease(p.lease_id ?? p.lease?.id)
                       : 0
-                    const creditoAplicavel = parseFloat(Math.min(creditoDisponivel, p.amount).toFixed(2))
-                    const aAplicar = applyingAdvanceKey === `${p.lease_id ?? p.lease?.id}__${p.reference_month.slice(0, 7)}`
+                    const owedAmount = p.isElecCharge ? (p.remainingAmount ?? p.amount) : p.amount
+                    const creditoAplicavel = parseFloat(Math.min(creditoDisponivel, owedAmount).toFixed(2))
+                    const advanceKey = p.isElecCharge ? `elec-${p.id}` : p.reference_month.slice(0, 7)
+                    const aAplicar = applyingAdvanceKey === `${p.lease_id ?? p.lease?.id}__${advanceKey}`
                     return (
                       <div key={p.id ?? `row-${i}`}
                         className={`flex items-center justify-between p-3 rounded-lg border ${
@@ -1393,7 +1456,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                             </p>
                           )}
                           {creditoAplicavel > 0 && (
-                            <button onClick={() => handleApplyAdvanceToRent(p)} disabled={aAplicar}
+                            <button onClick={() => p.isElecCharge ? handleApplyAdvanceToElec(p) : handleApplyAdvanceToRent(p)} disabled={aAplicar}
                               className="mt-1.5 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-purple-300 bg-purple-50 text-purple-700 text-xs font-medium hover:bg-purple-100 disabled:opacity-50 transition-colors">
                               {aAplicar ? <Loader2 className="w-3 h-3 animate-spin" /> : <Banknote className="w-3 h-3" />}
                               {aAplicar ? 'A aplicar...' : `Usar adiantamento (${formatCurrency(creditoAplicavel)})`}
