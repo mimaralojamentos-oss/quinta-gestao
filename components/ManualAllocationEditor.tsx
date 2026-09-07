@@ -50,22 +50,28 @@ export default function ManualAllocationEditor({
           const v = values[it.key] ?? 0
           const excedeMax = v > it.max + 0.01
           return (
-            <div key={it.key} className="flex items-center justify-between gap-2 px-3 py-2">
-              <div className="min-w-0">
-                <p className="text-xs text-gray-700 truncate">{ICONS[it.type]} {it.label}</p>
-                <p className="text-[11px] text-gray-400">
+            <div key={it.key} className="flex items-center gap-2 px-3 py-2">
+              <div className="flex-1 min-w-0">
+                <p className="text-xs text-gray-700 truncate" title={it.label}>{ICONS[it.type]} {it.label}</p>
+                <p className="text-[11px] text-gray-400 truncate">
                   em falta {formatCurrency(it.max)}
                   {it.type === 'renda' && (it.creditApplied ?? 0) > 0 && (
                     <span className="text-purple-500"> · crédito {formatCurrency(it.creditApplied!)} já aplicado</span>
                   )}
                 </p>
               </div>
+              {/* Não usa a classe partilhada "input" — esta é `width:100%` em
+                  CSS não encapsulado em @layer, que no Tailwind v4 ganha
+                  sempre a classes utilitárias como w-24, por mais tarde que
+                  estas apareçam. A largura fixa tem de vir por estilo em
+                  linha para garantir que não é sobreposta pela cascata. */}
               <input
                 type="number" step="0.01" min="0" max={it.max}
                 value={v === 0 ? '' : v}
                 onChange={e => onChange(it.key, parseFloat(e.target.value) || 0)}
                 placeholder="0,00"
-                className={`input text-xs w-24 text-right flex-shrink-0 ${excedeMax ? 'border-red-400 text-red-700' : ''}`}
+                style={{ width: '6rem' }}
+                className={`flex-shrink-0 border rounded-lg px-2 py-1.5 text-xs text-right outline-none ${excedeMax ? 'border-red-400 text-red-700' : 'border-gray-200'}`}
               />
             </div>
           )
