@@ -8,7 +8,11 @@ import { formatCurrency, formatDate, getCurrentMonth, getMonthLabel } from '@/li
 import { logAccess } from '@/lib/logAccess'
 import { useFileDrop } from '@/lib/useFileDrop'
 import DestinoPagamentoPicker from '@/components/DestinoPagamentoPicker'
-import { buildRentPaymentPlan, applyRentPaymentPlan, type DestinoPagamento, type RentPaymentPlan } from '@/lib/rentPaymentPlan'
+import {
+  buildRentPaymentPlan, applyRentPaymentPlan, buildManualPlanItems, buildPlanFromManualItems, validateManualPlan,
+  type DestinoPagamento, type RentPaymentPlan, type ManualPlanItem,
+} from '@/lib/rentPaymentPlan'
+import ManualAllocationEditor from '@/components/ManualAllocationEditor'
 import { consumeAdvances, releaseAdvance, describeAdvanceTarget, buildAppliedAdvanceMap } from '@/lib/advanceCredit'
 import { getDebtRemaining } from '@/lib/debts'
 import { getMonthlyRentStatus } from '@/lib/rentShortfall'
@@ -123,6 +127,10 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
   // (lib/rentPaymentPlan.ts), à medida que o valor é escrito.
   const [recebimentoPlan, setRecebimentoPlan] = useState<RentPaymentPlan | null>(null)
   const [recebimentoPlanLoading, setRecebimentoPlanLoading] = useState(false)
+  // Destino "Manual" — lista de rubricas em aberto (lib/rentPaymentPlan.ts)
+  // e os valores que o utilizador escolhe para cada uma.
+  const [manualItems, setManualItems] = useState<ManualPlanItem[]>([])
+  const [manualValues, setManualValues] = useState<Record<string, number>>({})
   const [applyingAdvanceKey, setApplyingAdvanceKey] = useState<string | null>(null)
   const [releasingAdvanceId, setReleasingAdvanceId] = useState<string | null>(null)
 
@@ -611,13 +619,32 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
 
   // Calcula a distribuição deste recebimento em concreto, à medida que o
   // valor é escrito — o mesmo motor único usado no banco e em /pagamentos.
+  // No destino "Manual" busca-se a lista de rubricas em aberto em vez do
+  // plano — quem constrói o plano nesse caso é o próprio utilizador.
   useEffect(() => {
     let cancelado = false
 
     async function calcular() {
       const total = parseFloat(recebimentoForm.amount)
       const activeLease = leases.find((l: any) => l.status === 'ativo') ?? leases[0]
-      if (!showRecebimentoForm || !total || total <= 0 || !activeLease) { setRecebimentoPlan(null); return }
+      if (!showRecebimentoForm || !total || total <= 0 || !activeLease) {
+        setRecebimentoPlan(null); setManualItems([]); setManualValues({})
+        return
+      }
+
+      if (recebimentoForm.destino === 'manual') {
+        setRecebimentoPlanLoading(true)
+        try {
+          const items = await buildManualPlanItems(supabase, { leaseId: activeLease.id, tenantId: tenant?.id, amount: total })
+          if (cancelado) return
+          setManualItems(items)
+          setManualValues(Object.fromEntries(items.map(it => [it.key, it.proposed])))
+        } finally {
+          if (!cancelado) setRecebimentoPlanLoading(false)
+        }
+        return
+      }
+
       setRecebimentoPlanLoading(true)
       try {
         const resultado = await buildRentPaymentPlan(supabase, {
@@ -638,14 +665,23 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
 
   async function handleSaveRecebimento() {
     const total = parseFloat(recebimentoForm.amount)
-    if (!total || total <= 0 || !recebimentoPlan) return
-    setSavingRecebimento(true)
+    if (!total || total <= 0) return
 
     const activeLease = leases.find((l: any) => l.status === 'ativo') ?? leases[0]
     const spaceRef = activeLease?.space?.ref ?? ''
     const tenantName = tenant?.name ?? ''
 
-    const result = await applyRentPaymentPlan(supabase, recebimentoPlan, {
+    let planParaGravar = recebimentoPlan
+    if (recebimentoForm.destino === 'manual') {
+      const erro = validateManualPlan(manualItems, manualValues, total)
+      if (erro) { alert(erro); return }
+      planParaGravar = buildPlanFromManualItems(manualItems, manualValues, total)
+    }
+    if (!planParaGravar) return
+
+    setSavingRecebimento(true)
+
+    const result = await applyRentPaymentPlan(supabase, planParaGravar, {
       leaseId: activeLease.id,
       tenantId: tenant?.id,
       paymentDate: recebimentoForm.date,
@@ -662,12 +698,13 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
 
     await logAccess({
       action: 'criar', page: '/inquilinos',
-      details: `Registou recebimento (${formatCurrency(total)}) de ${tenantName} (${spaceRef}) — ${recebimentoPlan.summary}`,
+      details: `Registou recebimento (${formatCurrency(total)}) de ${tenantName} (${spaceRef}) — ${planParaGravar.summary}`,
     })
 
     await fetchPayments()
     setShowRecebimentoForm(false)
     setRecebimentoForm({ date: new Date().toISOString().slice(0, 10), amount: '', method: 'dinheiro', destino: 'auto' })
+    setManualItems([]); setManualValues({})
     setSavingRecebimento(false)
   }
 
@@ -1199,6 +1236,18 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                       onChange={d => setRecebimentoForm(f => ({ ...f, destino: d }))} />
                   </div>
 
+                  {recebimentoForm.destino === 'manual' ? (
+                    <div className="mb-3">
+                      <ManualAllocationEditor
+                        items={manualItems}
+                        values={manualValues}
+                        onChange={(key, value) => setManualValues(v => ({ ...v, [key]: value }))}
+                        amount={parseFloat(recebimentoForm.amount) || 0}
+                        loading={recebimentoPlanLoading}
+                      />
+                    </div>
+                  ) : (
+                    <>
                   {recebimentoPlanLoading && (
                     <p className="text-xs text-gray-400 mb-3">A calcular a distribuição...</p>
                   )}
@@ -1288,11 +1337,14 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                       )}
                     </div>
                   )}
+                    </>
+                  )}
                   <div className="flex gap-2">
-                    <button className="btn-secondary flex-1" onClick={() => { setShowRecebimentoForm(false); setRecebimentoForm({ date: new Date().toISOString().slice(0, 10), amount: '', method: 'dinheiro', destino: 'auto' }) }}>
+                    <button className="btn-secondary flex-1" onClick={() => { setShowRecebimentoForm(false); setRecebimentoForm({ date: new Date().toISOString().slice(0, 10), amount: '', method: 'dinheiro', destino: 'auto' }); setManualItems([]); setManualValues({}) }}>
                       Cancelar
                     </button>
-                    <button onClick={handleSaveRecebimento} disabled={savingRecebimento || recebimentoPlanLoading || !recebimentoPlan || !recebimentoForm.amount}
+                    <button onClick={handleSaveRecebimento}
+                      disabled={savingRecebimento || recebimentoPlanLoading || !recebimentoForm.amount || (recebimentoForm.destino === 'manual' ? manualItems.length === 0 : !recebimentoPlan)}
                       className="flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium disabled:opacity-50 transition-colors">
                       {savingRecebimento ? <Loader2 className="w-4 h-4 animate-spin" /> : <Banknote className="w-4 h-4" />}
                       {savingRecebimento ? 'A guardar...' : 'Confirmar Recebimento'}

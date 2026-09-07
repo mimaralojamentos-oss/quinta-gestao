@@ -7,7 +7,7 @@ import { formatCurrency, formatDate, normalizeText } from '@/lib/utils'
 import { Plus, Building, CreditCard, ArrowUpRight, ArrowDownRight, Upload, Eye, X, Loader2, FileText, CheckCircle, Printer } from 'lucide-react'
 import { useFileDrop } from '@/lib/useFileDrop'
 import { useAuth } from '@/lib/auth-context'
-import { buildRentPaymentPlan, applyRentPaymentPlan, type DestinoPagamento } from '@/lib/rentPaymentPlan'
+import { buildRentPaymentPlan, applyRentPaymentPlan, type DestinoPagamento, type RentPaymentPlan } from '@/lib/rentPaymentPlan'
 import { ensureExpenseForTransaction } from '@/lib/bankExpense'
 import BankMatchModal from '@/components/BankMatchModal'
 import BankImportModal from '@/components/BankImportModal'
@@ -223,7 +223,7 @@ export default function BancosPage() {
   async function saveManualMatch(
     tx: any, type: string, tenantId: string, expenseId: string, notes: string,
     documentId?: string, referenceMonth?: string, incomeId?: string, skipProcessing?: boolean,
-    cashMovementId?: string, destino?: DestinoPagamento,
+    cashMovementId?: string, destino?: DestinoPagamento, manualPlan?: RentPaymentPlan,
   ) {
     const lease = tenantId ? leases.find(l => (l.tenant as any)?.id === tenantId) : null
 
@@ -269,7 +269,9 @@ export default function BancosPage() {
     }
 
     if (type === 'renda' && lease) {
-      const plan = await buildRentPaymentPlan(supabase, {
+      // Destino "Manual": o plano já vem construído (BankMatchModal), com
+      // os valores escolhidos pelo utilizador — não se recalcula aqui.
+      const plan = manualPlan ?? await buildRentPaymentPlan(supabase, {
         leaseId: lease.id,
         tenantId,
         amount: tx.amount,

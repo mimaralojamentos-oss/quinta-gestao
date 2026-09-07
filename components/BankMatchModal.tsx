@@ -14,8 +14,12 @@ import { formatCurrency, formatDate, matchesSearch, getMonthLabel } from '@/lib/
 import { EXPENSE_CATEGORIES } from '@/lib/expenseCategories'
 import { Search, X, Sparkles, FileText, CheckCircle } from 'lucide-react'
 import { mergeCategories, normalizeCategory } from '@/lib/incomeCategories'
-import { buildRentPaymentPlan, DESTINOS, type RentPaymentPlan, type DestinoPagamento } from '@/lib/rentPaymentPlan'
+import {
+  buildRentPaymentPlan, buildManualPlanItems, buildPlanFromManualItems, validateManualPlan, DESTINOS,
+  type RentPaymentPlan, type DestinoPagamento, type ManualPlanItem,
+} from '@/lib/rentPaymentPlan'
 import DestinoPagamentoPicker from '@/components/DestinoPagamentoPicker'
+import ManualAllocationEditor from '@/components/ManualAllocationEditor'
 import { logAccess } from '@/lib/logAccess'
 import { createExpense } from '@/lib/createExpense'
 import { findSimilarExpenses } from '@/lib/expenseDuplicates'
@@ -120,7 +124,7 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
   documents: any[]
   autoMatches: any[]
   bankId: string
-  onSave: (tx: BankTransaction, type: string, tenantId: string, expenseId: string, notes: string, documentId?: string, referenceMonth?: string, incomeId?: string, skipProcessing?: boolean, cashMovementId?: string, destino?: DestinoPagamento) => void
+  onSave: (tx: BankTransaction, type: string, tenantId: string, expenseId: string, notes: string, documentId?: string, referenceMonth?: string, incomeId?: string, skipProcessing?: boolean, cashMovementId?: string, destino?: DestinoPagamento, manualPlan?: RentPaymentPlan) => void
   onSaveRule: () => void
   onClose: () => void
 }) {
@@ -169,6 +173,9 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
   // Pré-visualização da distribuição do valor recebido
   const [plan, setPlan] = useState<RentPaymentPlan | null>(null)
   const [planLoading, setPlanLoading] = useState(false)
+  // Destino "Manual" — rubricas em aberto e valores escolhidos à mão.
+  const [manualItems, setManualItems] = useState<ManualPlanItem[]>([])
+  const [manualValues, setManualValues] = useState<Record<string, number>>({})
 
   // Origens conhecidas + as que já foram usadas antes, para a lista crescer sozinha
   const categoriasDisponiveis = mergeCategories(incomeRecords.map(r => r.category))
@@ -234,7 +241,20 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
 
     async function calcular() {
       const lease = tenantId ? leases.find(l => (l.tenant as any)?.id === tenantId) : null
-      if (type !== 'renda' || !lease || tx.amount <= 0) { setPlan(null); return }
+      if (type !== 'renda' || !lease || tx.amount <= 0) { setPlan(null); setManualItems([]); setManualValues({}); return }
+
+      if (destino === 'manual') {
+        setPlanLoading(true)
+        try {
+          const items = await buildManualPlanItems(supabase, { leaseId: lease.id, tenantId, amount: tx.amount })
+          if (cancelado) return
+          setManualItems(items)
+          setManualValues(Object.fromEntries(items.map(it => [it.key, it.proposed])))
+        } finally {
+          if (!cancelado) setPlanLoading(false)
+        }
+        return
+      }
 
       setPlanLoading(true)
       try {
@@ -525,7 +545,17 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
                 <DestinoPagamentoPicker valor={destino} onChange={setDestino} />
               </div>
 
-              {plan && !planLoading && (
+              {destino === 'manual' && (
+                <ManualAllocationEditor
+                  items={manualItems}
+                  values={manualValues}
+                  onChange={(key, value) => setManualValues(v => ({ ...v, [key]: value }))}
+                  amount={tx.amount}
+                  loading={planLoading}
+                />
+              )}
+
+              {destino !== 'manual' && plan && !planLoading && (
                 <div className="border border-emerald-200 bg-emerald-50/60 rounded-lg p-3">
                   <p className="text-xs font-medium text-emerald-800 mb-2">
                     Distribuição de {formatCurrency(tx.amount)}
@@ -952,6 +982,13 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
         <div className="flex justify-end gap-3 mt-6">
           <button className="btn-secondary" onClick={onClose}>Cancelar</button>
           <button className="btn-primary" onClick={async () => {
+            let manualPlan: RentPaymentPlan | undefined
+            if (type === 'renda' && destino === 'manual') {
+              const erro = validateManualPlan(manualItems, manualValues, tx.amount)
+              if (erro) { alert(erro); return }
+              manualPlan = buildPlanFromManualItems(manualItems, manualValues, tx.amount)
+            }
+
             if (saveAsRule && ruleKeyword.trim()) {
               await supabase.from('bank_matching_rules').insert({
                 bank_id: bankId,
@@ -987,6 +1024,7 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
               skipProcessing,
               type === 'transferencia_interna' ? (cashMovementId || undefined) : undefined,
               type === 'renda' ? destino : undefined,
+              manualPlan,
             )
           }}>{creatingIncome ? 'A guardar...' : 'Guardar'}</button>
         </div>

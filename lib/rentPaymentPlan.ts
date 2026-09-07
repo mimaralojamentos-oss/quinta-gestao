@@ -84,13 +84,14 @@ export interface RentPaymentPlan {
  * houver, continua a ser considerada, pela mesma razão de sempre andarem
  * juntas (ambas dependem só do contrato, não de um mês específico).
  */
-export type DestinoPagamento = 'auto' | 'renda' | 'luz' | 'dividas'
+export type DestinoPagamento = 'auto' | 'renda' | 'luz' | 'dividas' | 'manual'
 
 export const DESTINOS: { valor: DestinoPagamento; label: string; descricao: string }[] = [
   { valor: 'auto', label: 'Automático', descricao: 'Renda, depois caução, depois luz, depois dívidas' },
   { valor: 'renda', label: 'Só renda', descricao: 'Renda e caução — o que sobrar fica como adiantamento' },
   { valor: 'luz', label: 'Só eletricidade', descricao: 'Não toca na renda nem na caução' },
   { valor: 'dividas', label: 'Só dívidas', descricao: 'Apenas dívidas em conta corrente' },
+  { valor: 'manual', label: '✏️ Manual', descricao: 'Decides tu, linha a linha, quanto vai para cada rubrica' },
 ]
 
 interface BuildPlanParams {
@@ -311,6 +312,203 @@ export async function buildRentPaymentPlan(supabase: any, params: BuildPlanParam
     debtPayments, debtTotal,
     adiantamento,
     summary: lines.join(', '),
+  }
+}
+
+/**
+ * Uma rubrica em aberto, para o destino "Manual" — o utilizador decide
+ * quanto vai para cada uma, em vez de o motor decidir pela ordem habitual.
+ *
+ * `max` é o teto (não se pode meter mais do que isto nesta rubrica) e
+ * `proposed` é o valor que o Automático puxaria para aqui com o montante
+ * recebido — serve só de pré-preenchimento, o utilizador pode mudar.
+ *
+ * Os restantes campos guardam o que é preciso para reconstruir a linha do
+ * plano em buildPlanFromManualItems, sem precisar de voltar a ler a BD.
+ */
+export interface ManualPlanItem {
+  type: 'renda' | 'caucao' | 'eletricidade' | 'divida'
+  key: string
+  label: string
+  max: number
+  proposed: number
+  monthlyRent?: number
+  owedBefore?: number
+  /** Renda: crédito de adiantamento já aplicado automaticamente (não editável aqui). */
+  creditApplied?: number
+  chargeDate?: string | null
+  totalAmount?: number
+  alreadyPaid?: number
+}
+
+/**
+ * Lista todas as rubricas em aberto do contrato (renda, caução, luz, dívidas),
+ * cada uma com o valor máximo que pode receber e a proposta do Automático
+ * como pré-preenchimento.
+ *
+ * Reutiliza o próprio buildRentPaymentPlan em vez de duplicar a lógica de
+ * "o que está em falta": uma chamada com um montante enorme dá a lista
+ * completa (nada fica de fora por falta de dinheiro) e os valores em falta
+ * de cada rubrica; outra com o montante real dá a proposta do Automático.
+ */
+export async function buildManualPlanItems(
+  supabase: any,
+  params: { leaseId: string; tenantId: string | null | undefined; amount: number },
+): Promise<ManualPlanItem[]> {
+  const { leaseId, tenantId, amount } = params
+  const SENTINEL = 1_000_000_000
+
+  const [full, proposed] = await Promise.all([
+    buildRentPaymentPlan(supabase, { leaseId, tenantId, amount: SENTINEL, destino: 'auto' }),
+    buildRentPaymentPlan(supabase, { leaseId, tenantId, amount, destino: 'auto' }),
+  ])
+
+  const items: ManualPlanItem[] = []
+
+  for (const rp of full.rendaPayments) {
+    const max = parseFloat(Math.max(0, rp.owedBefore - rp.creditApplied).toFixed(2))
+    if (max <= 0) continue // nada por pagar a dinheiro novo nesta rubrica
+    const pr = proposed.rendaPayments.find(x => x.referenceMonth === rp.referenceMonth)
+    items.push({
+      type: 'renda',
+      key: rp.referenceMonth,
+      label: `Renda de ${getMonthLabel(rp.referenceMonth)}`,
+      max,
+      proposed: pr ? pr.amount : 0,
+      monthlyRent: rp.monthlyRent,
+      owedBefore: rp.owedBefore,
+      creditApplied: rp.creditApplied,
+    })
+  }
+
+  if (full.caucao) {
+    items.push({
+      type: 'caucao',
+      key: 'caucao',
+      label: 'Caução',
+      max: full.caucao.owedBefore,
+      proposed: proposed.caucao?.amount ?? 0,
+      owedBefore: full.caucao.owedBefore,
+    })
+  }
+
+  for (const ec of full.electricityCharges) {
+    const max = parseFloat((ec.totalAmount - ec.alreadyPaid).toFixed(2))
+    if (max <= 0) continue
+    const pr = proposed.electricityCharges.find(x => x.id === ec.id)
+    items.push({
+      type: 'eletricidade',
+      key: ec.id,
+      label: `Luz${ec.chargeDate ? ` de ${getMonthLabel(ec.chargeDate.slice(0, 7))}` : ''}`,
+      max,
+      proposed: pr ? pr.amount : 0,
+      chargeDate: ec.chargeDate,
+      totalAmount: ec.totalAmount,
+      alreadyPaid: ec.alreadyPaid,
+    })
+  }
+
+  for (const dp of full.debtPayments) {
+    if (dp.remainingBefore <= 0) continue
+    const pr = proposed.debtPayments.find(x => x.debtId === dp.debtId)
+    items.push({
+      type: 'divida',
+      key: dp.debtId,
+      label: dp.description,
+      max: dp.remainingBefore,
+      proposed: pr ? pr.amount : 0,
+    })
+  }
+
+  return items
+}
+
+/** Erro de validação da distribuição manual, ou null se estiver tudo bem. */
+export function validateManualPlan(items: ManualPlanItem[], values: Record<string, number>, amount: number): string | null {
+  for (const it of items) {
+    const v = parseFloat((values[it.key] ?? 0).toFixed(2))
+    if (v < 0) return `${it.label}: o valor não pode ser negativo`
+    if (v > it.max + 0.01) return `${it.label}: o valor (${formatCurrency(v)}) não pode exceder o que está em falta (${formatCurrency(it.max)})`
+  }
+  const soma = parseFloat(items.reduce((s, it) => s + (values[it.key] ?? 0), 0).toFixed(2))
+  if (soma > amount + 0.01) return `A soma das rubricas (${formatCurrency(soma)}) não pode exceder o valor recebido (${formatCurrency(amount)})`
+  return null
+}
+
+/**
+ * Constrói o plano a partir dos valores escolhidos à mão. Tem exatamente a
+ * forma de RentPaymentPlan, por isso segue depois para applyRentPaymentPlan
+ * sem nenhum caminho de gravação paralelo — a única diferença do automático
+ * é a origem dos montantes.
+ */
+export function buildPlanFromManualItems(items: ManualPlanItem[], values: Record<string, number>, amount: number): RentPaymentPlan {
+  const rendaPayments: RendaMonthPlan[] = []
+  let creditTotal = 0
+  let caucao: CaucaoPlan | null = null
+  const electricityCharges: ElectricityChargePlan[] = []
+  const debtPayments: DebtPaymentPlan[] = []
+  const lines: string[] = []
+
+  for (const it of items) {
+    const value = parseFloat((values[it.key] ?? 0).toFixed(2))
+
+    if (it.type === 'renda') {
+      const creditApplied = it.creditApplied ?? 0
+      if (value <= 0 && creditApplied <= 0) continue
+      const owedBefore = it.owedBefore ?? 0
+      const remainingAfter = parseFloat((owedBefore - creditApplied - value).toFixed(2))
+      const fullyPaid = remainingAfter <= 0.01
+      rendaPayments.push({
+        referenceMonth: it.key, monthlyRent: it.monthlyRent ?? 0, owedBefore, creditApplied,
+        amount: value, fullyPaid, remainingAfter,
+      })
+      creditTotal = parseFloat((creditTotal + creditApplied).toFixed(2))
+      const mesLabel = getMonthLabel(it.key)
+      lines.push(fullyPaid
+        ? `Renda ${mesLabel}: ${formatCurrency(value)} ✅`
+        : `Renda ${mesLabel}: ${formatCurrency(value)} de ${formatCurrency(it.monthlyRent ?? 0)} ⚠️`)
+    } else if (it.type === 'caucao') {
+      if (value <= 0) continue
+      const owedBefore = it.owedBefore ?? 0
+      const remainingAfter = parseFloat((owedBefore - value).toFixed(2))
+      caucao = { owedBefore, amount: value, fullyPaid: remainingAfter <= 0.01, remainingAfter }
+      lines.push(caucao.fullyPaid
+        ? `Caução: ${formatCurrency(value)} ✅`
+        : `Caução: ${formatCurrency(value)} de ${formatCurrency(owedBefore)} ⚠️`)
+    } else if (it.type === 'eletricidade') {
+      if (value <= 0) continue
+      const totalAmount = it.totalAmount ?? 0
+      const alreadyPaid = it.alreadyPaid ?? 0
+      const remainingAfter = parseFloat((totalAmount - alreadyPaid - value).toFixed(2))
+      electricityCharges.push({
+        id: it.key, amount: value, chargeDate: it.chargeDate ?? null, totalAmount, alreadyPaid,
+        remainingAfter, isPartial: remainingAfter > 0.01,
+      })
+      lines.push(`Luz${it.chargeDate ? ` ${it.chargeDate.slice(0, 7)}` : ''}: ${formatCurrency(value)}${remainingAfter > 0.01 ? ' (parcial)' : ' ✅'}`)
+    } else if (it.type === 'divida') {
+      if (value <= 0) continue
+      const remainingBefore = it.max
+      const remainingAfter = parseFloat((remainingBefore - value).toFixed(2))
+      debtPayments.push({ debtId: it.key, description: it.label, amount: value, remainingBefore, remainingAfter })
+      lines.push(remainingAfter <= 0.01
+        ? `Dívida: ${formatCurrency(value)} ✅`
+        : `Dívida: ${formatCurrency(value)} de ${formatCurrency(remainingBefore)} pagos`)
+    }
+  }
+
+  const rendaTotal = parseFloat(rendaPayments.reduce((s, r) => s + r.amount, 0).toFixed(2))
+  const electricityTotal = parseFloat(electricityCharges.reduce((s, c) => s + c.amount, 0).toFixed(2))
+  const debtTotal = parseFloat(debtPayments.reduce((s, d) => s + d.amount, 0).toFixed(2))
+  const distribuido = parseFloat((rendaTotal + (caucao?.amount ?? 0) + electricityTotal + debtTotal).toFixed(2))
+  const adiantamento = parseFloat(Math.max(0, amount - distribuido).toFixed(2))
+  if (adiantamento > 0.01) lines.push(`Excedente (não distribuído) → adiantamento: ${formatCurrency(adiantamento)}`)
+
+  return {
+    rendaPayments, rendaTotal, creditTotal, caucao,
+    electricityCharges, electricityTotal,
+    debtPayments, debtTotal,
+    adiantamento,
+    summary: lines.join(', ') || 'Nada distribuído',
   }
 }
 

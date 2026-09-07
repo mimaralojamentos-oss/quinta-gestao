@@ -3,8 +3,12 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency, formatDate, getMonthLabel } from '@/lib/utils'
-import { buildRentPaymentPlan, applyRentPaymentPlan, type DestinoPagamento, type RentPaymentPlan } from '@/lib/rentPaymentPlan'
+import {
+  buildRentPaymentPlan, applyRentPaymentPlan, buildManualPlanItems, buildPlanFromManualItems, validateManualPlan,
+  type DestinoPagamento, type RentPaymentPlan, type ManualPlanItem,
+} from '@/lib/rentPaymentPlan'
 import DestinoPagamentoPicker from '@/components/DestinoPagamentoPicker'
+import ManualAllocationEditor from '@/components/ManualAllocationEditor'
 import { X, Pencil, Trash2, AlertTriangle } from 'lucide-react'
 import { logAccess } from '@/lib/logAccess'
 import { buildAppliedAdvanceMap } from '@/lib/advanceCredit'
@@ -45,6 +49,9 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
   // (lib/rentPaymentPlan.ts), à medida que o valor é escrito.
   const [plan, setPlan] = useState<RentPaymentPlan | null>(null)
   const [planLoading, setPlanLoading] = useState(false)
+  // Destino "Manual" — rubricas em aberto e valores escolhidos à mão.
+  const [manualItems, setManualItems] = useState<ManualPlanItem[]>([])
+  const [manualValues, setManualValues] = useState<Record<string, number>>({})
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -158,7 +165,21 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
 
     async function calcular() {
       const total = parseFloat(singleAmount)
-      if (!total || total <= 0) { setPlan(null); return }
+      if (!total || total <= 0) { setPlan(null); setManualItems([]); setManualValues({}); return }
+
+      if (destinoPagamento === 'manual') {
+        setPlanLoading(true)
+        try {
+          const items = await buildManualPlanItems(supabase, { leaseId: lease.id, tenantId: lease.tenant?.id, amount: total })
+          if (cancelado) return
+          setManualItems(items)
+          setManualValues(Object.fromEntries(items.map(it => [it.key, it.proposed])))
+        } finally {
+          if (!cancelado) setPlanLoading(false)
+        }
+        return
+      }
+
       setPlanLoading(true)
       try {
         const resultado = await buildRentPaymentPlan(supabase, {
@@ -180,10 +201,18 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
   async function handleSaveDebts() {
     const total = parseFloat(singleAmount)
     if (!total || total <= 0) { setError('Introduz o valor recebido'); return }
-    if (!plan) { setError('Aguarda o cálculo da distribuição'); return }
+
+    let planParaGravar = plan
+    if (destinoPagamento === 'manual') {
+      const erro = validateManualPlan(manualItems, manualValues, total)
+      if (erro) { setError(erro); return }
+      planParaGravar = buildPlanFromManualItems(manualItems, manualValues, total)
+    }
+    if (!planParaGravar) { setError('Aguarda o cálculo da distribuição'); return }
+
     setSaving(true); setError('')
 
-    const result = await applyRentPaymentPlan(supabase, plan, {
+    const result = await applyRentPaymentPlan(supabase, planParaGravar, {
       leaseId: lease.id,
       tenantId: lease.tenant?.id,
       paymentDate: singleDate,
@@ -200,7 +229,7 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
 
     await logAccess({
       action: 'criar', page: '/pagamentos',
-      details: `Registou pagamento (${formatCurrency(total)}) de ${lease.tenant?.name} (${lease.space?.ref}) — ${plan.summary}`,
+      details: `Registou pagamento (${formatCurrency(total)}) de ${lease.tenant?.name} (${lease.space?.ref}) — ${planParaGravar.summary}`,
     })
 
     setSaving(false)
@@ -434,11 +463,21 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
 
                   <DestinoPagamentoPicker valor={destinoPagamento} onChange={setDestinoPagamento} />
 
+                  {destinoPagamento === 'manual' && (
+                    <ManualAllocationEditor
+                      items={manualItems}
+                      values={manualValues}
+                      onChange={(key, value) => setManualValues(v => ({ ...v, [key]: value }))}
+                      amount={parseFloat(singleAmount) || 0}
+                      loading={planLoading}
+                    />
+                  )}
+
                   {/* Preview distribuição */}
-                  {planLoading && (
+                  {destinoPagamento !== 'manual' && planLoading && (
                     <p className="text-xs text-gray-400">A calcular a distribuição...</p>
                   )}
-                  {plan && !planLoading && parseFloat(singleAmount) > 0 && (
+                  {destinoPagamento !== 'manual' && plan && !planLoading && parseFloat(singleAmount) > 0 && (
                     <div className="border border-blue-200 rounded-lg overflow-hidden">
                       <div className="bg-blue-100 px-3 py-2 text-xs font-semibold text-blue-800">
                         Distribuição{destinoPagamento !== 'auto' ? '' : ' automática'}
@@ -589,7 +628,8 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
             {editingPayment ? 'Cancelar edição' : 'Cancelar'}
           </button>
           {mode === 'debts' ? (
-            <button className="btn-primary" onClick={handleSaveDebts} disabled={saving || planLoading || !plan || !singleAmount || parseFloat(singleAmount) <= 0}>
+            <button className="btn-primary" onClick={handleSaveDebts}
+              disabled={saving || planLoading || !singleAmount || parseFloat(singleAmount) <= 0 || (destinoPagamento === 'manual' ? manualItems.length === 0 : !plan)}>
               {saving ? 'A guardar...' : `Guardar ${parseFloat(singleAmount) > 0 ? formatCurrency(parseFloat(singleAmount)) : ''}`}
             </button>
           ) : (
