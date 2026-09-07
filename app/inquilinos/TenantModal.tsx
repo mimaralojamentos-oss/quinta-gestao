@@ -62,6 +62,20 @@ interface PaymentRow {
   displayAmount?: number
   /** Linha de renda coberta apenas por adiantamento (não existe pagamento em dinheiro). */
   isAdvanceOnly?: boolean
+  /**
+   * Este pagamento já aparece como sub-linha dentro do cartão do mês em
+   * falta a que pertence — continua no array `payments` (para os totais e
+   * as impressões não mudarem), mas não é desenhado como cartão à parte.
+   */
+  absorbedIntoShortfall?: boolean
+  /**
+   * Histórico dos pagamentos parciais já feitos contra esta rubrica (data +
+   * valor explícitos). `date: null` só acontece quando não existe nenhum
+   * registo datado desse pagamento (ex.: eletricidade paga pelo banco antes
+   * de haver rasto na tabela de movimentos de caixa) — nesse caso mostra-se
+   * o valor sem inventar uma data.
+   */
+  partialPayments?: { amount: number; date: string | null; method: string | null }[]
 }
 
 export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Props) {
@@ -219,10 +233,17 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
           })
         } else if (totalCovered < rentForMonth - 0.01) {
           const shortfall = parseFloat((rentForMonth - totalCovered).toFixed(2))
+          const pagamentosDatados = monthPayments
+            .filter(p => !!p.payment_date)
+            .sort((a, b) => (a.payment_date ?? '').localeCompare(b.payment_date ?? ''))
+          // Continuam no array enriched (para os totais e as impressões não
+          // mudarem) — só deixam de ser desenhados como cartão à parte.
+          for (const p of pagamentosDatados) { p.absorbedIntoShortfall = true }
           missingRows.push({
             reference_month: monthStr + '-01', amount: shortfall,
             payment_date: null, payment_method: null, tipo: 'renda', lease, isMissing: true, isManualDebt: false, isElecCharge: false,
-            notes: `Pagamento parcial — faltam ${formatCurrency(shortfall)}`
+            notes: `Pagamento parcial — faltam ${formatCurrency(shortfall)}`,
+            partialPayments: pagamentosDatados.map(p => ({ amount: p.amount ?? 0, date: p.payment_date ?? null, method: p.payment_method ?? null })),
           })
         }
       }
@@ -253,6 +274,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
     const { data: debtsData } = await supabase.from('debts').select('*, payments:debt_payments(*)').eq('tenant_id', tenant.id).order('reference_date', { ascending: false })
     const manualDebtRows: PaymentRow[] = (debtsData ?? []).map(d => {
       const remaining = getDebtRemaining(d)
+      const pagamentos = (d.payments ?? []) as { amount: number; payment_date: string; payment_method: string | null }[]
       return {
         id: d.id,
         reference_month: d.reference_date,
@@ -265,6 +287,11 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
         isMissing: false,
         isManualDebt: true,
         isElecCharge: false,
+        // debt_payments já guarda data e valor de cada parcial — nunca falta aqui.
+        partialPayments: remaining > 0 && pagamentos.length > 0
+          ? [...pagamentos].sort((a, b) => (a.payment_date ?? '').localeCompare(b.payment_date ?? ''))
+            .map(p => ({ amount: p.amount, date: p.payment_date, method: p.payment_method }))
+          : undefined,
       }
     })
 
@@ -276,12 +303,45 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
         .select('id, lease_id, amount, amount_paid, charge_date, reference_month, paid, payment_date, payment_method')
         .in('lease_id', leaseIds)
 
+      // A cobrança só guarda o acumulado (amount_paid) — não existe uma
+      // tabela de eventos por parcial. O único rasto datado que sobrevive
+      // por transação é o movimento de caixa criado nos pagamentos em
+      // dinheiro (lib/rentPaymentPlan.ts); pagamentos por banco, ou em
+      // dinheiro anteriores a existir fundo de maneio, não deixam esse
+      // rasto — por isso o fallback "pago até agora" sem data, nunca uma
+      // data inventada.
+      const partialChargeIds = (elecData ?? []).filter(ec => !ec.paid && (ec.amount_paid ?? 0) > 0).map(ec => ec.id)
+      const cfmByCharge = new Map<string, { amount: number; date: string }[]>()
+      if (partialChargeIds.length > 0) {
+        const { data: cfm } = await supabase
+          .from('cash_fund_movements')
+          .select('source_id, amount, movement_date')
+          .eq('source', 'eletricidade')
+          .in('source_id', partialChargeIds)
+          .order('movement_date', { ascending: true })
+        for (const m of cfm ?? []) {
+          const lista = cfmByCharge.get(m.source_id) ?? []
+          lista.push({ amount: m.amount, date: m.movement_date })
+          cfmByCharge.set(m.source_id, lista)
+        }
+      }
+
       for (const ec of elecData ?? []) {
         const lease = (leasesData ?? []).find(l => l.id === ec.lease_id)
         const refDate = ec.charge_date ?? ec.reference_month ?? new Date().toISOString().slice(0, 10)
         const amountPaid = ec.amount_paid ?? 0
         const remaining = Math.max(0, ec.amount - amountPaid)
         const isPartial = !ec.paid && amountPaid > 0
+
+        let partialPayments: PaymentRow['partialPayments']
+        if (isPartial) {
+          const eventos = cfmByCharge.get(ec.id) ?? []
+          const somaDatada = parseFloat(eventos.reduce((s, e) => s + e.amount, 0).toFixed(2))
+          partialPayments = eventos.map(e => ({ amount: e.amount, date: e.date, method: 'dinheiro' }))
+          const semRasto = parseFloat((amountPaid - somaDatada).toFixed(2))
+          if (semRasto > 0.01) partialPayments.push({ amount: semRasto, date: null, method: null })
+        }
+
         elecChargeRows.push({
           id: ec.id,
           lease_id: ec.lease_id,
@@ -301,6 +361,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
           isManualDebt: false,
           isElecCharge: true,
           isPartialElec: isPartial,
+          partialPayments,
         })
       }
     }
@@ -737,13 +798,28 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
         : p.tipo === 'adiantamento' && p.used
           ? ` — ${describeAdvanceTarget(p).replace('✓ ', '')}`
           : ''
-      return `<tr>
+      const linhaPrincipal = `<tr>
         <td>${periodo}</td>
         <td>${tipo}${p.notes ? ` — ${p.notes}` : ''}${detalheCredito}</td>
         <td>${p.payment_date && p.payment_date !== 'liquidada' ? p.payment_date : '—'}</td>
         <td style="color:${estadoColor};font-weight:600">${estado}</td>
         <td style="text-align:right;font-weight:600">${formatCurrency(amount)}</td>
       </tr>`
+
+      // Histórico dos parciais — só para eletricidade e dívidas manuais, cujos
+      // eventos individuais não têm outra linha própria neste relatório (ao
+      // contrário da renda, em que cada rent_payments já aparece à parte).
+      const subLinhas = (p.isElecCharge || p.isManualDebt) && p.partialPayments?.length
+        ? p.partialPayments.map(pp => `<tr>
+            <td></td>
+            <td style="color:#6b7280;font-size:9px;padding-left:14px">↳ pago ${formatCurrency(pp.amount)}${pp.method ? ` · ${pp.method}` : ''}</td>
+            <td style="color:#6b7280;font-size:9px">${pp.date ?? 'sem data'}</td>
+            <td></td>
+            <td></td>
+          </tr>`).join('')
+        : ''
+
+      return linhaPrincipal + subLinhas
     }).join('')
 
     const totalPago = payments.filter((p: PaymentRow) => p.payment_date && p.payment_date !== 'liquidada').reduce((s: number, p: PaymentRow) => s + p.amount, 0)
@@ -1426,7 +1502,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                 <p className="text-center text-gray-400 text-sm py-8">Sem registos de pagamentos</p>
               ) : (
                 <div className="space-y-2">
-                  {payments.map((p, i) => {
+                  {payments.filter(p => !p.absorbedIntoShortfall).map((p, i) => {
                     const isLiquidada = p.isManualDebt && p.payment_date === 'liquidada'
                     const isPago = !p.isManualDebt && ((!!p.payment_date && p.payment_date !== 'liquidada') || !!p.isAdvanceOnly)
                     // Crédito disponível para cobrir esta renda, ou esta cobrança de eletricidade, em falta
@@ -1467,7 +1543,10 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                           {p.tipo === 'adiantamento' ? (
                             p.used ? (
                               <div className="flex items-center gap-2 flex-wrap">
-                                <p className="text-xs text-gray-400 font-medium">{describeAdvanceTarget(p)}</p>
+                                <p className="text-xs text-gray-400 font-medium">
+                                  {describeAdvanceTarget(p)}
+                                  {p.payment_date && ` · recebido em ${formatDate(p.payment_date)} · ${p.payment_method}`}
+                                </p>
                                 <button onClick={() => handleReleaseAdvance(p)} disabled={releasingAdvanceId === p.id}
                                   className="text-xs text-gray-400 hover:text-purple-600 hover:underline disabled:opacity-50 transition-colors"
                                   title="Devolver este valor ao crédito disponível do inquilino">
@@ -1498,7 +1577,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                           ) : p.isAdvanceOnly ? (
                             <p className="text-xs text-gray-500">Pago com adiantamento · {formatCurrency(p.advanceApplied ?? 0)}</p>
                           ) : p.isMissing ? (
-                            <p className="text-xs text-orange-600 font-medium">⚠ Sem registo de pagamento</p>
+                            <p className="text-xs text-orange-600 font-medium">{p.notes ?? '⚠ Sem registo de pagamento'}</p>
                           ) : (
                             <p className="text-xs text-red-500 font-medium">⚠ Por pagar</p>
                           )}
@@ -1506,6 +1585,16 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                             <p className={`text-xs font-medium mt-0.5 ${isLiquidada ? 'text-emerald-600' : 'text-red-600'}`}>
                               {isLiquidada ? '✓ Liquidada' : `Em dívida: ${formatCurrency(p.remainingAmount ?? p.amount)}`}
                             </p>
+                          )}
+                          {(p.partialPayments?.length ?? 0) > 0 && (
+                            <div className="mt-1 pl-2 border-l-2 border-gray-200 space-y-0.5">
+                              {p.partialPayments!.map((pp, idx) => (
+                                <p key={idx} className="text-[11px] text-gray-500">
+                                  ↳ pago {formatCurrency(pp.amount)}
+                                  {pp.date ? ` em ${formatDate(pp.date)}${pp.method ? ` · ${pp.method}` : ''}` : ' (sem data registada)'}
+                                </p>
+                              ))}
+                            </div>
                           )}
                           {creditoAplicavel > 0 && (
                             <button onClick={() => p.isElecCharge ? handleApplyAdvanceToElec(p) : handleApplyAdvanceToRent(p)} disabled={aAplicar}
