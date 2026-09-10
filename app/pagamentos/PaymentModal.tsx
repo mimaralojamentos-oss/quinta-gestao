@@ -44,6 +44,7 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
   const [singleAmount, setSingleAmount] = useState('')
   const [singleDate, setSingleDate] = useState(new Date().toISOString().slice(0, 10))
   const [singleMethod, setSingleMethod] = useState('dinheiro')
+  const [singleNote, setSingleNote] = useState('')
   const [loadingDebts, setLoadingDebts] = useState(true)
   // Distribuição deste pagamento em concreto — calculada pelo motor único
   // (lib/rentPaymentPlan.ts), à medida que o valor é escrito.
@@ -217,6 +218,7 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
       tenantId: lease.tenant?.id,
       paymentDate: singleDate,
       paymentMethod: singleMethod,
+      notes: singleNote.trim() || undefined,
       spaceRef: lease.space?.ref,
       tenantName: lease.tenant?.name,
     })
@@ -233,6 +235,7 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
     })
 
     setSaving(false)
+    setSingleNote('')
     onSaved()
   }
 
@@ -458,6 +461,14 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
                           </button>
                         ))}
                       </div>
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-500 block mb-1">Nota (opcional)</label>
+                      <input type="text" className="input text-sm w-full" placeholder="ex: Acerto luz por lapso"
+                        value={singleNote} onChange={e => setSingleNote(e.target.value)} />
+                      <p className="text-[11px] text-gray-400 mt-1">
+                        Fica anexada ao texto automático de todos os registos criados por este recebimento.
+                      </p>
                     </div>
                   </div>
 

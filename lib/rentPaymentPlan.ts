@@ -530,6 +530,14 @@ export interface ApplyPlanResult {
   error?: string
 }
 
+/** Junta uma nota escrita à mão ao texto automático de uma linha, sem o substituir. */
+function appendNote(auto: string | null | undefined, extra: string | null | undefined): string | null {
+  const a = (auto ?? '').trim()
+  const e = (extra ?? '').trim()
+  if (a && e) return `${a} — ${e}`
+  return a || e || null
+}
+
 // Executa as escritas correspondentes a um plano já confirmado pelo utilizador.
 export async function applyRentPaymentPlan(supabase: any, plan: RentPaymentPlan, params: ApplyPlanParams): Promise<ApplyPlanResult> {
   const { leaseId, paymentDate, paymentMethod, notes, spaceRef, tenantName } = params
@@ -557,7 +565,7 @@ export async function applyRentPaymentPlan(supabase: any, plan: RentPaymentPlan,
       amount: rp.amount,
       payment_method: paymentMethod,
       tipo: 'renda',
-      notes: !rp.fullyPaid ? 'Pagamento parcial' : (notes || null),
+      notes: appendNote(rp.fullyPaid ? null : 'Pagamento parcial', notes),
     }).select().single()
 
     if (insertErr) return { rendaPayments, adiantamentoPayment: null, error: insertErr.message }
@@ -571,6 +579,7 @@ export async function applyRentPaymentPlan(supabase: any, plan: RentPaymentPlan,
         type: 'entrada',
         source: 'renda',
         source_id: newPayment.id,
+        notes: notes || null,
       })
     }
   }
@@ -583,7 +592,7 @@ export async function applyRentPaymentPlan(supabase: any, plan: RentPaymentPlan,
       amount: plan.caucao.amount,
       payment_method: paymentMethod,
       tipo: 'caucao',
-      notes: !plan.caucao.fullyPaid ? 'Pagamento parcial' : (notes || null),
+      notes: appendNote(plan.caucao.fullyPaid ? null : 'Pagamento parcial', notes),
     }).select().single()
 
     if (caucaoErr) return { rendaPayments, adiantamentoPayment: null, error: caucaoErr.message }
@@ -596,6 +605,7 @@ export async function applyRentPaymentPlan(supabase: any, plan: RentPaymentPlan,
         type: 'entrada',
         source: 'renda',
         source_id: caucaoPayment.id,
+        notes: notes || null,
       })
     }
   }
@@ -605,6 +615,7 @@ export async function applyRentPaymentPlan(supabase: any, plan: RentPaymentPlan,
       // Parcial: acumula o que foi pago e a fatura continua em aberto.
       await supabase.from('electricity_charges').update({
         amount_paid: parseFloat((charge.alreadyPaid + charge.amount).toFixed(2)),
+        ...(notes ? { notes: appendNote('Pagamento parcial', notes) } : {}),
       }).eq('id', charge.id)
     } else {
       await supabase.from('electricity_charges').update({
@@ -612,6 +623,7 @@ export async function applyRentPaymentPlan(supabase: any, plan: RentPaymentPlan,
         amount_paid: charge.totalAmount,
         payment_date: paymentDate,
         payment_method: paymentMethod,
+        ...(notes ? { notes: appendNote(null, notes) } : {}),
       }).eq('id', charge.id)
     }
 
@@ -623,6 +635,7 @@ export async function applyRentPaymentPlan(supabase: any, plan: RentPaymentPlan,
         type: 'entrada',
         source: 'eletricidade',
         source_id: charge.id,
+        notes: notes || null,
       })
     }
   }
@@ -630,7 +643,8 @@ export async function applyRentPaymentPlan(supabase: any, plan: RentPaymentPlan,
   for (const dp of plan.debtPayments) {
     await supabase.from('debt_payments').insert({
       debt_id: dp.debtId, payment_date: paymentDate, amount: dp.amount,
-      payment_method: paymentMethod, notes: 'Aplicado automaticamente via processamento de pagamento',
+      payment_method: paymentMethod,
+      notes: appendNote('Aplicado automaticamente via processamento de pagamento', notes),
     })
 
     if (cashOk) {
@@ -641,6 +655,7 @@ export async function applyRentPaymentPlan(supabase: any, plan: RentPaymentPlan,
         type: 'entrada',
         source: 'divida',
         source_id: dp.debtId,
+        notes: notes || null,
       })
     }
   }
@@ -655,7 +670,7 @@ export async function applyRentPaymentPlan(supabase: any, plan: RentPaymentPlan,
       payment_method: paymentMethod,
       tipo: 'adiantamento',
       used: false,
-      notes: 'Excedente (adiantamento)',
+      notes: appendNote('Excedente (adiantamento)', notes),
     }).select().single()
     adiantamentoPayment = data
 
@@ -667,6 +682,7 @@ export async function applyRentPaymentPlan(supabase: any, plan: RentPaymentPlan,
         type: 'entrada',
         source: 'renda',
         source_id: data.id,
+        notes: notes || null,
       })
     }
   }

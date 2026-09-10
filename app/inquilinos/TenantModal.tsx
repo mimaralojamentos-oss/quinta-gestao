@@ -129,12 +129,13 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
 
   const [showRecebimentoForm, setShowRecebimentoForm] = useState(false)
   const [recebimentoForm, setRecebimentoForm] = useState<{
-    date: string; amount: string; method: string; destino: DestinoPagamento
+    date: string; amount: string; method: string; destino: DestinoPagamento; note: string
   }>({
     date: new Date().toISOString().slice(0, 10),
     amount: '',
     method: 'dinheiro',
     destino: 'auto',
+    note: '',
   })
   const [savingRecebimento, setSavingRecebimento] = useState(false)
   // Distribuição deste recebimento em concreto — calculada pelo motor único
@@ -747,6 +748,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
       tenantId: tenant?.id,
       paymentDate: recebimentoForm.date,
       paymentMethod: recebimentoForm.method,
+      notes: recebimentoForm.note.trim() || undefined,
       spaceRef,
       tenantName,
     })
@@ -764,7 +766,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
 
     await fetchPayments()
     setShowRecebimentoForm(false)
-    setRecebimentoForm({ date: new Date().toISOString().slice(0, 10), amount: '', method: 'dinheiro', destino: 'auto' })
+    setRecebimentoForm({ date: new Date().toISOString().slice(0, 10), amount: '', method: 'dinheiro', destino: 'auto', note: '' })
     setManualItems([]); setManualValues({})
     setSavingRecebimento(false)
   }
@@ -1307,6 +1309,16 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                   </div>
 
                   <div className="mb-3">
+                    <label className="label">Nota (opcional)</label>
+                    <input className="input text-sm" placeholder="ex: Acerto luz por lapso"
+                      value={recebimentoForm.note}
+                      onChange={e => setRecebimentoForm(f => ({ ...f, note: e.target.value }))} />
+                    <p className="text-xs text-gray-400 mt-1">
+                      Fica anexada ao texto automático de todos os registos criados por este recebimento.
+                    </p>
+                  </div>
+
+                  <div className="mb-3">
                     <DestinoPagamentoPicker
                       valor={recebimentoForm.destino}
                       onChange={d => setRecebimentoForm(f => ({ ...f, destino: d }))} />
@@ -1416,7 +1428,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                     </>
                   )}
                   <div className="flex gap-2">
-                    <button className="btn-secondary flex-1" onClick={() => { setShowRecebimentoForm(false); setRecebimentoForm({ date: new Date().toISOString().slice(0, 10), amount: '', method: 'dinheiro', destino: 'auto' }); setManualItems([]); setManualValues({}) }}>
+                    <button className="btn-secondary flex-1" onClick={() => { setShowRecebimentoForm(false); setRecebimentoForm({ date: new Date().toISOString().slice(0, 10), amount: '', method: 'dinheiro', destino: 'auto', note: '' }); setManualItems([]); setManualValues({}) }}>
                       Cancelar
                     </button>
                     <button onClick={handleSaveRecebimento}
