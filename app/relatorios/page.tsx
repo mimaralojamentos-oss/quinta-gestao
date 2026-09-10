@@ -1,7 +1,7 @@
 'use client'
 
 import AppLayout from '@/components/layout/AppLayout'
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, Fragment } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatDate, getMonthLabel, formatCurrency } from '@/lib/utils'
 import { getDebtRemaining } from '@/lib/debts'
@@ -623,15 +623,57 @@ export default function RelatoriosPage() {
       const { data: elecData, error: ecError } = await ecQuery
       if (ecError) throw new Error(`Não foi possível carregar a eletricidade: ${ecError.message}`)
 
+      // O valor da cobrança (e.amount) é o total pago, que pode incluir
+      // crédito de adiantamento aplicado num dia anterior (botão "Usar
+      // adiantamento" na ficha do inquilino) — sem descontar isso, o
+      // relatório conta esse crédito como se fosse dinheiro novo recebido
+      // hoje, quando já tinha sido contado no dia em que o adiantamento
+      // entrou. O rasto desse crédito são as linhas de rent_payments
+      // tipo='adiantamento' com applied_to_type='eletricidade' que apontam
+      // para esta cobrança — cada uma sabe quanto e, pela sua própria
+      // payment_date, QUANDO esse dinheiro entrou de facto.
+      //
+      // Limitação conhecida e aceite: isto só separa o que está marcado
+      // como crédito consumido. Uma cobrança paga em duas tranches de
+      // dinheiro/banco reais (sem nenhuma envolver adiantamento) continua
+      // a aparecer inteira na data da tranche final — não há, hoje, um
+      // registo por tranche para reconstruir isso com certeza, e mostrar
+      // como está é preferível a inventar uma divisão.
+      const chargeIds = (elecData ?? []).map((e: any) => e.id)
+      const creditoPorCobranca = new Map<string, { amount: number; date: string }[]>()
+      if (chargeIds.length > 0) {
+        const { data: creditRows } = await supabase
+          .from('rent_payments')
+          .select('amount, payment_date, applied_to_id')
+          .eq('tipo', 'adiantamento')
+          .eq('applied_to_type', 'eletricidade')
+          .in('applied_to_id', chargeIds)
+        for (const c of creditRows ?? []) {
+          const lista = creditoPorCobranca.get(c.applied_to_id) ?? []
+          lista.push({ amount: c.amount, date: c.payment_date })
+          creditoPorCobranca.set(c.applied_to_id, lista)
+        }
+      }
+
       // Normalizar electricity_charges para o mesmo formato que rent_payments
       const elecNorm = (elecData ?? []).map((e: any) => {
         const refMonth = e.reference_month ? getMonthLabel(e.reference_month) : null
+        const creditoInfo = creditoPorCobranca.get(e.id) ?? []
+        const creditoTotal = parseFloat(creditoInfo.reduce((s, c) => s + c.amount, 0).toFixed(2))
+        // Só desconta o crédito se o resultado fizer sentido — um valor
+        // negativo ou maior que o total pago significa que não há garantia
+        // suficiente de que o rasto está completo, e aí é mais honesto
+        // mostrar a cobrança inteira do que arriscar um número errado.
+        const dinheiroNovo = parseFloat((e.amount_paid - creditoTotal).toFixed(2))
+        const separavel = creditoTotal > 0 && dinheiroNovo >= 0 && dinheiroNovo <= e.amount_paid
         return {
           ...e,
           tipo: 'luz',
+          amount: separavel ? dinheiroNovo : e.amount,
           payment_date: e.payment_date,
           payment_method: e.payment_method,
           notes: refMonth ? `Eletricidade de ${refMonth}` : 'Eletricidade',
+          creditoInfo: separavel ? creditoInfo : [],
         }
       })
 
@@ -1709,12 +1751,17 @@ export default function RelatoriosPage() {
                         const mes = getMonthLabel(p.reference_month)
                         const tipoLabel = TIPO_LABELS[p.tipo || 'renda'] ?? p.tipo ?? 'Renda'
                         const tipoColor = (p.tipo || 'renda') === 'renda' ? '#065f46;background:#d1fae5' : p.tipo === 'adiantamento' ? '#5b21b6;background:#ede9fe' : '#92400e;background:#fef3c7'
+                        const creditoRows = (p.creditoInfo ?? []).map((c: any) => `<tr>
+                          <td></td><td></td>
+                          <td style="padding:2px 8px;color:#9ca3af;font-size:11px" colspan="1">↳ ${formatCurrency(c.amount)} pagos com crédito de adiantamento (recebido a ${formatDate(c.date)})</td>
+                          <td></td>
+                        </tr>`).join('')
                         return `<tr>
                           <td style="padding:6px 8px;color:#6b7280;font-size:12px">↳ ${mes}</td>
                           <td style="padding:6px 8px"><span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:12px;color:${tipoColor}">${tipoLabel}</span></td>
                           <td style="padding:6px 8px;color:#6b7280;font-size:12px;font-style:italic">${p.notes ?? ''}</td>
                           <td style="padding:6px 8px;text-align:right;font-weight:600;font-size:13px">${formatCurrency(p.amount ?? 0)}</td>
-                        </tr>`
+                        </tr>${creditoRows}`
                       }).join('')
                       const dateStr = formatDate(g.date)
                       const methodStr = g.method === 'dinheiro' ? '💵 Dinheiro' : '🏦 Banco'
@@ -1828,26 +1875,37 @@ export default function RelatoriosPage() {
                                 <table className="w-full text-sm">
                                   <tbody>
                                     {g.items.sort((a: any, b: any) => (a.reference_month ?? '').localeCompare(b.reference_month ?? '')).map((p: any) => (
-                                      <tr key={p.id} className="border-b border-gray-50 last:border-0 hover:bg-gray-50">
-                                        <td className="py-2 px-4 text-gray-500 text-xs w-8">↳</td>
-                                        <td className="py-2 px-4 text-gray-700">
-                                          {getMonthLabel(p.reference_month)}
-                                        </td>
-                                        <td className="py-2 px-4">
-                                          <span className={`inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full ${
-                                            (p.tipo || 'renda') === 'renda' ? 'bg-emerald-100 text-emerald-700' :
-                                            p.tipo === 'luz' ? 'bg-yellow-100 text-yellow-700' :
-                                            p.tipo === 'caucao' ? 'bg-gray-100 text-gray-700' :
-                                            p.tipo === 'adiantamento' ? 'bg-purple-100 text-purple-700' :
-                                            'bg-blue-100 text-blue-700'
-                                          }`}>
-                                            {TIPO_LABELS[p.tipo || 'renda'] ?? p.tipo}
-                                          </span>
-                                        </td>
-                                        {p.notes && <td className="py-2 px-4 text-xs text-gray-400 italic">{p.notes}</td>}
-                                        {!p.notes && <td className="py-2 px-4" />}
-                                        <td className="py-2 px-4 text-right font-semibold text-gray-900">{fmt(p.amount ?? 0)}</td>
-                                      </tr>
+                                      <Fragment key={p.id}>
+                                        <tr className="border-b border-gray-50 last:border-0 hover:bg-gray-50">
+                                          <td className="py-2 px-4 text-gray-500 text-xs w-8">↳</td>
+                                          <td className="py-2 px-4 text-gray-700">
+                                            {getMonthLabel(p.reference_month)}
+                                          </td>
+                                          <td className="py-2 px-4">
+                                            <span className={`inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full ${
+                                              (p.tipo || 'renda') === 'renda' ? 'bg-emerald-100 text-emerald-700' :
+                                              p.tipo === 'luz' ? 'bg-yellow-100 text-yellow-700' :
+                                              p.tipo === 'caucao' ? 'bg-gray-100 text-gray-700' :
+                                              p.tipo === 'adiantamento' ? 'bg-purple-100 text-purple-700' :
+                                              'bg-blue-100 text-blue-700'
+                                            }`}>
+                                              {TIPO_LABELS[p.tipo || 'renda'] ?? p.tipo}
+                                            </span>
+                                          </td>
+                                          {p.notes && <td className="py-2 px-4 text-xs text-gray-400 italic">{p.notes}</td>}
+                                          {!p.notes && <td className="py-2 px-4" />}
+                                          <td className="py-2 px-4 text-right font-semibold text-gray-900">{fmt(p.amount ?? 0)}</td>
+                                        </tr>
+                                        {(p.creditoInfo ?? []).map((c: any, idx: number) => (
+                                          <tr key={`${p.id}-credito-${idx}`} className="border-b border-gray-50 last:border-0">
+                                            <td></td>
+                                            <td colSpan={3} className="py-1 px-4 text-[11px] text-gray-400">
+                                              ↳ {fmt(c.amount)} pagos com crédito de adiantamento (recebido a {formatDate(c.date)})
+                                            </td>
+                                            <td></td>
+                                          </tr>
+                                        ))}
+                                      </Fragment>
                                     ))}
                                   </tbody>
                                 </table>
