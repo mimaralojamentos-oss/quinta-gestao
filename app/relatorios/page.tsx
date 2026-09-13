@@ -5,6 +5,7 @@ import { useEffect, useState, useRef, Fragment } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatDate, getMonthLabel, formatCurrency } from '@/lib/utils'
 import { getDebtRemaining } from '@/lib/debts'
+import { EXPENSE_CATEGORIES } from '@/lib/expenseCategories'
 import { BarChart3, TrendingUp, Home, FileText, Calendar, ChevronDown, ChevronUp, Edit2, X, Save, ClipboardList, Download, Loader2, Receipt, Mail, AlertTriangle, Printer } from 'lucide-react'
 import EmailComposer from '@/components/EmailComposer'
 import { buildAppliedAdvanceMap } from '@/lib/advanceCredit'
@@ -26,7 +27,6 @@ function getLastMonths(n: number): MonthOption[] {
 }
 
 const MONTHS = getLastMonths(12)
-const CATEGORIAS = ['administracao', 'contabilidade', 'edp', 'manutencao', 'obras', 'outros', 'pessoal']
 
 const TIPO_LABELS: Record<string, string> = {
   renda: '🏠 Renda',
@@ -1470,8 +1470,8 @@ export default function RelatoriosPage() {
                                             <label className="text-xs text-gray-500 mb-0.5 block">Categoria</label>
                                             <select className="input text-sm" value={editForm.category ?? ''}
                                               onChange={e => setEditForm((f: any) => ({ ...f, category: e.target.value }))}>
-                                              {CATEGORIAS.map(c => (
-                                                <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>
+                                              {EXPENSE_CATEGORIES.map(c => (
+                                                <option key={c.value} value={c.value}>{c.label}</option>
                                               ))}
                                             </select>
                                           </div>

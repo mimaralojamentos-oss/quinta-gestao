@@ -104,9 +104,12 @@ interface UploadResult {
   status: 'pending' | 'processing' | 'success' | 'error' | 'duplicate' | 'skipped'
   error?: string
   autoExpense?: boolean
+  expenseError?: string
   cashMovementCreated?: boolean
   duplicate?: any
   detectedTipo?: string
+  /** Só em faturas de água: o que aconteceu ao criar a leitura no contador geral. */
+  waterReading?: { status: 'created' | 'duplicate' | 'no_meter' | 'no_date' | 'error'; meterName?: string; matchReason?: string; error?: string } | null
 }
 
 type SortField = 'tipo' | 'nome' | 'associado' | 'data' | 'valor' | 'despesa' | 'banco' | 'carregado' | null
@@ -419,7 +422,7 @@ async function handleSaveEdit() {
     if (data.error) {
       setUploadResults(prev => prev.map((r, i) => i === index ? { ...r, status: 'error', error: data.error } : r))
     } else {
-      setUploadResults(prev => prev.map((r, i) => i === index ? { ...r, status: 'success', autoExpense: data.autoExpense, cashMovementCreated: data.cashMovementCreated, detectedTipo: data.detectedTipo } : r))
+      setUploadResults(prev => prev.map((r, i) => i === index ? { ...r, status: 'success', autoExpense: data.autoExpense, expenseError: data.expenseError, cashMovementCreated: data.cashMovementCreated, detectedTipo: data.detectedTipo, waterReading: data.waterReading } : r))
       await logAccess({ action: 'criar', page: '/documentos', details: `Carregou documento "${file.name}"` })
     }
     return 'done'
@@ -1121,6 +1124,22 @@ async function handleSaveEdit() {
                         <p className="text-xs text-blue-600">🤖 Detetado: {tipoLabels[r.detectedTipo] ?? r.detectedTipo}</p>
                       )}
                       {r.status === 'success' && r.autoExpense && <p className="text-xs text-emerald-600">✓ Despesa criada automaticamente</p>}
+                      {r.status === 'success' && r.expenseError && <p className="text-xs text-red-600">⚠ Despesa não criada: {r.expenseError}</p>}
+                      {r.status === 'success' && r.waterReading?.status === 'created' && (
+                        <p className="text-xs text-emerald-600">✓ Leitura criada no contador &quot;{r.waterReading.meterName}&quot; (por {r.waterReading.matchReason})</p>
+                      )}
+                      {r.status === 'success' && r.waterReading?.status === 'duplicate' && (
+                        <p className="text-xs text-gray-500">ℹ A leitura desta fatura já existia no contador &quot;{r.waterReading.meterName}&quot;</p>
+                      )}
+                      {r.status === 'success' && r.waterReading?.status === 'no_meter' && (
+                        <p className="text-xs text-amber-600">⚠ Sem contador de água correspondente — documento arquivado, leitura não criada</p>
+                      )}
+                      {r.status === 'success' && r.waterReading?.status === 'no_date' && (
+                        <p className="text-xs text-amber-600">⚠ A fatura não tem data de leitura — leitura não criada</p>
+                      )}
+                      {r.status === 'success' && r.waterReading?.status === 'error' && (
+                        <p className="text-xs text-red-600">⚠ Leitura de água não criada: {r.waterReading.error}</p>
+                      )}
                       {r.status === 'success' && (r as any).autoIncome && <p className="text-xs text-emerald-600">✓ Receita criada automaticamente</p>}
                       {r.status === 'success' && r.cashMovementCreated && <p className="text-xs text-emerald-600">✓ Movimento criado no Fundo de Maneio</p>}
                       {r.status === 'success' && !r.autoExpense && !r.cashMovementCreated && !r.detectedTipo && <p className="text-xs text-gray-500">✓ Documento guardado</p>}

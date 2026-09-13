@@ -7,6 +7,7 @@ import { checkFileSize } from '@/lib/fileUpload'
 import { meterReadingExists } from '@/lib/meterReadings'
 import { findUnlinkedExpenseByAmount } from '@/lib/expenseDuplicates'
 import { createExpense } from '@/lib/createExpense'
+import { extractWaterInvoice, importWaterInvoiceReading, waterInvoiceMediaBlock, type WaterReadingImportResult } from '@/lib/waterInvoiceExtraction'
 
 export async function POST(request: Request) {
   const auth = await requireRole(['admin', 'coadmin', 'electrician'])
@@ -99,7 +100,7 @@ Se for o caso (b), usa doc_type "receita" e mete "is_venda_energia": true.
   "amount": valor numérico total sem símbolo (null se não existir),
   "doc_date": "data no formato YYYY-MM-DD (null se não existir)",
   "items_summary": "resumo do conteúdo em português, máximo 200 caracteres",
-  "category": "uma de: obras, edp, pessoal, contabilidade, manutencao, outros",
+  "category": "uma de: obras, edp, agua, pessoal, contabilidade, manutencao, outros (agua para faturas de água/saneamento)",
   "edp_contract_number": "código de contrato EDP se for fatura de luz (ex: 160807307528), null caso contrário",
   "edp_reading_value": valor numérico da leitura do contador se for fatura de luz (null caso contrário),
   "edp_reading_date": "data da leitura se for fatura de luz no formato YYYY-MM-DD (null caso contrário)",
@@ -142,7 +143,7 @@ IMPORTANTE sobre o valor ("amount"):
   "amount": valor numérico total sem símbolo (null se não existir),
   "doc_date": "data no formato YYYY-MM-DD (null se não existir)",
   "items_summary": "resumo do conteúdo em português, máximo 200 caracteres",
-  "category": "uma de: obras, edp, pessoal, contabilidade, manutencao, outros"
+  "category": "uma de: obras, edp, agua, pessoal, contabilidade, manutencao, outros (agua para faturas de água/saneamento)"
 }`
 
         const promptTransferenciaInterna = jsonOnlyInstruction + `Extrai os seguintes dados deste documento de transferência interna (do Fundo de Maneio para o banco) em JSON (sem markdown, só JSON puro):
@@ -213,6 +214,10 @@ IMPORTANTE sobre o valor ("amount"):
     } else {
       if (isAutomatic) tipo = 'fatura'
     }
+
+    // Tal como a fatura de luz fica sempre em 'edp' (promptEdp), a de água
+    // fica sempre em 'agua' — não depende de a IA acertar na categoria.
+    if (tipo === 'fatura_agua') extracted.category = 'agua'
 
     // Procurar proprietário pelo NIF
     let ownerName = 'N/D'
@@ -325,6 +330,36 @@ IMPORTANTE sobre o valor ("amount"):
       }
     }
 
+    // ── FATURA ÁGUA: criar a leitura no contador geral de água ──
+    //
+    // A extração genérica de cima só tira os dados de documento (nº, valor,
+    // data). Os dados de contador vêm da extração dedicada da água
+    // (lib/waterInvoiceExtraction.ts — a mesma de /api/extract-water-meter),
+    // e a leitura só é criada se houver um contador que corresponda. Se não
+    // houver, o documento fica arquivado na mesma e o resultado avisa.
+    let waterReading: WaterReadingImportResult | null = null
+
+    if (tipo === 'fatura_agua' && doc && (isPdf || isImage)) {
+      try {
+        const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
+        const waterData = await extractWaterInvoice(anthropic, waterInvoiceMediaBlock(buffer.toString('base64'), file.type))
+
+        waterReading = waterData
+          ? await importWaterInvoiceReading(supabase, {
+              data: waterData,
+              documentId: doc.id,
+              docNumber: doc.doc_number,
+              docDate: doc.doc_date,
+              amount: doc.amount,
+              fileName: file.name,
+            })
+          : { status: 'error', error: 'Não foi possível ler os dados de contador desta fatura' }
+      } catch (e: any) {
+        console.error('Leitura de água falhou:', e)
+        waterReading = { status: 'error', error: e?.message ?? 'erro desconhecido' }
+      }
+    }
+
     // ── TRANSFERÊNCIA INTERNA: criar movimento de saída no Fundo de Maneio ──
     // Só admin/coadmin mexem no fundo de maneio.
     let cashMovementCreated = false
@@ -345,6 +380,10 @@ IMPORTANTE sobre o valor ("amount"):
     const isFatura = ['fatura', 'fatura_luz', 'fatura_agua'].includes(tipo)
     let autoExpense = false
     let expenseId = null
+    // Antes, uma falha a criar a despesa (ex: categoria recusada pela
+    // constraint da base de dados) desaparecia em silêncio — agora vai na
+    // resposta e aparece no resultado do upload.
+    let expenseError: string | null = null
 
     if (!skipExpense && isFatura && doc && extracted.amount && extracted.doc_date) {
       const paymentMethod = detectPaymentMethod(file.name)
@@ -360,7 +399,7 @@ IMPORTANTE sobre o valor ("amount"):
       } else {
         // Fluxo automático — sem aviso de duplicado (já usa
         // findUnlinkedExpenseByAmount acima para reaproveitar em vez de duplicar).
-        const { expense: newExpense } = await createExpense(supabase, {
+        const { expense: newExpense, error: createExpenseError } = await createExpense(supabase, {
           expense_date: extracted.doc_date,
           category: extracted.category ?? 'outros',
           type: 'pontual',
@@ -377,6 +416,9 @@ IMPORTANTE sobre o valor ("amount"):
         if (newExpense) {
           expenseId = newExpense.id
           autoExpense = true
+        } else {
+          console.error('Despesa automática não criada:', createExpenseError)
+          expenseError = createExpenseError ?? 'erro desconhecido'
         }
       }
     }
@@ -400,7 +442,7 @@ IMPORTANTE sobre o valor ("amount"):
       if (newIncome) autoIncome = true
     }
 
-    return NextResponse.json({ success: true, document: doc, autoExpense, autoIncome, duplicate: false, expenseId, meterReadingCreated, meterMatchReason, cashMovementCreated, detectedTipo: tipo })
+    return NextResponse.json({ success: true, document: doc, autoExpense, expenseError, autoIncome, duplicate: false, expenseId, meterReadingCreated, meterMatchReason, waterReading, cashMovementCreated, detectedTipo: tipo })
 
   } catch (e: any) {
     console.error(e)

@@ -19,6 +19,7 @@ export const EXPENSE_CATEGORIES = [
   { value: 'administracao', label: 'Administração', filterLabel: '📋 Administração', color: 'bg-slate-100 text-slate-700' },
   { value: 'obras', label: 'Obras', filterLabel: '🏗️ Obras', color: 'bg-orange-100 text-orange-700' },
   { value: 'edp', label: 'Eletricidade (EDP)', filterLabel: '⚡ Eletricidade', color: 'bg-yellow-100 text-yellow-700' },
+  { value: 'agua', label: 'Água', filterLabel: '💧 Água', color: 'bg-sky-100 text-sky-700' },
   { value: 'pessoal', label: 'Pessoal', filterLabel: '👤 Pessoal', color: 'bg-blue-100 text-blue-700' },
   { value: 'contabilidade', label: 'Contabilidade', filterLabel: '📊 Contabilidade', color: 'bg-purple-100 text-purple-700' },
   { value: 'manutencao', label: 'Manutenção', filterLabel: '🔧 Manutenção', color: 'bg-cyan-100 text-cyan-700' },

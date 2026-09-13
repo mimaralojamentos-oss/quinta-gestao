@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase'
 import { formatCurrency, formatDate, matchesSearch, openStorageDocument } from '@/lib/utils'
 import { Plus, Search, FolderOpen, X, FileText, Eye, FolderInput } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
+import { EXPENSE_CATEGORIES } from '@/lib/expenseCategories'
 import ProjectModal from './ProjectModal'
 
 interface Project {
@@ -64,19 +65,10 @@ const statusColors: Record<string, string> = {
   pausado: 'bg-yellow-100 text-yellow-700',
 }
 
-const categoryColors: Record<string, string> = {
-  obras: 'bg-orange-100 text-orange-700',
-  edp: 'bg-yellow-100 text-yellow-700',
-  pessoal: 'bg-blue-100 text-blue-700',
-  contabilidade: 'bg-purple-100 text-purple-700',
-  manutencao: 'bg-cyan-100 text-cyan-700',
-  outros: 'bg-gray-100 text-gray-700',
-}
-
-const categoryLabels: Record<string, string> = {
-  obras: 'Obras', edp: 'EDP', pessoal: 'Pessoal',
-  contabilidade: 'Contabilidade', manutencao: 'Manutenção', outros: 'Outros',
-}
+// Derivados da lista única (lib/expenseCategories.ts) — estavam escritos à
+// mão aqui e já não tinham 'administracao'.
+const categoryColors: Record<string, string> = Object.fromEntries(EXPENSE_CATEGORIES.map(c => [c.value, c.color]))
+const categoryLabels: Record<string, string> = Object.fromEntries(EXPENSE_CATEGORIES.map(c => [c.value, c.label]))
 
 export default function ProjetosPage() {
   const { isAdmin, isCoAdmin } = useAuth()
