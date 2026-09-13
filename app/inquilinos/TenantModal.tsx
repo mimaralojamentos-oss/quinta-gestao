@@ -33,6 +33,7 @@ const tipoConfig = {
   adiantamento: { label: '💰 Adiantamento' },
   divida: { label: '⚠️ Dívida' },
   eletricidade: { label: '⚡ Eletricidade' },
+  agua: { label: '💧 Água' },
 }
 
 interface PaymentRow {
@@ -49,10 +50,12 @@ interface PaymentRow {
   isMissing?: boolean
   isManualDebt?: boolean
   isElecCharge?: boolean
+  isWaterCharge?: boolean
   isDeposit?: boolean
   isPartialElec?: boolean
+  isPartialWater?: boolean
   remainingAmount?: number
-  /** Destino de um adiantamento já consumido ('renda' | 'eletricidade'). */
+  /** Destino de um adiantamento já consumido ('renda' | 'eletricidade' | 'agua'). */
   applied_to_type?: string | null
   /** Mês da renda a que o adiantamento foi aplicado. */
   applied_to_month?: string | null
@@ -367,7 +370,72 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
       }
     }
 
-    const allRows = [...enriched, ...missingRows, ...depositRows, ...manualDebtRows, ...elecChargeRows]
+    // Cobranças de água (pagas e por pagar) — mesmo tratamento da eletricidade.
+    const waterChargeRows: PaymentRow[] = []
+    if (leaseIds.length > 0) {
+      const { data: waterData } = await supabase
+        .from('water_charges')
+        .select('id, lease_id, amount, amount_paid, charge_date, reference_month, paid, payment_date, payment_method')
+        .in('lease_id', leaseIds)
+
+      const partialWaterChargeIds = (waterData ?? []).filter(wc => !wc.paid && (wc.amount_paid ?? 0) > 0).map(wc => wc.id)
+      const cfmByWaterCharge = new Map<string, { amount: number; date: string }[]>()
+      if (partialWaterChargeIds.length > 0) {
+        const { data: cfm } = await supabase
+          .from('cash_fund_movements')
+          .select('source_id, amount, movement_date')
+          .eq('source', 'agua')
+          .in('source_id', partialWaterChargeIds)
+          .order('movement_date', { ascending: true })
+        for (const m of cfm ?? []) {
+          const lista = cfmByWaterCharge.get(m.source_id) ?? []
+          lista.push({ amount: m.amount, date: m.movement_date })
+          cfmByWaterCharge.set(m.source_id, lista)
+        }
+      }
+
+      for (const wc of waterData ?? []) {
+        const lease = (leasesData ?? []).find(l => l.id === wc.lease_id)
+        const refDate = wc.charge_date ?? wc.reference_month ?? new Date().toISOString().slice(0, 10)
+        const amountPaid = wc.amount_paid ?? 0
+        const remaining = Math.max(0, wc.amount - amountPaid)
+        const isPartial = !wc.paid && amountPaid > 0
+
+        let partialPayments: PaymentRow['partialPayments']
+        if (isPartial) {
+          const eventos = cfmByWaterCharge.get(wc.id) ?? []
+          const somaDatada = parseFloat(eventos.reduce((s, e) => s + e.amount, 0).toFixed(2))
+          partialPayments = eventos.map(e => ({ amount: e.amount, date: e.date, method: 'dinheiro' }))
+          const semRasto = parseFloat((amountPaid - somaDatada).toFixed(2))
+          if (semRasto > 0.01) partialPayments.push({ amount: semRasto, date: null, method: null })
+        }
+
+        waterChargeRows.push({
+          id: wc.id,
+          lease_id: wc.lease_id,
+          reference_month: refDate,
+          amount: wc.amount,
+          remainingAmount: wc.paid ? 0 : remaining,
+          payment_date: wc.paid ? wc.payment_date : null,
+          payment_method: wc.paid ? wc.payment_method : null,
+          tipo: 'agua',
+          notes: wc.paid
+            ? 'Cobrança de água paga'
+            : isPartial
+              ? `Cobrança de água — pago parcialmente (${formatCurrency(amountPaid)} de ${formatCurrency(wc.amount)})`
+              : 'Cobrança de água por pagar',
+          lease,
+          isMissing: false,
+          isManualDebt: false,
+          isElecCharge: false,
+          isWaterCharge: true,
+          isPartialWater: isPartial,
+          partialPayments,
+        })
+      }
+    }
+
+    const allRows = [...enriched, ...missingRows, ...depositRows, ...manualDebtRows, ...elecChargeRows, ...waterChargeRows]
       .sort((a, b) => {
         // 1. Mês descendente
         const monthDiff = b.reference_month.localeCompare(a.reference_month)
@@ -634,6 +702,63 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
     await fetchPayments()
   }
 
+  // Espelha handleApplyAdvanceToElec — mesma mecânica, tabela water_charges.
+  async function handleApplyAdvanceToWater(row: PaymentRow) {
+    const leaseId = row.lease_id ?? row.lease?.id
+    if (!leaseId || !row.id) { alert('Esta cobrança não tem contrato associado.'); return }
+
+    const owed = row.remainingAmount ?? row.amount
+    const disponivel = availableAdvanceForLease(leaseId)
+    const aplicar = parseFloat(Math.min(disponivel, owed).toFixed(2))
+    if (aplicar <= 0) return
+
+    const sobra = parseFloat((owed - aplicar).toFixed(2))
+    const aviso = sobra > 0.01
+      ? `\n\nDepois disto continuam em falta ${formatCurrency(sobra)} nesta cobrança de água.`
+      : '\n\nEsta cobrança de água fica completa.'
+
+    if (!confirm(
+      `Usar ${formatCurrency(aplicar)} do adiantamento do inquilino para pagar a água?` +
+      `\n\nCrédito disponível: ${formatCurrency(disponivel)}` + aviso
+    )) return
+
+    setApplyingAdvanceKey(`${leaseId}__water-${row.id}`)
+    const { applied, error } = await consumeAdvances(supabase, {
+      leaseId,
+      amountNeeded: aplicar,
+      target: { type: 'agua', chargeId: row.id },
+    })
+    setApplyingAdvanceKey(null)
+
+    if (error) { alert(`Não foi possível aplicar o adiantamento: ${error}`); return }
+    if (applied <= 0) { alert('Não havia crédito disponível para aplicar.'); return }
+
+    const jaPago = parseFloat((row.amount - owed).toFixed(2))
+    const novoAmountPaid = parseFloat((jaPago + applied).toFixed(2))
+    const ficaCompleta = novoAmountPaid >= row.amount - 0.01
+
+    const { error: chargeError } = await supabase.from('water_charges').update({
+      amount_paid: novoAmountPaid,
+      paid: ficaCompleta,
+      ...(ficaCompleta ? { payment_date: new Date().toISOString().slice(0, 10) } : {}),
+      notes: ficaCompleta
+        ? 'Pago com adiantamento'
+        : `Pago parcialmente com adiantamento (${formatCurrency(novoAmountPaid)} de ${formatCurrency(row.amount)})`,
+    }).eq('id', row.id)
+
+    if (chargeError) {
+      alert(`O crédito foi aplicado, mas houve um erro ao atualizar a cobrança de água: ${chargeError.message}`)
+      return
+    }
+
+    await logAccess({
+      action: 'editar',
+      page: '/inquilinos',
+      details: `Aplicou adiantamento (${formatCurrency(applied)}) à água de "${tenant?.name}"`,
+    })
+    await fetchPayments()
+  }
+
   // Devolve um adiantamento já aplicado ao crédito disponível do inquilino.
   // O total em dívida não muda: o valor sai da renda e volta ao crédito.
   async function handleReleaseAdvance(p: PaymentRow) {
@@ -643,7 +768,9 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
       ? `à renda de ${String(p.applied_to_month).slice(0, 7)}`
       : p.applied_to_type === 'eletricidade'
         ? 'a uma fatura de eletricidade'
-        : 'ao que estava aplicado'
+        : p.applied_to_type === 'agua'
+          ? 'a uma fatura de água'
+          : 'ao que estava aplicado'
 
     if (!confirm(
       `Desfazer a aplicação de ${formatCurrency(p.amount)} ${destino}?` +
@@ -675,7 +802,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
     .filter(p => p.payment_date !== 'liquidada')
     .reduce((sum, p) => {
       if (p.isManualDebt) return sum + (p.remainingAmount ?? 0)
-      if (p.isElecCharge) return sum + (p.remainingAmount ?? p.amount ?? 0)
+      if (p.isElecCharge || p.isWaterCharge) return sum + (p.remainingAmount ?? p.amount ?? 0)
       return sum + (p.amount ?? 0)
     }, 0) - totalAdvance
 
@@ -783,7 +910,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
 
     const tipoLabel: Record<string, string> = {
       renda: 'Renda', caucao: 'Caução', extra: 'Extra', luz: 'Luz',
-      adiantamento: 'Adiantamento', divida: 'Dívida', eletricidade: 'Eletricidade',
+      adiantamento: 'Adiantamento', divida: 'Dívida', eletricidade: 'Eletricidade', agua: 'Água',
     }
 
     const rows = payments.map((p: PaymentRow) => {
@@ -811,7 +938,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
       // Histórico dos parciais — só para eletricidade e dívidas manuais, cujos
       // eventos individuais não têm outra linha própria neste relatório (ao
       // contrário da renda, em que cada rent_payments já aparece à parte).
-      const subLinhas = (p.isElecCharge || p.isManualDebt) && p.partialPayments?.length
+      const subLinhas = (p.isElecCharge || p.isWaterCharge || p.isManualDebt) && p.partialPayments?.length
         ? p.partialPayments.map(pp => `<tr>
             <td></td>
             <td style="color:#6b7280;font-size:9px;padding-left:14px">↳ pago ${formatCurrency(pp.amount)}${pp.method ? ` · ${pp.method}` : ''}</td>
@@ -925,7 +1052,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
 
     const tipoLabel: Record<string, string> = {
       renda: 'Renda', caucao: 'Caução', extra: 'Extra', luz: 'Luz',
-      adiantamento: 'Adiantamento', divida: 'Dívida', eletricidade: 'Eletricidade',
+      adiantamento: 'Adiantamento', divida: 'Dívida', eletricidade: 'Eletricidade', agua: 'Água',
     }
     const methodLabel: Record<string, string> = {
       dinheiro: 'Dinheiro', banco: 'Transferência Bancária',
@@ -1517,14 +1644,15 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                   {payments.filter(p => !p.absorbedIntoShortfall).map((p, i) => {
                     const isLiquidada = p.isManualDebt && p.payment_date === 'liquidada'
                     const isPago = !p.isManualDebt && ((!!p.payment_date && p.payment_date !== 'liquidada') || !!p.isAdvanceOnly)
-                    // Crédito disponível para cobrir esta renda, ou esta cobrança de eletricidade, em falta
+                    // Crédito disponível para cobrir esta renda, ou esta cobrança de eletricidade/água, em falta
                     const isUnpaidElec = p.isElecCharge && !p.payment_date
-                    const creditoDisponivel = (p.isMissing && !p.isManualDebt && !p.isElecCharge) || isUnpaidElec
+                    const isUnpaidWater = p.isWaterCharge && !p.payment_date
+                    const creditoDisponivel = (p.isMissing && !p.isManualDebt && !p.isElecCharge && !p.isWaterCharge) || isUnpaidElec || isUnpaidWater
                       ? availableAdvanceForLease(p.lease_id ?? p.lease?.id)
                       : 0
-                    const owedAmount = p.isElecCharge ? (p.remainingAmount ?? p.amount) : p.amount
+                    const owedAmount = (p.isElecCharge || p.isWaterCharge) ? (p.remainingAmount ?? p.amount) : p.amount
                     const creditoAplicavel = parseFloat(Math.min(creditoDisponivel, owedAmount).toFixed(2))
-                    const advanceKey = p.isElecCharge ? `elec-${p.id}` : p.reference_month.slice(0, 7)
+                    const advanceKey = p.isElecCharge ? `elec-${p.id}` : p.isWaterCharge ? `water-${p.id}` : p.reference_month.slice(0, 7)
                     const aAplicar = applyingAdvanceKey === `${p.lease_id ?? p.lease?.id}__${advanceKey}`
                     return (
                       <div key={p.id ?? `row-${i}`}
@@ -1534,6 +1662,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                           : p.isMissing ? 'border-orange-200 bg-orange-50'
                           : p.isDeposit ? 'border-blue-200 bg-blue-50'
                           : p.isElecCharge ? 'border-red-200 bg-red-50'
+                          : p.isWaterCharge ? 'border-blue-200 bg-blue-50'
                           : p.isManualDebt ? 'border-red-200 bg-red-50'
                           : 'border-red-100 bg-red-50'
                         }`}>
@@ -1545,6 +1674,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                               : p.tipo === 'extra' ? 'bg-orange-100 text-orange-700'
                               : p.tipo === 'luz' ? 'bg-yellow-100 text-yellow-700'
                               : p.tipo === 'eletricidade' ? 'bg-red-100 text-red-700'
+                              : p.tipo === 'agua' ? 'bg-blue-100 text-blue-700'
                               : p.tipo === 'divida' ? 'bg-red-100 text-red-700'
                               : p.tipo === 'adiantamento' ? 'bg-purple-100 text-purple-700'
                               : 'bg-gray-100 text-gray-600'
@@ -1580,6 +1710,14 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                             ) : (
                               <p className="text-xs text-red-600 font-medium">⚡ Eletricidade por pagar</p>
                             )
+                          ) : p.isWaterCharge ? (
+                            p.payment_date ? (
+                              <p className="text-xs text-gray-500">💧 Pago em {formatDate(p.payment_date)} · {p.payment_method}</p>
+                            ) : (p as any).isPartialWater ? (
+                              <p className="text-xs text-orange-600 font-medium">💧 Pagamento parcial — falta {formatCurrency((p as any).remainingAmount ?? 0)}</p>
+                            ) : (
+                              <p className="text-xs text-blue-600 font-medium">💧 Água por pagar</p>
+                            )
                           ) : p.payment_date ? (
                             <p className="text-xs text-gray-500">
                               Pago em {formatDate(p.payment_date)} · {p.advanceApplied
@@ -1609,7 +1747,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                             </div>
                           )}
                           {creditoAplicavel > 0 && (
-                            <button onClick={() => p.isElecCharge ? handleApplyAdvanceToElec(p) : handleApplyAdvanceToRent(p)} disabled={aAplicar}
+                            <button onClick={() => p.isElecCharge ? handleApplyAdvanceToElec(p) : p.isWaterCharge ? handleApplyAdvanceToWater(p) : handleApplyAdvanceToRent(p)} disabled={aAplicar}
                               className="mt-1.5 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-purple-300 bg-purple-50 text-purple-700 text-xs font-medium hover:bg-purple-100 disabled:opacity-50 transition-colors">
                               {aAplicar ? <Loader2 className="w-3 h-3 animate-spin" /> : <Banknote className="w-3 h-3" />}
                               {aAplicar ? 'A aplicar...' : `Usar adiantamento (${formatCurrency(creditoAplicavel)})`}
@@ -1625,7 +1763,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                           }`}>
                             {p.tipo === 'adiantamento' && !p.used ? '+' : ''}{formatCurrency(p.displayAmount ?? p.amount)}
                           </span>
-                          {!p.isMissing && !p.isManualDebt && !p.isElecCharge && p.id && (
+                          {!p.isMissing && !p.isManualDebt && !p.isElecCharge && !p.isWaterCharge && p.id && (
                             <>
                               <button onClick={() => handleEditPayment(p)} className="text-gray-300 hover:text-blue-500 transition-colors" title="Editar"><Pencil className="w-4 h-4" /></button>
                               <button onClick={() => handleDeletePayment(p.id!)} className="text-gray-300 hover:text-red-500 transition-colors" title="Apagar"><Trash2 className="w-4 h-4" /></button>
@@ -1701,17 +1839,19 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
         // rubrica a rubrica em vez de apresentar só o total.
         items={totalDebt > 0
           ? payments
-              .filter(p => !p.payment_date || (p as any).isPartialElec)
+              .filter(p => !p.payment_date || (p as any).isPartialElec || (p as any).isPartialWater)
               .map(p => ({
-                grupo: p.isElecCharge ? 'Eletricidade' : p.isManualDebt ? 'Dívida' : p.isDeposit ? 'Caução' : 'Renda',
+                grupo: p.isElecCharge ? 'Eletricidade' : p.isWaterCharge ? 'Água' : p.isManualDebt ? 'Dívida' : p.isDeposit ? 'Caução' : 'Renda',
                 descricao: p.isElecCharge
                   ? `Eletricidade de ${formatDate(p.reference_month)}`
-                  : p.isManualDebt
-                    ? (p.notes ?? 'Dívida')
-                    : p.isDeposit
-                      ? 'Caução em falta'
-                      : `Renda de ${formatDate(p.reference_month)}`,
-                valor: (p as any).isPartialElec ? ((p as any).remainingAmount ?? 0) : (p.amount ?? 0),
+                  : p.isWaterCharge
+                    ? `Água de ${formatDate(p.reference_month)}`
+                    : p.isManualDebt
+                      ? (p.notes ?? 'Dívida')
+                      : p.isDeposit
+                        ? 'Caução em falta'
+                        : `Renda de ${formatDate(p.reference_month)}`,
+                valor: ((p as any).isPartialElec || (p as any).isPartialWater) ? ((p as any).remainingAmount ?? 0) : (p.amount ?? 0),
               }))
               .filter(i => i.valor > 0)
           : undefined}
