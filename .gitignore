@@ -6,3 +6,6 @@ node_modules/
 
 # Saída de scripts/generate-context-pdf.mjs — gerada localmente, não é código-fonte.
 *.pdf
+
+# Fatura real usada só para testar a extração de IA da água — nunca commitar.
+tmp-fatura-agua*.pdf

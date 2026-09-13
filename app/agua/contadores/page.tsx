@@ -5,8 +5,9 @@ import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, formatDate, formatMonthShort, openStorageDocument, normalizeText } from '@/lib/utils'
 import { waterMeterReadingExists } from '@/lib/waterMeterReadings'
-import { Plus, Droplet, Trash2, X, ChevronDown, ChevronRight, BarChart2, Eye, Search } from 'lucide-react'
+import { Plus, Droplet, Trash2, X, ChevronDown, ChevronRight, BarChart2, Eye, Search, Upload, Loader2, CheckCircle } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
+import { useFileDrop } from '@/lib/useFileDrop'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 
 const supabase = createClient()
@@ -46,11 +47,13 @@ const METER_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6']
 /**
  * Contadores Gerais de água — espelha /eletricidade/quadros.
  *
- * Deliberadamente sem a extração automática por IA de faturas (o
- * equivalente elétrico usa um endpoint de OCR treinado no formato das
- * faturas EDP, que não existe para a água) — registo é manual e a
- * associação ao documento já carregado em Documentos (tipo 'fatura_agua')
- * é feita à mão, tal como em /eletricidade/quadros.
+ * Extração por IA (upload de fatura) em "Novo Contador" e "+ Leitura",
+ * via /api/extract-water-meter — espelha o padrão de /api/extract-edp-meter
+ * da luz, mas devolve os dois grupos de campos (identificação do contador
+ * + leitura/valor desta fatura) numa só chamada, já que uma fatura de água
+ * traz tudo isto junto. A associação ao documento já carregado em
+ * Documentos (tipo 'fatura_agua') continua a ser manual, tal como em
+ * /eletricidade/quadros.
  */
 export default function ContadoresAguaPage() {
   const { isAdmin, isCoAdmin, profile } = useAuth()
@@ -71,6 +74,117 @@ export default function ContadoresAguaPage() {
     invoice_amount: '',
     invoice_number: '',
     notes: ''
+  })
+
+  // ── Extração por IA a partir de uma fatura de água ──
+  const [extractingMeter, setExtractingMeter] = useState(false)
+  const [meterExtractDone, setMeterExtractDone] = useState(false)
+  const [meterExtractError, setMeterExtractError] = useState('')
+  const [meterExtractInfo, setMeterExtractInfo] = useState('')
+
+  function resetMeterExtraction() {
+    setExtractingMeter(false)
+    setMeterExtractDone(false)
+    setMeterExtractError('')
+    setMeterExtractInfo('')
+  }
+
+  async function extractMeterFromPdf(file: File) {
+    setExtractingMeter(true)
+    setMeterExtractError('')
+    setMeterExtractDone(false)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = await fetch('/api/extract-water-meter', { method: 'POST', body: fd })
+      const json = await res.json()
+
+      if (!res.ok || json.error) {
+        setMeterExtractError(json.error ?? 'Não foi possível ler a fatura')
+        return
+      }
+
+      // Já existe um contador com este contrato/nº — avisa em vez de criar um duplicado
+      if (json.existingMeter) {
+        setMeterExtractError(`Esta fatura pertence ao contador "${json.existingMeter.name}", que já está registado. Não é preciso criar outro.`)
+        return
+      }
+
+      const d = json.data
+      setMeterForm(f => ({
+        name: d.suggested_name || f.name,
+        contract_number: d.contract_number || f.contract_number,
+        meter_number: d.meter_number || f.meter_number,
+        location: d.location || f.location,
+      }))
+      setMeterExtractInfo(d.holder_name ?? '')
+      setMeterExtractDone(true)
+    } catch {
+      setMeterExtractError('Erro ao processar a fatura. Tenta novamente.')
+    } finally {
+      setExtractingMeter(false)
+    }
+  }
+
+  const meterPdfDrop = useFileDrop({
+    accept: ['.pdf'],
+    onFiles: dropped => { if (dropped[0]) extractMeterFromPdf(dropped[0]) },
+    disabled: extractingMeter,
+  })
+
+  // ── O mesmo endpoint, mas para preencher "+ Leitura" (data, leitura,
+  // valor e nº da fatura) em vez dos campos de identificação do contador. ──
+  const [extractingReading, setExtractingReading] = useState(false)
+  const [readingExtractDone, setReadingExtractDone] = useState(false)
+  const [readingExtractError, setReadingExtractError] = useState('')
+  const [readingExtractInfo, setReadingExtractInfo] = useState('')
+
+  function resetReadingExtraction() {
+    setExtractingReading(false)
+    setReadingExtractDone(false)
+    setReadingExtractError('')
+    setReadingExtractInfo('')
+  }
+
+  async function extractReadingFromPdf(file: File) {
+    setExtractingReading(true)
+    setReadingExtractError('')
+    setReadingExtractDone(false)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = await fetch('/api/extract-water-meter', { method: 'POST', body: fd })
+      const json = await res.json()
+
+      if (!res.ok || json.error) {
+        setReadingExtractError(json.error ?? 'Não foi possível ler a fatura')
+        return
+      }
+
+      const d = json.data
+      setReadingForm(f => ({
+        reading_date: d.period_end || f.reading_date,
+        reading_value: d.reading_value != null ? String(d.reading_value) : f.reading_value,
+        invoice_amount: d.total_amount != null ? String(d.total_amount) : f.invoice_amount,
+        invoice_number: d.invoice_number || f.invoice_number,
+        notes: f.notes,
+      }))
+      setReadingExtractInfo([
+        d.period_start && d.period_end ? `Período ${formatDate(d.period_start)} a ${formatDate(d.period_end)}` : null,
+        d.reading_estimated === true ? 'leitura estimada' : d.reading_estimated === false ? 'leitura real' : null,
+      ].filter(Boolean).join(' · '))
+      setReadingExtractDone(true)
+    } catch {
+      setReadingExtractError('Erro ao processar a fatura. Tenta novamente.')
+    } finally {
+      setExtractingReading(false)
+    }
+  }
+
+  const readingPdfDrop = useFileDrop({
+    accept: ['.pdf'],
+    onFiles: dropped => { if (dropped[0]) extractReadingFromPdf(dropped[0]) },
+    disabled: extractingReading,
   })
 
   const [filterType, setFilterType] = useState<FilterType>('all')
@@ -228,6 +342,7 @@ export default function ContadoresAguaPage() {
   function openEdit(meter: WaterMeter) {
     setEditMeter(meter)
     setMeterForm({ name: meter.name, contract_number: meter.contract_number, meter_number: meter.meter_number ?? '', location: meter.location ?? '' })
+    resetMeterExtraction()
     setShowModal(true)
   }
 
@@ -252,7 +367,7 @@ export default function ContadoresAguaPage() {
               <BarChart2 className="w-4 h-4" /> Gráfico
             </button>
             {canEdit && (
-              <button className="btn-primary" onClick={() => { setEditMeter(null); setMeterForm({ name: '', contract_number: '', meter_number: '', location: '' }); setShowModal(true) }}>
+              <button className="btn-primary" onClick={() => { setEditMeter(null); setMeterForm({ name: '', contract_number: '', meter_number: '', location: '' }); resetMeterExtraction(); setShowModal(true) }}>
                 <Plus className="w-4 h-4" /> Novo Contador
               </button>
             )}
@@ -379,7 +494,7 @@ export default function ContadoresAguaPage() {
                       {canEdit && (
                         <div className="flex gap-2" onClick={e => e.stopPropagation()}>
                           <button onClick={() => openEdit(meter)} className="text-xs text-blue-600 hover:underline font-medium">Editar</button>
-                          <button onClick={() => { setShowReadingModal(meter.id); setReadingForm({ reading_date: new Date().toISOString().slice(0, 10), reading_value: '', invoice_amount: '', invoice_number: '', notes: '' }) }}
+                          <button onClick={() => { setShowReadingModal(meter.id); setReadingForm({ reading_date: new Date().toISOString().slice(0, 10), reading_value: '', invoice_amount: '', invoice_number: '', notes: '' }); resetReadingExtraction() }}
                             className="text-xs text-emerald-600 hover:underline font-medium">+ Leitura</button>
                         </div>
                       )}
@@ -505,6 +620,42 @@ export default function ContadoresAguaPage() {
               <h2 className="font-semibold text-lg text-gray-900">{editMeter ? 'Editar Contador' : 'Novo Contador'}</h2>
               <button onClick={() => setShowModal(false)}><X className="w-5 h-5 text-gray-400" /></button>
             </div>
+            {!editMeter && (
+              <div className="mb-5">
+                <label
+                  {...meterPdfDrop.dropProps}
+                  className={`flex items-center gap-3 border-2 border-dashed rounded-lg p-4 cursor-pointer transition-colors ${
+                    meterPdfDrop.isDragging ? 'border-blue-500 bg-blue-100' :
+                    extractingMeter ? 'border-blue-300 bg-blue-50' :
+                    meterExtractDone ? 'border-blue-400 bg-blue-50' :
+                    'border-blue-300 bg-blue-50 hover:bg-blue-100'
+                  }`}>
+                  {extractingMeter ? <Loader2 className="w-5 h-5 text-blue-500 animate-spin flex-shrink-0" />
+                    : meterExtractDone ? <CheckCircle className="w-5 h-5 text-blue-600 flex-shrink-0" />
+                    : <Upload className="w-5 h-5 text-blue-600 flex-shrink-0" />}
+                  <div className="min-w-0">
+                    {extractingMeter ? (
+                      <p className="text-sm font-medium text-blue-600">A ler fatura com IA...</p>
+                    ) : meterPdfDrop.isDragging ? (
+                      <p className="text-sm font-medium text-blue-700">Larga aqui a fatura</p>
+                    ) : meterExtractDone ? (
+                      <>
+                        <p className="text-sm font-medium text-blue-700">✓ Campos preenchidos — confirma antes de guardar</p>
+                        {meterExtractInfo && <p className="text-xs text-blue-600 truncate">{meterExtractInfo}</p>}
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-sm font-medium text-blue-700">Criar a partir de uma fatura de água</p>
+                        <p className="text-xs text-blue-600">Arrasta para aqui ou clica — a IA preenche os campos abaixo</p>
+                      </>
+                    )}
+                  </div>
+                  <input type="file" accept=".pdf" className="hidden"
+                    onChange={e => { const f = e.target.files?.[0]; if (f) extractMeterFromPdf(f); e.target.value = '' }} />
+                </label>
+                {meterExtractError && <p className="text-xs text-red-600 mt-1">{meterExtractError}</p>}
+              </div>
+            )}
             <div className="space-y-4">
               <div>
                 <label className="label">Nome *</label>
@@ -544,6 +695,40 @@ export default function ContadoresAguaPage() {
             <div className="flex items-center justify-between mb-5">
               <h2 className="font-semibold text-lg text-gray-900">Nova Leitura</h2>
               <button onClick={() => setShowReadingModal(null)}><X className="w-5 h-5 text-gray-400" /></button>
+            </div>
+            <div className="mb-5">
+              <label
+                {...readingPdfDrop.dropProps}
+                className={`flex items-center gap-3 border-2 border-dashed rounded-lg p-4 cursor-pointer transition-colors ${
+                  readingPdfDrop.isDragging ? 'border-blue-500 bg-blue-100' :
+                  extractingReading ? 'border-blue-300 bg-blue-50' :
+                  readingExtractDone ? 'border-blue-400 bg-blue-50' :
+                  'border-blue-300 bg-blue-50 hover:bg-blue-100'
+                }`}>
+                {extractingReading ? <Loader2 className="w-5 h-5 text-blue-500 animate-spin flex-shrink-0" />
+                  : readingExtractDone ? <CheckCircle className="w-5 h-5 text-blue-600 flex-shrink-0" />
+                  : <Upload className="w-5 h-5 text-blue-600 flex-shrink-0" />}
+                <div className="min-w-0">
+                  {extractingReading ? (
+                    <p className="text-sm font-medium text-blue-600">A ler fatura com IA...</p>
+                  ) : readingPdfDrop.isDragging ? (
+                    <p className="text-sm font-medium text-blue-700">Larga aqui a fatura</p>
+                  ) : readingExtractDone ? (
+                    <>
+                      <p className="text-sm font-medium text-blue-700">✓ Campos preenchidos — confirma antes de guardar</p>
+                      {readingExtractInfo && <p className="text-xs text-blue-600 truncate">{readingExtractInfo}</p>}
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-sm font-medium text-blue-700">Preencher a partir de uma fatura de água</p>
+                      <p className="text-xs text-blue-600">Arrasta para aqui ou clica — a IA preenche os campos abaixo</p>
+                    </>
+                  )}
+                </div>
+                <input type="file" accept=".pdf" className="hidden"
+                  onChange={e => { const f = e.target.files?.[0]; if (f) extractReadingFromPdf(f); e.target.value = '' }} />
+              </label>
+              {readingExtractError && <p className="text-xs text-red-600 mt-1">{readingExtractError}</p>}
             </div>
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
