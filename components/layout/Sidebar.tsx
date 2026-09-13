@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, Building2, Users, CreditCard,
-  Receipt, Wallet, Bell, Zap, LogOut, ShieldCheck,
+  Receipt, Wallet, Bell, Zap, Droplet, LogOut, ShieldCheck,
   TrendingUp, Landmark, ChevronDown, ChevronRight, FolderOpen, HardHat, NotebookPen, BarChart3, UserCircle, DoorOpen, ScrollText, Mail, Boxes, Clock,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -35,6 +35,11 @@ const eletricidadeItems = [
   { href: '/eletricidade/espacos', label: 'Quadros dos Espaços', icon: Building2 },
 ]
 
+const aguaItems = [
+  { href: '/agua/contadores', label: 'Contadores Gerais', icon: Droplet },
+  { href: '/agua/espacos', label: 'Contadores dos Espaços', icon: Building2 },
+]
+
 const financeItems = [
   { href: '/pagamentos', label: 'Rendas & Pagamentos', icon: CreditCard },
   { href: '/despesas', label: 'Despesas', icon: Receipt },
@@ -54,6 +59,9 @@ export default function Sidebar({ onClose }: { onClose?: () => void }) {
   )
   const [eletricidadeOpen, setEletricidadeOpen] = useState(
     pathname.startsWith('/eletricidade')
+  )
+  const [aguaOpen, setAguaOpen] = useState(
+    pathname.startsWith('/agua')
   )
 
   const canSeeUtilizadores = isAdmin
@@ -106,6 +114,33 @@ export default function Sidebar({ onClose }: { onClose?: () => void }) {
           {eletricidadeOpen && (
             <div className="ml-4 mt-1 space-y-1 border-l-2 border-gray-100 pl-3">
               {eletricidadeItems.map((item) => {
+                const Icon = item.icon
+                const isActive = pathname === item.href || pathname.startsWith(item.href + '/')
+                return (
+                  <Link key={item.href} href={item.href} prefetch={false} onClick={onClose}
+                    className={cn('sidebar-link text-xs py-2', isActive ? 'active' : '')}>
+                    <Icon className="w-3.5 h-3.5 flex-shrink-0" />
+                    {item.label}
+                  </Link>
+                )
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Água — visível a todos, escrita restrita via RLS */}
+        <div className="pt-1">
+          <button onClick={() => setAguaOpen(v => !v)}
+            className="w-full flex items-center justify-between px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-blue-50 hover:text-blue-700 transition-colors">
+            <div className="flex items-center gap-3">
+              <Droplet className="w-4 h-4 flex-shrink-0" />
+              <span>Água</span>
+            </div>
+            {aguaOpen ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+          </button>
+          {aguaOpen && (
+            <div className="ml-4 mt-1 space-y-1 border-l-2 border-gray-100 pl-3">
+              {aguaItems.map((item) => {
                 const Icon = item.icon
                 const isActive = pathname === item.href || pathname.startsWith(item.href + '/')
                 return (

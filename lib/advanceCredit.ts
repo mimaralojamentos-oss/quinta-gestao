@@ -17,11 +17,11 @@
  * é criada uma linha nova com o restante, disponível para uso futuro.
  */
 
-export type AdvanceTargetType = 'renda' | 'eletricidade'
+export type AdvanceTargetType = 'renda' | 'eletricidade' | 'agua'
 
 export interface AdvanceTarget {
   type: AdvanceTargetType
-  /** Id da cobrança de eletricidade. Pode ficar a null e ser preenchido depois. */
+  /** Id da cobrança de eletricidade/água. Pode ficar a null e ser preenchido depois. */
   chargeId?: string | null
   /** Contrato da renda paga (obrigatório quando type === 'renda'). */
   leaseId?: string | null
@@ -69,7 +69,7 @@ export async function consumeAdvances(
   const stamp = {
     used: true,
     applied_to_type: target.type,
-    applied_to_id: target.type === 'eletricidade' ? (target.chargeId ?? null) : null,
+    applied_to_id: (target.type === 'eletricidade' || target.type === 'agua') ? (target.chargeId ?? null) : null,
     applied_to_lease_id: target.type === 'renda' ? (target.leaseId ?? leaseId) : null,
     applied_to_month: target.type === 'renda' ? toMonthStart(target.month) : null,
     applied_at: new Date().toISOString(),
@@ -202,5 +202,6 @@ export function describeAdvanceTarget(row: {
   }
   if (row.applied_to_type === 'renda') return '✓ Aplicado a uma renda'
   if (row.applied_to_type === 'eletricidade') return '✓ Aplicado a uma fatura de eletricidade'
+  if (row.applied_to_type === 'agua') return '✓ Aplicado a uma fatura de água'
   return '✓ Aplicado'
 }
