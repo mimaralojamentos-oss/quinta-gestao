@@ -3,9 +3,9 @@
 import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
-import { formatCurrency, formatDate, formatMonthShort } from '@/lib/utils'
+import { formatCurrency, formatDate, formatMonthShort, openStorageDocument, normalizeText } from '@/lib/utils'
 import { waterMeterReadingExists } from '@/lib/waterMeterReadings'
-import { Plus, Droplet, Trash2, X, ChevronDown, ChevronRight, BarChart2 } from 'lucide-react'
+import { Plus, Droplet, Trash2, X, ChevronDown, ChevronRight, BarChart2, Eye, Search } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 
@@ -30,6 +30,15 @@ interface WaterMeterReading {
   notes: string | null
 }
 
+interface Document {
+  id: string
+  file_path: string
+  original_name: string | null
+  doc_number: string | null
+  doc_date: string | null
+  amount: number | null
+}
+
 type FilterType = 'all' | 'year' | 'semester' | 'trimester' | 'custom'
 
 const METER_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6']
@@ -39,8 +48,9 @@ const METER_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6']
  *
  * Deliberadamente sem a extração automática por IA de faturas (o
  * equivalente elétrico usa um endpoint de OCR treinado no formato das
- * faturas EDP, que não existe para a água) — registo e associação de
- * fatura são manuais aqui. Decisão aprovada, ver relatório final.
+ * faturas EDP, que não existe para a água) — registo é manual e a
+ * associação ao documento já carregado em Documentos (tipo 'fatura_agua')
+ * é feita à mão, tal como em /eletricidade/quadros.
  */
 export default function ContadoresAguaPage() {
   const { isAdmin, isCoAdmin, profile } = useAuth()
@@ -71,6 +81,10 @@ export default function ContadoresAguaPage() {
   const [filterEnd, setFilterEnd] = useState(new Date().toISOString().slice(0, 10))
   const [chartData, setChartData] = useState<Record<string, any>[]>([])
 
+  const [documents, setDocuments] = useState<Document[]>([])
+  const [associateReading, setAssociateReading] = useState<WaterMeterReading | null>(null)
+  const [associateSearch, setAssociateSearch] = useState('')
+
   useEffect(() => { fetchAll() }, [])
 
   async function fetchAll() {
@@ -85,8 +99,37 @@ export default function ContadoresAguaPage() {
       allReadings[m.id] = data ?? []
     }
     setReadings(allReadings)
+
+    const { data: docs } = await supabase
+      .from('documents')
+      .select('id, file_path, original_name, doc_number, doc_date, amount')
+      .eq('tipo', 'fatura_agua')
+      .eq('status', 'ativo')
+      .order('doc_date', { ascending: false })
+    setDocuments(docs ?? [])
+
     setLoading(false)
   }
+
+  function findDocument(reading: WaterMeterReading): Document | null {
+    if (!reading.invoice_number) return null
+    return documents.find(d =>
+      d.doc_number && d.doc_number.trim() === reading.invoice_number!.trim()
+    ) ?? null
+  }
+
+  async function openDocument(doc: Document) {
+    await openStorageDocument(supabase, doc.file_path)
+  }
+
+  const filteredDocs = documents.filter(d => {
+    if (!associateSearch) return true
+    const s = normalizeText(associateSearch)
+    return (
+      normalizeText(d.original_name).includes(s) ||
+      normalizeText(d.doc_number).includes(s)
+    )
+  })
 
   // Recarrega os dados do gráfico sempre que as leituras, contadores ou filtros mudam.
   useEffect(() => {
@@ -355,17 +398,33 @@ export default function ContadoresAguaPage() {
                               <th className="text-left py-2">Leitura (m³)</th>
                               <th className="text-left py-2">Nº Fatura</th>
                               <th className="text-left py-2">Valor Fatura</th>
+                              <th className="text-left py-2">Documento</th>
                               <th className="text-left py-2">Notas</th>
                               {canEdit && <th className="py-2"></th>}
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-50">
-                            {meterReadings.map(r => (
+                            {meterReadings.map(r => {
+                              const doc = findDocument(r)
+                              return (
                               <tr key={r.id} className="hover:bg-gray-50">
                                 <td className="py-2 text-sm">{formatDate(r.reading_date)}</td>
                                 <td className="py-2 text-sm font-mono">{r.reading_value || '—'}</td>
                                 <td className="py-2 text-sm text-gray-500">{r.invoice_number ?? '—'}</td>
                                 <td className="py-2 text-sm font-semibold text-blue-600">{r.invoice_amount ? formatCurrency(r.invoice_amount) : '—'}</td>
+                                <td className="py-2">
+                                  {doc ? (
+                                    <button onClick={() => openDocument(doc)}
+                                      className="flex items-center gap-1 text-xs text-emerald-600 hover:underline font-medium">
+                                      <Eye className="w-3.5 h-3.5" /> Ver fatura
+                                    </button>
+                                  ) : (
+                                    <button onClick={() => { setAssociateReading(r); setAssociateSearch('') }}
+                                      className="flex items-center gap-1 text-xs text-blue-500 hover:underline font-medium">
+                                      <Search className="w-3.5 h-3.5" /> Associar
+                                    </button>
+                                  )}
+                                </td>
                                 <td className="py-2 text-sm text-gray-400 max-w-xs truncate">{r.notes ?? '—'}</td>
                                 {canEdit && (
                                   <td className="py-2">
@@ -375,7 +434,8 @@ export default function ContadoresAguaPage() {
                                   </td>
                                 )}
                               </tr>
-                            ))}
+                              )
+                            })}
                           </tbody>
                         </table>
                       )}
@@ -387,6 +447,55 @@ export default function ContadoresAguaPage() {
           </div>
         )}
       </div>
+
+      {/* Modal Associar Documento */}
+      {associateReading && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="font-semibold text-lg text-gray-900">Associar Documento</h2>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Leitura de {formatDate(associateReading.reading_date)}
+                  {associateReading.invoice_number && ` — Nº ${associateReading.invoice_number}`}
+                </p>
+              </div>
+              <button onClick={() => setAssociateReading(null)}><X className="w-5 h-5 text-gray-400" /></button>
+            </div>
+            <div className="relative mb-4">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input className="input pl-9 w-full" placeholder="Pesquisar por nome ou nº fatura..."
+                value={associateSearch} onChange={e => setAssociateSearch(e.target.value)} autoFocus />
+            </div>
+            <div className="flex-1 overflow-y-auto space-y-2 min-h-0">
+              {filteredDocs.length === 0 ? (
+                <p className="text-sm text-gray-400 text-center py-8">Nenhum documento encontrado</p>
+              ) : (
+                filteredDocs.map(doc => (
+                  <div key={doc.id}
+                    className="flex items-center justify-between p-3 rounded-lg border border-gray-100 hover:border-blue-300 hover:bg-blue-50 transition-colors cursor-pointer"
+                    onClick={() => openDocument(doc)}>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-gray-800 truncate">{doc.original_name ?? doc.file_path}</p>
+                      <div className="flex items-center gap-3 mt-0.5">
+                        {doc.doc_number && <span className="text-xs text-gray-500 font-mono">{doc.doc_number}</span>}
+                        {doc.doc_date && <span className="text-xs text-gray-400">{formatDate(doc.doc_date)}</span>}
+                        {doc.amount && <span className="text-xs font-medium text-blue-600">{formatCurrency(doc.amount)}</span>}
+                      </div>
+                    </div>
+                    <button className="flex items-center gap-1 text-xs text-blue-600 font-medium ml-3 flex-shrink-0">
+                      <Eye className="w-3.5 h-3.5" /> Abrir
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="flex justify-end mt-4 pt-4 border-t border-gray-100">
+              <button className="btn-secondary" onClick={() => setAssociateReading(null)}>Fechar</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal Contador */}
       {showModal && (
