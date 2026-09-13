@@ -4,7 +4,7 @@ import { formatCurrency } from '@/lib/utils'
 import type { ManualPlanItem } from '@/lib/rentPaymentPlan'
 
 const ICONS: Record<ManualPlanItem['type'], string> = {
-  renda: '🏠', caucao: '🔒', eletricidade: '⚡', divida: '📋',
+  renda: '🏠', caucao: '🔒', eletricidade: '⚡', agua: '💧', divida: '📋',
 }
 
 /**

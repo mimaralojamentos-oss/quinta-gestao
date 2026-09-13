@@ -1472,7 +1472,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                       <div className="bg-blue-100 px-3 py-2 text-xs font-semibold text-blue-800">
                         Distribuição{recebimentoForm.destino !== 'auto' ? '' : ' automática'}
                       </div>
-                      {recebimentoPlan.rendaPayments.length === 0 && !recebimentoPlan.caucao && recebimentoPlan.electricityCharges.length === 0 && recebimentoPlan.debtPayments.length === 0 ? (
+                      {recebimentoPlan.rendaPayments.length === 0 && !recebimentoPlan.caucao && recebimentoPlan.electricityCharges.length === 0 && recebimentoPlan.waterCharges.length === 0 && recebimentoPlan.debtPayments.length === 0 ? (
                         <p className="text-xs text-gray-400 p-3 text-center">Não há valores em dívida para cobrir.</p>
                       ) : (
                         <div className="divide-y divide-blue-50">
@@ -1513,6 +1513,21 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                             <div key={c.id} className="flex justify-between items-start px-3 py-2">
                               <span className="text-xs text-gray-700">
                                 ⚡ Eletricidade {c.chargeDate?.slice(0, 7) ?? ''}
+                                {c.isPartial && <span className="text-orange-500 ml-1">(parcial)</span>}
+                                <span className="block text-[11px] text-gray-500 mt-0.5">
+                                  Em dívida {formatCurrency(parseFloat((c.totalAmount - c.alreadyPaid).toFixed(2)))}
+                                  {c.remainingAfter > 0.01
+                                    ? <span className="text-orange-600 font-medium"> · ficam {formatCurrency(c.remainingAfter)}</span>
+                                    : <span className="text-emerald-600 font-medium"> · fica liquidada</span>}
+                                </span>
+                              </span>
+                              <span className="text-xs font-semibold">{formatCurrency(c.amount)}</span>
+                            </div>
+                          ))}
+                          {recebimentoPlan.waterCharges.map(c => (
+                            <div key={c.id} className="flex justify-between items-start px-3 py-2">
+                              <span className="text-xs text-gray-700">
+                                💧 Água {c.chargeDate?.slice(0, 7) ?? ''}
                                 {c.isPartial && <span className="text-orange-500 ml-1">(parcial)</span>}
                                 <span className="block text-[11px] text-gray-500 mt-0.5">
                                   Em dívida {formatCurrency(parseFloat((c.totalAmount - c.alreadyPaid).toFixed(2)))}

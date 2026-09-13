@@ -524,6 +524,15 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
                             <span className="text-xs font-semibold">{formatCurrency(c.amount)}</span>
                           </div>
                         ))}
+                        {plan.waterCharges.map(c => (
+                          <div key={c.id} className="flex justify-between items-center px-3 py-2">
+                            <span className="text-xs text-gray-700">
+                              💧 Água {c.chargeDate?.slice(0, 7) ?? ''}
+                              {c.isPartial && <span className="text-orange-500 ml-1">(parcial)</span>}
+                            </span>
+                            <span className="text-xs font-semibold">{formatCurrency(c.amount)}</span>
+                          </div>
+                        ))}
                         {plan.debtPayments.map(d => (
                           <div key={d.debtId} className="flex justify-between items-center px-3 py-2">
                             <span className="text-xs text-gray-700">

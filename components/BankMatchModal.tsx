@@ -622,6 +622,23 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
                       </div>
                     ))}
 
+                    {plan.waterCharges.map(c => (
+                      <div key={c.id} className="flex justify-between items-start gap-2">
+                        <span className="text-gray-700">
+                          💧 Água
+                          {c.chargeDate && <span className="text-xs text-gray-400 ml-1">{formatDate(c.chargeDate)}</span>}
+                          {c.isPartial && <span className="text-xs text-amber-600 ml-1">parcial</span>}
+                          <SaldoLinha
+                            emDivida={parseFloat((c.totalAmount - c.alreadyPaid).toFixed(2))}
+                            fica={c.remainingAfter}
+                          />
+                        </span>
+                        <span className={`font-medium ${c.isPartial ? 'text-amber-700' : 'text-gray-900'}`}>
+                          {formatCurrency(c.amount)}
+                        </span>
+                      </div>
+                    ))}
+
                     {plan.debtPayments.map(d => (
                       <div key={d.debtId} className="flex justify-between items-start gap-2">
                         <span className="text-gray-700">

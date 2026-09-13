@@ -20,6 +20,17 @@ export interface ElectricityChargePlan {
   isPartial: boolean
 }
 
+/** Espelha ElectricityChargePlan — mesmo papel, cobrança de água. */
+export interface WaterChargePlan {
+  id: string
+  amount: number
+  chargeDate: string | null
+  totalAmount: number
+  alreadyPaid: number
+  remainingAfter: number
+  isPartial: boolean
+}
+
 export interface DebtPaymentPlan {
   debtId: string
   description: string
@@ -63,6 +74,8 @@ export interface RentPaymentPlan {
   caucao: CaucaoPlan | null
   electricityCharges: ElectricityChargePlan[]
   electricityTotal: number
+  waterCharges: WaterChargePlan[]
+  waterTotal: number
   debtPayments: DebtPaymentPlan[]
   debtTotal: number
   adiantamento: number
@@ -74,8 +87,8 @@ export interface RentPaymentPlan {
  *
  * 'auto' é a ordem habitual: primeiro a renda (todos os meses em falta, do
  * mais antigo ao mais recente), depois a caução em falta, depois a
- * eletricidade em atraso, depois as dívidas, e o que sobrar fica como
- * adiantamento.
+ * eletricidade em atraso, depois a água em atraso, depois as dívidas, e o
+ * que sobrar fica como adiantamento.
  *
  * As outras servem para quando o inquilino diz expressamente ao que vem —
  * "isto é para a luz" — e não se quer que o valor seja absorvido pela renda.
@@ -83,13 +96,18 @@ export interface RentPaymentPlan {
  * por quem regista o pagamento (soRendaMonth) — mas a caução em falta, se
  * houver, continua a ser considerada, pela mesma razão de sempre andarem
  * juntas (ambas dependem só do contrato, não de um mês específico).
+ *
+ * "Só eletricidade" não inclui água deliberadamente — são consumos
+ * separados e o inquilino pode estar a identificar o pagamento só para um
+ * deles. Não existe (ainda) um "Só água" nem um "Só consumos" — ver
+ * proposta no relatório da ronda que introduziu o módulo de água.
  */
 export type DestinoPagamento = 'auto' | 'renda' | 'luz' | 'dividas' | 'manual'
 
 export const DESTINOS: { valor: DestinoPagamento; label: string; descricao: string }[] = [
-  { valor: 'auto', label: 'Automático', descricao: 'Renda, depois caução, depois luz, depois dívidas' },
+  { valor: 'auto', label: 'Automático', descricao: 'Renda, depois caução, depois luz, depois água, depois dívidas' },
   { valor: 'renda', label: 'Só renda', descricao: 'Renda e caução — o que sobrar fica como adiantamento' },
-  { valor: 'luz', label: 'Só eletricidade', descricao: 'Não toca na renda nem na caução' },
+  { valor: 'luz', label: 'Só eletricidade', descricao: 'Não toca na renda, na caução nem na água' },
   { valor: 'dividas', label: 'Só dívidas', descricao: 'Apenas dívidas em conta corrente' },
   { valor: 'manual', label: '✏️ Manual', descricao: 'Decides tu, linha a linha, quanto vai para cada rubrica' },
 ]
@@ -115,8 +133,10 @@ interface BuildPlanParams {
  *      partir de 2026-09-01). O crédito de adiantamento NÃO se aplica aqui,
  *      só à renda.
  *   3. Eletricidade em dívida (mais antiga primeiro).
- *   4. Dívidas abertas (mais antigas primeiro, pagamento parcial permitido).
- *   5. O que sobrar fica como adiantamento (crédito do inquilino).
+ *   4. Água em dívida (mais antiga primeiro) — só no automático, nunca em
+ *      "Só eletricidade" (são consumos separados).
+ *   5. Dívidas abertas (mais antigas primeiro, pagamento parcial permitido).
+ *   6. O que sobrar fica como adiantamento (crédito do inquilino).
  */
 export async function buildRentPaymentPlan(supabase: any, params: BuildPlanParams): Promise<RentPaymentPlan> {
   const { leaseId, tenantId, amount, destino = 'auto' } = params
@@ -125,6 +145,7 @@ export async function buildRentPaymentPlan(supabase: any, params: BuildPlanParam
 
   const podeRenda = destino === 'auto' || destino === 'renda'
   const podeLuz = destino === 'auto' || destino === 'luz'
+  const podeAgua = destino === 'auto'
   const podeDividas = destino === 'auto' || destino === 'dividas'
 
   const rendaPayments: RendaMonthPlan[] = []
@@ -269,6 +290,49 @@ export async function buildRentPaymentPlan(supabase: any, params: BuildPlanParam
     }
   }
 
+  // 4ª prioridade: água em dívida — espelha o bloco da eletricidade acima.
+  const waterCharges: WaterChargePlan[] = []
+  let waterTotal = 0
+  if (podeAgua && remaining > 0) {
+    const { data: charges } = await supabase
+      .from('water_charges')
+      .select('id, amount, amount_paid, charge_date')
+      .eq('lease_id', leaseId)
+      .eq('paid', false)
+      .order('charge_date', { ascending: true })
+
+    for (const charge of charges ?? []) {
+      if (remaining <= 0) break
+
+      const alreadyPaid = charge.amount_paid ?? 0
+      const emFalta = parseFloat((charge.amount - alreadyPaid).toFixed(2))
+      if (emFalta <= 0) continue
+
+      const aplicar = parseFloat(Math.min(emFalta, remaining).toFixed(2))
+      const remainingAfter = parseFloat((emFalta - aplicar).toFixed(2))
+
+      waterCharges.push({
+        id: charge.id,
+        amount: aplicar,
+        chargeDate: charge.charge_date,
+        totalAmount: charge.amount,
+        alreadyPaid,
+        remainingAfter,
+        isPartial: remainingAfter > 0,
+      })
+
+      waterTotal = parseFloat((waterTotal + aplicar).toFixed(2))
+      remaining = parseFloat((remaining - aplicar).toFixed(2))
+    }
+
+    if (waterTotal > 0) {
+      const parciais = waterCharges.filter(c => c.isPartial)
+      lines.push(parciais.length > 0
+        ? `Água: ${formatCurrency(waterTotal)} (parcial — falta ${formatCurrency(parciais.reduce((s, c) => s + c.remainingAfter, 0))})`
+        : `Água: ${formatCurrency(waterTotal)} ✅`)
+    }
+  }
+
   const debtPayments: DebtPaymentPlan[] = []
   let debtTotal = 0
   if (podeDividas && remaining > 0 && tenantId) {
@@ -309,6 +373,7 @@ export async function buildRentPaymentPlan(supabase: any, params: BuildPlanParam
   return {
     rendaPayments, rendaTotal, creditTotal, caucao,
     electricityCharges, electricityTotal,
+    waterCharges, waterTotal,
     debtPayments, debtTotal,
     adiantamento,
     summary: lines.join(', '),
@@ -327,7 +392,7 @@ export async function buildRentPaymentPlan(supabase: any, params: BuildPlanParam
  * plano em buildPlanFromManualItems, sem precisar de voltar a ler a BD.
  */
 export interface ManualPlanItem {
-  type: 'renda' | 'caucao' | 'eletricidade' | 'divida'
+  type: 'renda' | 'caucao' | 'eletricidade' | 'agua' | 'divida'
   key: string
   label: string
   max: number
@@ -408,6 +473,22 @@ export async function buildManualPlanItems(
     })
   }
 
+  for (const wc of full.waterCharges) {
+    const max = parseFloat((wc.totalAmount - wc.alreadyPaid).toFixed(2))
+    if (max <= 0) continue
+    const pr = proposed.waterCharges.find(x => x.id === wc.id)
+    items.push({
+      type: 'agua',
+      key: wc.id,
+      label: `Água${wc.chargeDate ? ` de ${getMonthLabel(wc.chargeDate.slice(0, 7))}` : ''}`,
+      max,
+      proposed: pr ? pr.amount : 0,
+      chargeDate: wc.chargeDate,
+      totalAmount: wc.totalAmount,
+      alreadyPaid: wc.alreadyPaid,
+    })
+  }
+
   for (const dp of full.debtPayments) {
     if (dp.remainingBefore <= 0) continue
     const pr = proposed.debtPayments.find(x => x.debtId === dp.debtId)
@@ -446,6 +527,7 @@ export function buildPlanFromManualItems(items: ManualPlanItem[], values: Record
   let creditTotal = 0
   let caucao: CaucaoPlan | null = null
   const electricityCharges: ElectricityChargePlan[] = []
+  const waterCharges: WaterChargePlan[] = []
   const debtPayments: DebtPaymentPlan[] = []
   const lines: string[] = []
 
@@ -485,6 +567,16 @@ export function buildPlanFromManualItems(items: ManualPlanItem[], values: Record
         remainingAfter, isPartial: remainingAfter > 0.01,
       })
       lines.push(`Luz${it.chargeDate ? ` ${it.chargeDate.slice(0, 7)}` : ''}: ${formatCurrency(value)}${remainingAfter > 0.01 ? ' (parcial)' : ' ✅'}`)
+    } else if (it.type === 'agua') {
+      if (value <= 0) continue
+      const totalAmount = it.totalAmount ?? 0
+      const alreadyPaid = it.alreadyPaid ?? 0
+      const remainingAfter = parseFloat((totalAmount - alreadyPaid - value).toFixed(2))
+      waterCharges.push({
+        id: it.key, amount: value, chargeDate: it.chargeDate ?? null, totalAmount, alreadyPaid,
+        remainingAfter, isPartial: remainingAfter > 0.01,
+      })
+      lines.push(`Água${it.chargeDate ? ` ${it.chargeDate.slice(0, 7)}` : ''}: ${formatCurrency(value)}${remainingAfter > 0.01 ? ' (parcial)' : ' ✅'}`)
     } else if (it.type === 'divida') {
       if (value <= 0) continue
       const remainingBefore = it.max
@@ -498,14 +590,16 @@ export function buildPlanFromManualItems(items: ManualPlanItem[], values: Record
 
   const rendaTotal = parseFloat(rendaPayments.reduce((s, r) => s + r.amount, 0).toFixed(2))
   const electricityTotal = parseFloat(electricityCharges.reduce((s, c) => s + c.amount, 0).toFixed(2))
+  const waterTotal = parseFloat(waterCharges.reduce((s, c) => s + c.amount, 0).toFixed(2))
   const debtTotal = parseFloat(debtPayments.reduce((s, d) => s + d.amount, 0).toFixed(2))
-  const distribuido = parseFloat((rendaTotal + (caucao?.amount ?? 0) + electricityTotal + debtTotal).toFixed(2))
+  const distribuido = parseFloat((rendaTotal + (caucao?.amount ?? 0) + electricityTotal + waterTotal + debtTotal).toFixed(2))
   const adiantamento = parseFloat(Math.max(0, amount - distribuido).toFixed(2))
   if (adiantamento > 0.01) lines.push(`Excedente (não distribuído) → adiantamento: ${formatCurrency(adiantamento)}`)
 
   return {
     rendaPayments, rendaTotal, creditTotal, caucao,
     electricityCharges, electricityTotal,
+    waterCharges, waterTotal,
     debtPayments, debtTotal,
     adiantamento,
     summary: lines.join(', ') || 'Nada distribuído',
@@ -634,6 +728,36 @@ export async function applyRentPaymentPlan(supabase: any, plan: RentPaymentPlan,
         amount: charge.amount,
         type: 'entrada',
         source: 'eletricidade',
+        source_id: charge.id,
+        notes: notes || null,
+      })
+    }
+  }
+
+  // Espelha o bloco da eletricidade acima.
+  for (const charge of plan.waterCharges) {
+    if (charge.isPartial) {
+      await supabase.from('water_charges').update({
+        amount_paid: parseFloat((charge.alreadyPaid + charge.amount).toFixed(2)),
+        ...(notes ? { notes: appendNote('Pagamento parcial', notes) } : {}),
+      }).eq('id', charge.id)
+    } else {
+      await supabase.from('water_charges').update({
+        paid: true,
+        amount_paid: charge.totalAmount,
+        payment_date: paymentDate,
+        payment_method: paymentMethod,
+        ...(notes ? { notes: appendNote(null, notes) } : {}),
+      }).eq('id', charge.id)
+    }
+
+    if (cashOk) {
+      await supabase.from('cash_fund_movements').insert({
+        movement_date: paymentDate,
+        description: `💧 Água ${charge.chargeDate?.slice(0, 7) ?? ''}${charge.isPartial ? ' (parcial)' : ''}${quemTexto ? ` — ${quemTexto}` : ''}`,
+        amount: charge.amount,
+        type: 'entrada',
+        source: 'agua',
         source_id: charge.id,
         notes: notes || null,
       })
