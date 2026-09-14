@@ -584,6 +584,7 @@ export default function TrabalhadorPage({ params }: { params: Promise<{ id: stri
           worker={worker}
           onClose={() => setEditarDados(false)}
           onSaved={async () => { setEditarDados(false); await carregar(true) }}
+          onAccessChanged={() => carregar(true)}
         />
       )}
 
