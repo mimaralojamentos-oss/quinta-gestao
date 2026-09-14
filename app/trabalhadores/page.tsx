@@ -4,10 +4,10 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, matchesSearch } from '@/lib/utils'
-import { formatarHoras, calcularConta, gerarToken, gerarPin, type Worker } from '@/lib/ponto'
+import { formatarHoras, calcularConta, type Worker } from '@/lib/ponto'
 import { useAuth } from '@/lib/auth-context'
-import { logAccess } from '@/lib/logAccess'
-import { HardHat, Plus, Search, X, ChevronRight, Users } from 'lucide-react'
+import WorkerFormModal from '@/components/WorkerFormModal'
+import { Plus, Search, ChevronRight, Users, Pencil } from 'lucide-react'
 import Link from 'next/link'
 
 const supabase = createClient()
@@ -37,19 +37,15 @@ export default function TrabalhadoresPage() {
   const [mostrarInativos, setMostrarInativos] = useState(false)
 
   const [novoAberto, setNovoAberto] = useState(false)
-  const [guardando, setGuardando] = useState(false)
-  const [erroNovo, setErroNovo] = useState('')
-  const [novo, setNovo] = useState({
-    name: '', phone: '', nif: '',
-    hourly_rate: '', hourly_rate_holiday: '', notes: '',
-  })
+  // Trabalhador em edição. A lista nunca carrega o link nem o código de acesso.
+  const [aEditar, setAEditar] = useState<Worker | null>(null)
 
   useEffect(() => { carregar() }, [])
 
   async function carregar(silencioso = false) {
     if (!silencioso) setLoading(true)
     const [wRes, eRes, pRes] = await Promise.all([
-      supabase.from('workers').select('id, name, phone, hourly_rate, hourly_rate_holiday, active').order('name'),
+      supabase.from('workers').select('id, name, phone, email, nif, notes, hourly_rate, hourly_rate_holiday, active').order('name'),
       supabase.from('work_entries').select('worker_id, work_date, start_time, amount, hours'),
       supabase.from('worker_payments').select('worker_id, amount'),
     ])
@@ -74,32 +70,6 @@ export default function TrabalhadoresPage() {
     setLoading(false)
   }
 
-  async function criar() {
-    if (!novo.name.trim()) { setErroNovo('O nome é obrigatório'); return }
-    const tarifa = parseFloat(novo.hourly_rate)
-    if (!tarifa || tarifa <= 0) { setErroNovo('Indica o preço por hora'); return }
-
-    setGuardando(true); setErroNovo('')
-    const { error } = await supabase.from('workers').insert({
-      name: novo.name.trim(),
-      phone: novo.phone.trim() || null,
-      nif: novo.nif.trim() || null,
-      notes: novo.notes.trim() || null,
-      hourly_rate: tarifa,
-      hourly_rate_holiday: novo.hourly_rate_holiday ? parseFloat(novo.hourly_rate_holiday) : null,
-      access_token: gerarToken(),
-      pin: gerarPin(),
-      active: true,
-    })
-    setGuardando(false)
-    if (error) { setErroNovo(error.message); return }
-
-    await logAccess({ action: 'criar', page: '/trabalhadores', details: `Criou o trabalhador "${novo.name.trim()}"` })
-    setNovoAberto(false)
-    setNovo({ name: '', phone: '', nif: '', hourly_rate: '', hourly_rate_holiday: '', notes: '' })
-    await carregar(true)
-  }
-
   const visiveis = linhas
     .filter(l => mostrarInativos || l.active)
     .filter(l => matchesSearch(l.name, pesquisa))
@@ -118,7 +88,7 @@ export default function TrabalhadoresPage() {
             </p>
           </div>
           {podeEditar && (
-            <button className="btn-primary" onClick={() => { setNovoAberto(true); setErroNovo('') }}>
+            <button className="btn-primary" onClick={() => setNovoAberto(true)}>
               <Plus className="w-4 h-4" /> Novo Trabalhador
             </button>
           )}
@@ -194,7 +164,11 @@ export default function TrabalhadoresPage() {
                         {l.name}
                       </Link>
                       {!l.active && <span className="ml-2 text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full">inativo</span>}
-                      {l.phone && <p className="text-xs text-gray-400 mt-0.5">{l.phone}</p>}
+                      {(l.phone || l.email) && (
+                        <p className="text-xs text-gray-400 mt-0.5 break-all">
+                          {[l.phone, l.email].filter(Boolean).join(' · ')}
+                        </p>
+                      )}
                     </td>
                     <td className="table-cell text-xs text-gray-600">
                       {formatCurrency(l.hourly_rate)}
@@ -211,10 +185,18 @@ export default function TrabalhadoresPage() {
                       </span>
                     </td>
                     <td className="table-cell">
-                      <Link href={`/trabalhadores/${l.id}`} prefetch={false}
-                        className="text-gray-300 hover:text-emerald-600 transition-colors inline-flex">
-                        <ChevronRight className="w-4 h-4" />
-                      </Link>
+                      <div className="flex items-center justify-end gap-3">
+                        {podeEditar && (
+                          <button onClick={() => setAEditar(l)} title="Editar dados"
+                            className="text-gray-300 hover:text-blue-500 transition-colors inline-flex">
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                        <Link href={`/trabalhadores/${l.id}`} prefetch={false}
+                          className="text-gray-300 hover:text-emerald-600 transition-colors inline-flex">
+                          <ChevronRight className="w-4 h-4" />
+                        </Link>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -225,63 +207,18 @@ export default function TrabalhadoresPage() {
       </div>
 
       {novoAberto && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
-            <div className="flex items-center justify-between p-5 border-b border-gray-100">
-              <h2 className="font-semibold text-lg text-gray-900">
-                <HardHat className="w-5 h-5 inline mr-2 text-emerald-600" />Novo Trabalhador
-              </h2>
-              <button onClick={() => setNovoAberto(false)}><X className="w-5 h-5 text-gray-400" /></button>
-            </div>
+        <WorkerFormModal
+          onClose={() => setNovoAberto(false)}
+          onSaved={async () => { setNovoAberto(false); await carregar(true) }}
+        />
+      )}
 
-            <div className="p-5 space-y-3">
-              <div>
-                <label className="label">Nome *</label>
-                <input className="input" value={novo.name} onChange={e => setNovo(f => ({ ...f, name: e.target.value }))} autoFocus />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="label">Telefone</label>
-                  <input className="input" value={novo.phone} onChange={e => setNovo(f => ({ ...f, phone: e.target.value }))} />
-                </div>
-                <div>
-                  <label className="label">NIF</label>
-                  <input className="input" value={novo.nif} onChange={e => setNovo(f => ({ ...f, nif: e.target.value }))} />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="label">Preço/hora (€) *</label>
-                  <input className="input" type="number" step="0.01" placeholder="0.00"
-                    value={novo.hourly_rate} onChange={e => setNovo(f => ({ ...f, hourly_rate: e.target.value }))} />
-                </div>
-                <div>
-                  <label className="label">Fim de semana e feriados (€)</label>
-                  <input className="input" type="number" step="0.01" placeholder="igual ao normal"
-                    value={novo.hourly_rate_holiday} onChange={e => setNovo(f => ({ ...f, hourly_rate_holiday: e.target.value }))} />
-                </div>
-              </div>
-              <div>
-                <label className="label">Notas</label>
-                <input className="input" value={novo.notes} onChange={e => setNovo(f => ({ ...f, notes: e.target.value }))} />
-              </div>
-
-              <p className="text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2">
-                Ao guardar é criado automaticamente o link secreto e o código de 4 dígitos
-                para este trabalhador registar as horas pelo telemóvel.
-              </p>
-
-              {erroNovo && <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg">{erroNovo}</p>}
-            </div>
-
-            <div className="flex justify-end gap-3 p-4 border-t border-gray-100">
-              <button className="btn-secondary" onClick={() => setNovoAberto(false)}>Cancelar</button>
-              <button className="btn-primary" onClick={criar} disabled={guardando}>
-                {guardando ? 'A criar...' : 'Criar'}
-              </button>
-            </div>
-          </div>
-        </div>
+      {aEditar && (
+        <WorkerFormModal
+          worker={aEditar}
+          onClose={() => setAEditar(null)}
+          onSaved={async () => { setAEditar(null); await carregar(true) }}
+        />
       )}
     </AppLayout>
   )

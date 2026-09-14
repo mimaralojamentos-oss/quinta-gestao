@@ -13,6 +13,7 @@ export interface Worker {
   id: string
   name: string
   phone: string | null
+  email: string | null
   nif: string | null
   notes: string | null
   hourly_rate: number
@@ -182,6 +183,83 @@ export function tarifaDoDia(worker: Pick<Worker, 'hourly_rate' | 'hourly_rate_ho
     return Number(worker.hourly_rate_holiday)
   }
   return Number(worker.hourly_rate ?? 0)
+}
+
+/**
+ * Tarifa a gravar ao guardar um registo de horas.
+ *
+ * Um registo novo usa a tarifa do trabalhador para aquele dia. Um registo
+ * que já existe mantém SEMPRE a tarifa com que foi registado — corrigir as
+ * horas de um dia antigo nunca o recalcula ao preço atual do trabalhador.
+ */
+export function tarifaAoGuardar(
+  worker: Pick<Worker, 'hourly_rate' | 'hourly_rate_holiday'>,
+  dataISO: string,
+  tarifaExistente?: number | null,
+): number {
+  if (tarifaExistente != null) return Number(tarifaExistente)
+  return tarifaDoDia(worker, dataISO)
+}
+
+// ---------------------------------------------------------------- dados
+
+export interface DadosTrabalhadorForm {
+  name: string
+  phone: string
+  email: string
+  nif: string
+  notes: string
+  hourly_rate: string
+  hourly_rate_holiday: string
+  active: boolean
+}
+
+export const DADOS_TRABALHADOR_VAZIOS: DadosTrabalhadorForm = {
+  name: '', phone: '', email: '', nif: '', notes: '',
+  hourly_rate: '', hourly_rate_holiday: '', active: true,
+}
+
+export function dadosDoTrabalhador(w: Worker): DadosTrabalhadorForm {
+  return {
+    name: w.name, phone: w.phone ?? '', email: w.email ?? '', nif: w.nif ?? '', notes: w.notes ?? '',
+    hourly_rate: String(w.hourly_rate ?? ''),
+    hourly_rate_holiday: w.hourly_rate_holiday != null ? String(w.hourly_rate_holiday) : '',
+    active: w.active,
+  }
+}
+
+/** Validação leve: só apanha enganos óbvios (sem @, sem domínio, espaços). */
+export function emailValido(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
+}
+
+/**
+ * Converte o formulário nos campos a gravar. Devolve apenas os dados do
+ * trabalhador — nunca access_token, pin nem o travão de tentativas —, por
+ * isso editar os dados não mexe no acesso que ele já tem no telemóvel.
+ */
+export function validarDadosTrabalhador(f: DadosTrabalhadorForm):
+  { erro: string } | { campos: Pick<Worker, 'name' | 'phone' | 'email' | 'nif' | 'notes' | 'hourly_rate' | 'hourly_rate_holiday' | 'active'> } {
+  if (!f.name.trim()) return { erro: 'O nome é obrigatório' }
+  const tarifa = parseFloat(f.hourly_rate)
+  if (!tarifa || tarifa <= 0) return { erro: 'Indica o preço por hora' }
+  const email = f.email.trim()
+  if (email && !emailValido(email)) return { erro: 'O e-mail não parece válido' }
+  const tarifaAlta = f.hourly_rate_holiday ? parseFloat(f.hourly_rate_holiday) : null
+  if (tarifaAlta != null && (isNaN(tarifaAlta) || tarifaAlta < 0)) return { erro: 'O preço de fim de semana e feriados não é válido' }
+
+  return {
+    campos: {
+      name: f.name.trim(),
+      phone: f.phone.trim() || null,
+      email: email || null,
+      nif: f.nif.trim() || null,
+      notes: f.notes.trim() || null,
+      hourly_rate: tarifa,
+      hourly_rate_holiday: tarifaAlta,
+      active: f.active,
+    },
+  }
 }
 
 // ---------------------------------------------------------------- saldo
