@@ -9,3 +9,6 @@ node_modules/
 
 # Fatura real usada só para testar a extração de IA da água — nunca commitar.
 tmp-fatura-agua*.pdf
+
+# Cache local da Supabase CLI (projeto ligado nesta máquina, versão da CLI).
+supabase/.temp/
