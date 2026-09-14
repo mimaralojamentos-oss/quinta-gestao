@@ -110,7 +110,7 @@ export default function TrabalhadorPage({ params }: { params: Promise<{ id: stri
 
     setGuardandoHoras(true)
     // Registo novo: tarifa do dia. Registo existente: mantém a tarifa com que
-    // foi registado (e a marca de tarifa alta que lhe corresponde).
+    // foi registado (e a marca de fds/feriado que lhe corresponde).
     const tarifa = tarifaAoGuardar(worker, formHoras.work_date, formHoras.hourly_rate)
     const payload = {
       worker_id: worker.id,
@@ -476,7 +476,7 @@ export default function TrabalhadorPage({ params }: { params: Promise<{ id: stri
                   <tr key={e.id} className="hover:bg-gray-50 transition-colors">
                     <td className="table-cell whitespace-nowrap">
                       {formatDate(e.work_date)}
-                      {e.is_holiday && <span className="ml-1.5 text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">tarifa alta</span>}
+                      {e.is_holiday && <span className="ml-1.5 text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">fds/feriado</span>}
                     </td>
                     <td className="table-cell text-xs text-gray-500 whitespace-nowrap">
                       {String(e.start_time).slice(0, 5)} — {String(e.end_time).slice(0, 5)}
@@ -596,12 +596,12 @@ export default function TrabalhadorPage({ params }: { params: Promise<{ id: stri
                   onChange={e => setFormHoras(f => f && ({ ...f, work_date: e.target.value }))} />
                 {!formHoras.id && motivoDiaEspecial(formHoras.work_date) && (
                   <p className="text-xs text-amber-600 mt-1 font-medium">
-                    É {motivoDiaEspecial(formHoras.work_date)} — aplica a tarifa mais alta
+                    É {motivoDiaEspecial(formHoras.work_date)} — conta como fds/feriado (usa o preço de fds/feriados, se estiver definido)
                   </p>
                 )}
                 {formHoras.id && ehDiaEspecial(formHoras.work_date) !== !!formHoras.is_holiday && (
                   <p className="text-xs text-amber-600 mt-1 font-medium">
-                    O dia passou a ser {ehDiaEspecial(formHoras.work_date) ? (motivoDiaEspecial(formHoras.work_date) ?? 'dia de tarifa alta') : 'dia normal'},
+                    O dia passou a ser {ehDiaEspecial(formHoras.work_date) ? (motivoDiaEspecial(formHoras.work_date) ?? 'dia de fds/feriado') : 'dia normal'},
                     mas o registo mantém o preço com que foi registado. Se o preço tiver de mudar,
                     apaga este registo e regista-o de novo.
                   </p>

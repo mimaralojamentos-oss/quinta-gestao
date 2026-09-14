@@ -265,7 +265,7 @@ export default function PontoPage({ params }: { params: Promise<{ token: string 
                 value={form.work_date} onChange={e => setForm(f => ({ ...f, work_date: e.target.value }))} />
               {motivoDiaEspecial(form.work_date) && (
                 <p className="text-xs text-amber-600 mt-1 font-medium">
-                  É {motivoDiaEspecial(form.work_date)} — paga a tarifa mais alta
+                  É {motivoDiaEspecial(form.work_date)} — conta como fds/feriado
                 </p>
               )}
             </div>
@@ -318,7 +318,7 @@ export default function PontoPage({ params }: { params: Promise<{ token: string 
                   <div className="min-w-0">
                     <p className="font-medium text-gray-900 text-sm">
                       {formatDate(e.work_date)}
-                      {e.is_holiday && <span className="ml-2 text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">tarifa alta</span>}
+                      {e.is_holiday && <span className="ml-2 text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">fds/feriado</span>}
                     </p>
                     <p className="text-xs text-gray-500 mt-0.5">
                       {String(e.start_time).slice(0, 5)} às {String(e.end_time).slice(0, 5)} · {formatarHoras(e.hours)}
