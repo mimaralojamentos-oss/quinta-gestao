@@ -45,6 +45,7 @@ const NOMES_TABELAS: Record<string, string> = {
   leases: 'Contratos',
   tenants: 'Inquilinos',
   spaces: 'Espaços',
+  meter_shares: 'Partilha de contadores',
   lease_rent_history: 'Histórico de rendas',
   profiles: 'Utilizadores',
   workers: 'Trabalhadores',

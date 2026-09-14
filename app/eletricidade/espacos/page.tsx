@@ -1,15 +1,23 @@
 'use client'
 
 import AppLayout from '@/components/layout/AppLayout'
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, Fragment } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, formatDate, matchesSearch, getTenantName } from '@/lib/utils'
 import { Zap, Trash2, X, ChevronDown, ChevronRight, Settings, Save, Pencil, Search, Printer } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import { logAccess } from '@/lib/logAccess'
 import { consumeAdvances, linkAdvancesToCharge } from '@/lib/advanceCredit'
+import {
+  SERVICOS, grupoDoTitular, titularDoParticipante, carregarContratosAtivos, cobrarLeituraPartilhada,
+  cobrarParteEmFalta, encontrarCobrancasDaLeitura, partesPorCobrar, valorCobradoDaLeitura, formatPct,
+  type MeterShare, type ContratoAtivo, type ParteDivisao,
+} from '@/lib/meterShares'
+import MeterShareModal from '@/components/MeterShareModal'
+import { SharePreview, ShareSplitDetails } from '@/components/ShareSplitView'
 
 const supabase = createClient()
+const SERVICO = SERVICOS.luz
 
 interface ElectricityConfig {
   id: number
@@ -41,6 +49,8 @@ interface Reading {
   waived?: boolean
   waived_reason?: string | null
   notes: string | null
+  /** Divisão de um contador partilhado, gravada ao cobrar (null = sem partilha). */
+  share_split?: ParteDivisao[] | null
 }
 
 interface ReadingModal {
@@ -100,6 +110,12 @@ export default function QuadrosEspacosPage() {
   const [editLeaseId, setEditLeaseId] = useState<string | null>(null)
   const [editAdvance, setEditAdvance] = useState(0)
 
+  // Contador partilhado (meter_shares). Vazio = nenhum espaço partilha.
+  const [shares, setShares] = useState<MeterShare[]>([])
+  const [contratosAtivos, setContratosAtivos] = useState<Record<string, ContratoAtivo>>({})
+  const [shareModal, setShareModal] = useState<Space | null>(null)
+  const [aCobrarParte, setACobrarParte] = useState(false)
+
   // Filtros
   const [filterTenant, setFilterTenant] = useState('')
   const [filterSpaces, setFilterSpaces] = useState<string[]>([])
@@ -158,6 +174,13 @@ export default function QuadrosEspacosPage() {
       .order('ref')
 
     setSpaces((spacesData ?? []) as any[])
+
+    const [{ data: sharesData }, contratos] = await Promise.all([
+      supabase.from('meter_shares').select('id, service, owner_space_id, space_id, percentage').eq('service', SERVICO.service),
+      carregarContratosAtivos(supabase, (spacesData ?? []).map(s => s.id)),
+    ])
+    setShares((sharesData ?? []) as MeterShare[])
+    setContratosAtivos(contratos)
 
     const allReadings: Record<string, Reading[]> = {}
     for (const s of spacesData ?? []) {
@@ -306,6 +329,23 @@ export default function QuadrosEspacosPage() {
       return latest.amount_calculated ?? 0
     }
     return 0
+  }
+
+  /** Linhas da partilha em que o espaço é titular (vazio = sem partilha). */
+  function grupoDe(spaceId: string): MeterShare[] {
+    return grupoDoTitular(shares, spaceId)
+  }
+
+  const refs: Record<string, string> = Object.fromEntries(spaces.map(s => [s.id, s.ref]))
+
+  /**
+   * Há a quem cobrar? Sem partilha: o espaço tem inquilino (como sempre).
+   * Com partilha: algum espaço do grupo tem contrato ativo.
+   */
+  function temQuemCobrar(space: Space): boolean {
+    const grupo = grupoDe(space.id)
+    if (grupo.length === 0) return !!space.tenant_id
+    return grupo.some(g => contratosAtivos[g.space_id])
   }
 
   function printElectricity(space: Space) {
@@ -536,8 +576,80 @@ export default function QuadrosEspacosPage() {
     fetchAll()
   }
 
+  /**
+   * "Cobrar agora" num contador partilhado: divide o valor e cria uma
+   * cobrança por espaço com contrato ativo, cada uma com os adiantamentos do
+   * seu inquilino.
+   */
+  async function cobrarAgoraPartilhado(reading: Reading) {
+    const amountDue = reading.amount_calculated ?? 0
+    const space = spaces.find(s => s.id === reading.space_id)
+    if (amountDue <= 0 || !space) return
+
+    setSaving(true)
+    const r = await cobrarLeituraPartilhada(supabase, SERVICO, {
+      reading: { id: reading.id, reading_date: reading.reading_date, units: reading.kwh_consumed },
+      total: amountDue, ownerId: space.id, ownerRef: space.ref, linhas: grupoDe(space.id), refs,
+      aplicarAdiantamentos: true,
+    })
+    if ('erro' in r) { alert(r.erro); setSaving(false); return }
+    if (r.erros.length > 0) {
+      alert(`Algumas cobranças não foram criadas:\n\n${r.erros.join('\n')}\n\n` +
+        (r.cobradas > 0 ? 'Ficam como "por cobrar" na leitura.' : 'A leitura continua acumulada.'))
+    }
+    if (r.cobradas === 0) {
+      if (r.erros.length === 0) alert('Nenhum espaço da partilha tem contrato ativo — a leitura continua acumulada.')
+      setSaving(false)
+      return
+    }
+
+    await supabase.from('electricity_readings').update({
+      charged: true, accumulated: false, share_split: r.split,
+    }).eq('id', reading.id)
+
+    await logAccess({
+      action: 'criar',
+      page: '/eletricidade/espacos',
+      details: `Cobrou a leitura de ${formatDate(reading.reading_date)} do contador partilhado do ${space.ref}: ` +
+        r.split.map(p => `${p.ref} ${formatCurrency(p.amount)}${p.charge_id ? '' : ' (por cobrar)'}`).join(' · '),
+    })
+
+    setSaving(false)
+    setEditReadingModal(null)
+    fetchAll()
+  }
+
+  /** Cobra a parte de um espaço que não tinha contrato ativo quando a leitura foi cobrada. */
+  async function cobrarParte(reading: Reading, parte: ParteDivisao) {
+    const space = spaces.find(s => s.id === reading.space_id)
+    if (!space) return
+    if (!confirm(
+      `Cobrar a parte de ${parte.ref} (${formatPct(parte.percentage)}% · ${formatCurrency(parte.amount)}) ` +
+      `da leitura de ${formatDate(reading.reading_date)}?\n\n` +
+      `É criada a cobrança no contrato ativo de ${parte.ref}, com os adiantamentos que houver.`
+    )) return
+
+    setACobrarParte(true)
+    const r = await cobrarParteEmFalta(supabase, SERVICO, {
+      reading: { id: reading.id, reading_date: reading.reading_date, share_split: reading.share_split ?? null },
+      spaceId: parte.space_id,
+      ownerRef: space.ref,
+    })
+    setACobrarParte(false)
+    if ('erro' in r) { alert(r.erro); return }
+
+    await logAccess({
+      action: 'criar',
+      page: '/eletricidade/espacos',
+      details: `Cobrou a parte de ${parte.ref} (${formatCurrency(parte.amount)}) da leitura de ${formatDate(reading.reading_date)} do contador partilhado do ${space.ref}`,
+    })
+    fetchAll()
+  }
+
   async function handleCobrarAgora() {
-    if (!editReadingModal || !editLeaseId) return
+    if (!editReadingModal) return
+    if (grupoDe(editReadingModal.space_id).length > 0) { await cobrarAgoraPartilhado(editReadingModal); return }
+    if (!editLeaseId) return
     const amountDue = editReadingModal.amount_calculated ?? 0
     if (amountDue <= 0) return
 
@@ -635,7 +747,30 @@ export default function QuadrosEspacosPage() {
       return
     }
 
-    if (charged && space.tenant_id && amountCalc) {
+    const grupo = grupoDe(space.id)
+    if (grupo.length > 0) {
+      // Contador partilhado: uma cobrança por espaço do grupo, com a sua parte.
+      if (charged && amountCalc) {
+        const r = await cobrarLeituraPartilhada(supabase, SERVICO, {
+          reading: { id: inserted.id, reading_date: readingForm.reading_date, units: kwhConsumed },
+          total: amountCalc, ownerId: space.id, ownerRef: space.ref, linhas: grupo, refs,
+          aplicarAdiantamentos: false,
+        })
+        if ('erro' in r) {
+          alert(r.erro)
+        } else {
+          if (r.erros.length > 0) {
+            alert(`Algumas cobranças não foram criadas:\n\n${r.erros.join('\n')}\n\n` +
+              (r.cobradas > 0 ? 'Ficam como "por cobrar" na leitura.' : 'A leitura fica acumulada.'))
+          }
+          if (r.cobradas > 0) {
+            await supabase.from('electricity_readings').update({
+              charged: true, accumulated: false, share_split: r.split,
+            }).eq('id', inserted.id)
+          }
+        }
+      }
+    } else if (charged && space.tenant_id && amountCalc) {
       const { data: lease } = await supabase
         .from('leases')
         .select('id')
@@ -671,28 +806,6 @@ export default function QuadrosEspacosPage() {
   }
 
   /**
-   * Procura a cobrança de eletricidade correspondente a uma leitura: primeiro
-   * pela ligação direta (reading_id), e só depois pela data (leituras
-   * antigas não têm reading_id). Devolve null se a leitura nunca gerou
-   * cobrança.
-   */
-  async function encontrarCobrancaDaLeitura(reading: Reading): Promise<any | null> {
-    const { data: porLigacao } = await supabase
-      .from('electricity_charges').select('id, amount, amount_paid, paid, payment_date')
-      .eq('reading_id', reading.id).maybeSingle()
-    if (porLigacao) return porLigacao
-
-    const { data: lease } = await supabase
-      .from('leases').select('id').eq('space_id', reading.space_id).eq('status', 'ativo').maybeSingle()
-    if (!lease) return null
-
-    const { data: porData } = await supabase
-      .from('electricity_charges').select('id, amount, amount_paid, paid, payment_date')
-      .eq('lease_id', lease.id).eq('charge_date', reading.reading_date).maybeSingle()
-    return porData
-  }
-
-  /**
    * Uma cobrança "tem pagamento" quando está totalmente paga (paid) OU
    * quando já tem uma parte paga (amount_paid > 0, pagamento parcial) — nos
    * dois casos apagá-la faria desaparecer dinheiro que já entrou.
@@ -716,10 +829,14 @@ export default function QuadrosEspacosPage() {
    * logAccess — isso fica a cargo de quem chama, porque cada sítio tem o seu
    * próprio texto (motivo por prompt vs. confirmação direta).
    */
-  async function confirmarOferta(reading: Reading, cobranca: any | null, motivo: string | null): Promise<boolean> {
-    if (cobranca) {
-      const { error } = await supabase.from('electricity_charges').delete().eq('id', cobranca.id)
+  async function confirmarOferta(reading: Reading, cobrancas: any[], motivo: string | null): Promise<boolean> {
+    if (cobrancas.length === 1) {
+      const { error } = await supabase.from('electricity_charges').delete().eq('id', cobrancas[0].id)
       if (error) { alert(`Erro ao apagar a cobrança: ${error.message}`); return false }
+    } else if (cobrancas.length > 1) {
+      // Contador partilhado: a oferta perdoa o total, logo todas as partes.
+      const { error } = await supabase.from('electricity_charges').delete().in('id', cobrancas.map(c => c.id))
+      if (error) { alert(`Erro ao apagar as cobranças: ${error.message}`); return false }
     }
 
     const { error: updateError } = await supabase.from('electricity_readings').update({
@@ -728,6 +845,8 @@ export default function QuadrosEspacosPage() {
       charged: false,
       accumulated: false,
       amount_calculated: reading.amount_calculated,
+      // Sem cobranças, a divisão deixa de ter partes "por cobrar".
+      ...(reading.share_split ? { share_split: null } : {}),
     }).eq('id', reading.id)
 
     if (updateError) { alert(`Erro ao marcar como oferta: ${updateError.message}`); return false }
@@ -740,31 +859,39 @@ export default function QuadrosEspacosPage() {
    * acontecia.
    */
   async function marcarComoOferta(reading: Reading, spaceRef: string) {
-    const cobranca = await encontrarCobrancaDaLeitura(reading)
+    const cobrancas = await encontrarCobrancasDaLeitura(supabase, SERVICO, reading)
+    const paga = cobrancas.find(cobrancaTemPagamento)
 
-    if (cobrancaTemPagamento(cobranca)) {
-      alert(avisoCobrancaPaga(cobranca, 'Não é possível transformá-la em oferta, porque isso faria desaparecer dinheiro que entrou e as contas deixavam de bater certo.'))
+    if (paga) {
+      alert(avisoCobrancaPaga(paga, 'Não é possível transformá-la em oferta, porque isso faria desaparecer dinheiro que entrou e as contas deixavam de bater certo.'))
       return
     }
 
+    const cobranca = cobrancas.length === 1 ? cobrancas[0] : null
+    const totalCobrancas = cobrancas.reduce((s, c) => s + (c.amount ?? 0), 0)
+
     const motivo = window.prompt(
       `Marcar a leitura de ${formatDate(reading.reading_date)} (${spaceRef}) como oferta.\n\n` +
-      (cobranca
-        ? `A cobrança de ${formatCurrency(cobranca.amount)} vai ser APAGADA da conta corrente do inquilino.\n\n`
-        : `O valor deixa de ser cobrado e não transita para a leitura seguinte.\n\n`) +
+      (cobrancas.length > 1
+        ? `As ${cobrancas.length} cobranças da divisão (${formatCurrency(totalCobrancas)} no total) vão ser APAGADAS das contas correntes dos inquilinos.\n\n`
+        : cobranca
+          ? `A cobrança de ${formatCurrency(cobranca.amount)} vai ser APAGADA da conta corrente do inquilino.\n\n`
+          : `O valor deixa de ser cobrado e não transita para a leitura seguinte.\n\n`) +
       `Motivo (opcional):`,
       reading.waived_reason ?? ''
     )
     if (motivo === null) return
 
-    const ok = await confirmarOferta(reading, cobranca, motivo.trim() || null)
+    const ok = await confirmarOferta(reading, cobrancas, motivo.trim() || null)
     if (!ok) return
 
     await logAccess({
       action: 'editar',
       page: '/eletricidade/espacos',
       details: `Leitura de ${formatDate(reading.reading_date)} (${spaceRef}) marcada como oferta` +
-        (cobranca ? ` — cobrança de ${formatCurrency(cobranca.amount)} apagada` : '') +
+        (cobrancas.length > 1
+          ? ` — ${cobrancas.length} cobranças (${formatCurrency(totalCobrancas)}) apagadas`
+          : cobranca ? ` — cobrança de ${formatCurrency(cobranca.amount)} apagada` : '') +
         (motivo.trim() ? ` · ${motivo.trim()}` : ''),
     })
 
@@ -782,10 +909,11 @@ export default function QuadrosEspacosPage() {
     const valor = reading.amount_calculated ?? 0
     if (valor <= 0) return
 
-    const cobranca = await encontrarCobrancaDaLeitura(reading)
+    const cobrancas = await encontrarCobrancasDaLeitura(supabase, SERVICO, reading)
+    const paga = cobrancas.find(cobrancaTemPagamento)
 
-    if (cobrancaTemPagamento(cobranca)) {
-      alert(avisoCobrancaPaga(cobranca, 'Não é possível oferecer um valor já (parcialmente) pago, porque isso faria desaparecer dinheiro que entrou e as contas deixavam de bater certo.'))
+    if (paga) {
+      alert(avisoCobrancaPaga(paga, 'Não é possível oferecer um valor já (parcialmente) pago, porque isso faria desaparecer dinheiro que entrou e as contas deixavam de bater certo.'))
       return
     }
 
@@ -795,7 +923,7 @@ export default function QuadrosEspacosPage() {
     )) return
 
     setSaving(true)
-    const ok = await confirmarOferta(reading, cobranca, null)
+    const ok = await confirmarOferta(reading, cobrancas, null)
     setSaving(false)
     if (!ok) return
 
@@ -804,7 +932,9 @@ export default function QuadrosEspacosPage() {
       action: 'editar',
       page: '/eletricidade/espacos',
       details: `Ofereceu ${formatCurrency(valor)} acumulados no ${space?.ref ?? ''} (leitura de ${formatDate(reading.reading_date)})` +
-        (cobranca ? ` — cobrança de ${formatCurrency(cobranca.amount)} apagada` : ''),
+        (cobrancas.length > 1
+          ? ` — ${cobrancas.length} cobranças (${formatCurrency(cobrancas.reduce((s, c) => s + (c.amount ?? 0), 0))}) apagadas`
+          : cobrancas.length === 1 ? ` — cobrança de ${formatCurrency(cobrancas[0].amount)} apagada` : ''),
     })
 
     setEditReadingModal(null)
@@ -834,6 +964,18 @@ export default function QuadrosEspacosPage() {
     const leaseIds = (spaceLeases ?? []).map(l => l.id)
     const referenceMonth = reading.reading_date.slice(0, 7) + '-01'
 
+    // Contador partilhado: as cobranças da divisão estão também nos contratos
+    // dos outros espaços — encontram-se pela ligação à leitura.
+    let daDivisao: { id: string; paid: boolean }[] = []
+    if (reading.share_split) {
+      const { data } = await supabase.from('electricity_charges').select('id, paid').eq('reading_id', reading.id)
+      daDivisao = data ?? []
+      if (daDivisao.some(c => c.paid)) {
+        alert('Não é possível apagar esta leitura porque já tem uma cobrança paga associada.')
+        return
+      }
+    }
+
     let unpaidCharges: { id: string }[] = []
     if (leaseIds.length > 0) {
       const { data: paidCharges } = await supabase
@@ -855,6 +997,9 @@ export default function QuadrosEspacosPage() {
         .eq('paid', false)
         .or(`charge_date.eq.${reading.reading_date},reference_month.eq.${referenceMonth}`)
       unpaidCharges = charges ?? []
+    }
+    for (const c of daDivisao) {
+      if (!unpaidCharges.some(u => u.id === c.id)) unpaidCharges.push({ id: c.id })
     }
 
     const n = unpaidCharges.length
@@ -880,7 +1025,13 @@ export default function QuadrosEspacosPage() {
   const semInquilino = spaces.filter(s => !s.tenant_id).length
   const totalCobrado = Object.values(readings).flat()
     .filter(r => r.charged)
-    .reduce((s, r) => s + (r.amount_calculated ?? 0), 0)
+    .reduce((s, r) => s + valorCobradoDaLeitura(r), 0)
+  // Partes de contadores partilhados que ficaram por cobrar (espaço sem contrato ativo).
+  const totalPorCobrarPartilha = Object.values(readings).flat()
+    .filter(r => !r.waived)
+    .reduce((s, r) => s + partesPorCobrar(r.share_split).reduce((t, p) => t + p.amount, 0), 0)
+  const editPartilhado = editReadingModal ? grupoDe(editReadingModal.space_id) : []
+  const editPodeCobrarPartilha = editPartilhado.some(g => contratosAtivos[g.space_id])
   const totalAcumulado = spaces.reduce((s, sp) => s + getAccumulatedAmount(sp.id), 0)
   const totalOferecido = Object.values(readings).flat()
     .filter(r => r.waived)
@@ -1032,6 +1183,15 @@ export default function QuadrosEspacosPage() {
           </div>
         )}
 
+        {totalPorCobrarPartilha > 0 && (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2 mb-4">
+            <p className="text-sm text-amber-800">
+              ⇄ <strong>{formatCurrency(totalPorCobrarPartilha)}</strong> de contadores partilhados por cobrar — parte(s) de
+              espaços sem contrato ativo. Abre o espaço titular e usa &quot;cobrar parte&quot; quando houver contrato.
+            </p>
+          </div>
+        )}
+
         {loading ? (
           <div className="flex justify-center py-12">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600" />
@@ -1049,6 +1209,11 @@ export default function QuadrosEspacosPage() {
               const isOpen = expanded[space.id]
               const accumulated = getAccumulatedAmount(space.id)
               const tenantName = getTenantName(space.tenant, '')
+              const grupo = grupoDe(space.id)
+              const titular = titularDoParticipante(shares, space.id)
+              const porCobrarPartilha = spaceReadings
+                .filter(r => !r.waived)
+                .reduce((s, r) => s + partesPorCobrar(r.share_split).reduce((t, p) => t + p.amount, 0), 0)
 
               return (
                 <div key={space.id} className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
@@ -1067,10 +1232,26 @@ export default function QuadrosEspacosPage() {
                           )}
                         </div>
                         {tenantName && <p className="text-xs text-gray-500">{tenantName}</p>}
+                        {grupo.length > 0 && (
+                          <p className="text-xs text-indigo-600">
+                            ⇄ Contador partilhado: {grupo.map(g => `${refs[g.space_id] ?? '?'} ${formatPct(g.percentage)}%`).join(' · ')}
+                          </p>
+                        )}
+                        {titular && (
+                          <p className="text-xs text-indigo-600">
+                            ⇄ Partilha o contador do {refs[titular.owner_space_id] ?? '?'} ({formatPct(titular.percentage)}%) — leituras e cobranças feitas lá
+                          </p>
+                        )}
                       </div>
                     </div>
 
                     <div className="flex items-center gap-6">
+                      {porCobrarPartilha > 0 && (
+                        <div className="text-right">
+                          <p className="text-xs text-amber-600 font-medium">Parte por cobrar</p>
+                          <p className="text-sm font-semibold text-amber-700">{formatCurrency(porCobrarPartilha)}</p>
+                        </div>
+                      )}
                       {accumulated > 0 && (
                         <div className="text-right">
                           <p className="text-xs text-yellow-600 font-medium">Acumulado</p>
@@ -1084,19 +1265,27 @@ export default function QuadrosEspacosPage() {
                           <p className="text-xs text-gray-400">{lastReading.reading_value} kWh</p>
                         )}
                       </div>
-                      {canEdit && (
+                      {canEdit && !titular && (
                         <button
                           onClick={e => { e.stopPropagation(); openReadingModal(space) }}
                           className="text-xs text-blue-600 hover:underline font-medium whitespace-nowrap">
                           + Leitura
                         </button>
                       )}
-                      {canEdit && (isAdmin || isCoAdmin) && (
+                      {canEdit && (isAdmin || isCoAdmin) && !titular && (
                         <button
                           onClick={e => { e.stopPropagation(); openResetModal(space) }}
                           className="text-xs text-amber-600 hover:underline font-medium whitespace-nowrap"
                           title="Fechar contas do inquilino que sai e pôr o contador a zero para o próximo">
                           ⟲ Fecho de contas
+                        </button>
+                      )}
+                      {(isAdmin || isCoAdmin) && !titular && (
+                        <button
+                          onClick={e => { e.stopPropagation(); setShareModal(space) }}
+                          className={`text-xs hover:underline font-medium whitespace-nowrap ${grupo.length > 0 ? 'text-indigo-600' : 'text-gray-400'}`}
+                          title="Partilhar a cobrança deste contador com outro(s) espaço(s)">
+                          ⇄ Partilha
                         </button>
                       )}
                       {spaceReadings.length > 0 && (
@@ -1129,8 +1318,9 @@ export default function QuadrosEspacosPage() {
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-50">
-                            {spaceReadings.map((r, index) => (
-                              <tr key={r.id} className="hover:bg-gray-50">
+                            {spaceReadings.map(r => (
+                              <Fragment key={r.id}>
+                              <tr className="hover:bg-gray-50">
                                 <td className="py-2 text-sm">{formatDate(r.reading_date)}</td>
                                 <td className="py-2 text-sm font-mono">{r.reading_value}</td>
                                 <td className="py-2 text-sm font-mono text-gray-400">{r.previous_value ?? '—'}</td>
@@ -1152,6 +1342,9 @@ export default function QuadrosEspacosPage() {
                                   )}
                                   {r.waived && r.waived_reason && (
                                     <p className="text-[11px] text-gray-400 mt-0.5">{r.waived_reason}</p>
+                                  )}
+                                  {!r.waived && partesPorCobrar(r.share_split).length > 0 && (
+                                    <span className="ml-1 text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">parte por cobrar</span>
                                   )}
                                 </td>
                                 {canEdit && (
@@ -1187,6 +1380,15 @@ export default function QuadrosEspacosPage() {
                                   </td>
                                 )}
                               </tr>
+                              {r.share_split && !r.waived && (
+                                <tr>
+                                  <td colSpan={canEdit ? 7 : 6} className="pb-2 pt-0">
+                                    <ShareSplitDetails split={r.share_split} podeCobrar={canEdit && (isAdmin || isCoAdmin)}
+                                      aCobrar={aCobrarParte} onCobrarParte={parte => cobrarParte(r, parte)} />
+                                  </td>
+                                </tr>
+                              )}
+                              </Fragment>
                             ))}
                           </tbody>
                         </table>
@@ -1216,6 +1418,14 @@ export default function QuadrosEspacosPage() {
                 <p className="text-sm text-gray-500 mb-4">
                   Fecha as contas de eletricidade do inquilino que sai e deixa o contador pronto para o próximo.
                 </p>
+
+                {grupoDe(resetModal.space.id).length > 0 && (
+                  <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4">
+                    ⇄ Este contador é partilhado ({grupoDe(resetModal.space.id).map(g => `${refs[g.space_id] ?? '?'} ${formatPct(g.percentage)}%`).join(' · ')}).
+                    A leitura de saída fecha o consumo para todos os espaços da partilha e só trata as cobranças do {resetModal.space.ref}.
+                    Se quiseres dividir o consumo até hoje, regista e cobra primeiro uma leitura normal.
+                  </p>
+                )}
 
                 <div className="bg-gray-50 rounded-lg p-3 mb-4 space-y-1.5 text-sm">
                   <div className="flex justify-between">
@@ -1398,6 +1608,10 @@ export default function QuadrosEspacosPage() {
                         {total < minCharge && (
                           <p className="text-yellow-700 font-medium mt-1">⚠ Abaixo de {formatCurrency(minCharge)} — recomenda-se acumular</p>
                         )}
+                        {grupoDe(readingModal.space.id).length > 0 && total > 0 && (
+                          <SharePreview total={total} units={parseFloat(kwh.toFixed(2))} ownerId={readingModal.space.id}
+                            linhas={grupoDe(readingModal.space.id)} refs={refs} contratos={contratosAtivos} />
+                        )}
                       </div>
                     )
                   })()}
@@ -1421,7 +1635,7 @@ export default function QuadrosEspacosPage() {
             </div>
 
             <div className="mt-6 space-y-2">
-              {readingModal.space.tenant_id ? (
+              {temQuemCobrar(readingModal.space) ? (
                 <>
                   <button onClick={() => saveReading('cobrar')} disabled={saving || !readingForm.reading_value}
                     className="w-full py-2.5 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50">
@@ -1505,7 +1719,16 @@ export default function QuadrosEspacosPage() {
                   onChange={e => setEditForm(f => ({ ...f, notes: e.target.value }))} />
               </div>
 
-              {!editReadingModal.charged && (editReadingModal.amount_calculated ?? 0) > 0 && editLeaseId && (
+              {!editReadingModal.charged && (editReadingModal.amount_calculated ?? 0) > 0 && editPartilhado.length > 0 && (
+                <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+                  <p className="text-xs text-emerald-700">
+                    Valor a dividir: {formatCurrency(editReadingModal.amount_calculated ?? 0)} — os adiantamentos de cada inquilino são aplicados à sua parte.
+                  </p>
+                  <SharePreview total={editReadingModal.amount_calculated ?? 0} units={editReadingModal.kwh_consumed}
+                    ownerId={editReadingModal.space_id} linhas={editPartilhado} refs={refs} contratos={contratosAtivos} />
+                </div>
+              )}
+              {!editReadingModal.charged && (editReadingModal.amount_calculated ?? 0) > 0 && editLeaseId && editPartilhado.length === 0 && (
                 <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
                   {editAdvance > 0 ? (
                     <p className="text-xs text-emerald-700">
@@ -1521,7 +1744,7 @@ export default function QuadrosEspacosPage() {
             </div>
 
             <div className="mt-6 space-y-2">
-              {!editReadingModal.charged && (editReadingModal.amount_calculated ?? 0) > 0 && editLeaseId && (
+              {!editReadingModal.charged && (editReadingModal.amount_calculated ?? 0) > 0 && (editPartilhado.length > 0 ? editPodeCobrarPartilha : !!editLeaseId) && (
                 <button onClick={handleCobrarAgora} disabled={saving}
                   className="w-full py-2.5 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50">
                   {saving ? 'A processar...' : '✓ Cobrar agora'}
@@ -1545,6 +1768,17 @@ export default function QuadrosEspacosPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {shareModal && (
+        <MeterShareModal
+          service={SERVICO.service}
+          owner={{ id: shareModal.id, ref: shareModal.ref }}
+          spaces={spaces.map(s => ({ id: s.id, ref: s.ref, tenantName: getTenantName(s.tenant, '') }))}
+          shares={shares}
+          onClose={() => setShareModal(null)}
+          onSaved={async () => { setShareModal(null); await fetchAll() }}
+        />
       )}
     </AppLayout>
   )
