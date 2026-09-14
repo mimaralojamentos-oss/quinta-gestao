@@ -7,17 +7,18 @@ import { formatCurrency, formatDate, openStorageDocument, slugifyFilename, delet
 
 import {
   calcularConta, calcularHoras, formatarHoras, tarifaAoGuardar, ehDiaEspecial,
-  motivoDiaEspecial, gerarToken, gerarPin,
+  motivoDiaEspecial,
   type Worker, type WorkEntry, type WorkerPayment, type ResumoConta,
 } from '@/lib/ponto'
 import { useAuth } from '@/lib/auth-context'
 import { logAccess } from '@/lib/logAccess'
 import WorkerFormModal from '@/components/WorkerFormModal'
+import WorkerAccessActions from '@/components/WorkerAccessActions'
 import { createExpense } from '@/lib/createExpense'
 import { findSimilarExpenses } from '@/lib/expenseDuplicates'
 import {
   ChevronLeft, Copy, Check, Plus, Trash2, Pencil, X, Loader2,
-  Banknote, RefreshCw, Link2, FileText,
+  Banknote, Link2, FileText,
 } from 'lucide-react'
 import Link from 'next/link'
 
@@ -99,18 +100,6 @@ export default function TrabalhadorPage({ params }: { params: Promise<{ id: stri
     } catch {
       alert('Não foi possível copiar. Seleciona o texto e copia à mão.')
     }
-  }
-
-  // ------------------------------------------------------------ acesso
-  async function novoLink() {
-    if (!worker) return
-    if (!confirm('Gerar um link e um código novos?\n\nO link antigo deixa de funcionar imediatamente. Terás de enviar o novo ao trabalhador.')) return
-    const { error } = await supabase.from('workers')
-      .update({ access_token: gerarToken(), pin: gerarPin() })
-      .eq('id', worker.id)
-    if (error) { alert(`Não foi possível: ${error.message}`); return }
-    await logAccess({ action: 'editar', page: '/trabalhadores', details: `Gerou novo link de acesso para "${worker.name}"` })
-    await carregar(true)
   }
 
   // ------------------------------------------------------------ horas
@@ -416,9 +405,6 @@ export default function TrabalhadorPage({ params }: { params: Promise<{ id: stri
               <h2 className="font-semibold text-gray-900 flex items-center gap-2">
                 <Link2 className="w-4 h-4 text-emerald-600" /> Acesso do trabalhador
               </h2>
-              <button onClick={novoLink} className="text-xs text-gray-400 hover:text-red-500 inline-flex items-center gap-1">
-                <RefreshCw className="w-3 h-3" /> Gerar link novo
-              </button>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
@@ -446,6 +432,13 @@ export default function TrabalhadorPage({ params }: { params: Promise<{ id: stri
               Envia o link e o código. Ao abrir, o trabalhador escreve o código uma vez e fica
               guardado no telemóvel dele. Só vê as horas dele e o que tem a receber — mais nada da aplicação.
             </p>
+
+            <div className="mt-4 pt-4 border-t border-gray-100">
+              <p className="text-xs text-gray-500 mb-2">
+                Se o código ou o link chegaram a quem não devia, regenera só o que for preciso:
+              </p>
+              <WorkerAccessActions worker={worker} onChanged={() => carregar(true)} />
+            </div>
           </div>
         )}
 
