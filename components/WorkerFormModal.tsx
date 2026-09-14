@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase-client'
 import { logAccess } from '@/lib/logAccess'
 import {
   validarDadosTrabalhador, dadosDoTrabalhador, gerarToken, gerarPin,
-  DADOS_TRABALHADOR_VAZIOS, type Worker,
+  DADOS_TRABALHADOR_VAZIOS, type Worker, type DadosTrabalhadorForm,
 } from '@/lib/ponto'
 import { HardHat, X } from 'lucide-react'
 
@@ -77,9 +77,20 @@ export default function WorkerFormModal({ worker, onClose, onSaved }: {
               <input className="input" type="email" placeholder="opcional" value={form.email} onChange={campo('email')} />
             </div>
           </div>
-          <div>
-            <label className="label">NIF</label>
-            <input className="input" value={form.nif} onChange={campo('nif')} />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="label">NIF</label>
+              <input className="input" value={form.nif} onChange={campo('nif')} />
+            </div>
+            <div>
+              <label className="label">Telemóvel (sistema)</label>
+              <select className="input" value={form.phone_os}
+                onChange={e => setForm(f => ({ ...f, phone_os: e.target.value as DadosTrabalhadorForm['phone_os'] }))}>
+                <option value="">— (por definir)</option>
+                <option value="iphone">iPhone</option>
+                <option value="android">Android</option>
+              </select>
+            </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>

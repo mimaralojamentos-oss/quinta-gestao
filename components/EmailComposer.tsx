@@ -6,7 +6,7 @@ import {
   AlertTriangle, SpellCheck, Users,
 } from 'lucide-react'
 import {
-  EMAIL_CONTEXT_LABELS, EMAIL_TONES, applySubjectPrefix, DEFAULT_SUBJECT_PREFIX,
+  EMAIL_CONTEXT_LABELS, EMAIL_TONES, applySubjectPrefix, DEFAULT_SUBJECT_PREFIX, DEFAULT_SENDER_NAME,
   type EmailContext, type EmailContextData, type EmailItem, type EmailTone,
 } from '@/lib/emailConfig'
 import { logAccess } from '@/lib/logAccess'
@@ -70,7 +70,7 @@ type Step = 'tom' | 'compose' | 'review' | 'preview' | 'sent'
  */
 export default function EmailComposer({
   context, tenantName, tenantEmail, spaceRef, amount, periods, date,
-  senderName = 'Miguel Severino', freeMode = false, contacts = [], items, onClose, onSent,
+  senderName = DEFAULT_SENDER_NAME, freeMode = false, contacts = [], items, onClose, onSent,
 }: EmailComposerProps) {
   // Havendo detalhe da dívida, começa por perguntar a abordagem.
   const temItens = (items?.length ?? 0) > 0

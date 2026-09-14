@@ -7,7 +7,8 @@ import { formatCurrency, matchesSearch } from '@/lib/utils'
 import { formatarHoras, calcularConta, type Worker } from '@/lib/ponto'
 import { useAuth } from '@/lib/auth-context'
 import WorkerFormModal from '@/components/WorkerFormModal'
-import { Plus, Search, ChevronRight, Users, Pencil } from 'lucide-react'
+import WorkerEmailModal, { type DestinatarioEmail } from '@/components/WorkerEmailModal'
+import { Plus, Search, ChevronRight, Users, Pencil, Mail, Send } from 'lucide-react'
 import Link from 'next/link'
 
 const supabase = createClient()
@@ -39,13 +40,16 @@ export default function TrabalhadoresPage() {
   const [novoAberto, setNovoAberto] = useState(false)
   // Trabalhador em edição. A lista nunca carrega o link nem o código de acesso.
   const [aEditar, setAEditar] = useState<Worker | null>(null)
+  // E-mails: só se selecionam trabalhadores com e-mail preenchido.
+  const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
+  const [emailPara, setEmailPara] = useState<DestinatarioEmail[] | null>(null)
 
   useEffect(() => { carregar() }, [])
 
   async function carregar(silencioso = false) {
     if (!silencioso) setLoading(true)
     const [wRes, eRes, pRes] = await Promise.all([
-      supabase.from('workers').select('id, name, phone, email, nif, notes, hourly_rate, hourly_rate_holiday, active').order('name'),
+      supabase.from('workers').select('id, name, phone, email, phone_os, nif, notes, hourly_rate, hourly_rate_holiday, active').order('name'),
       supabase.from('work_entries').select('worker_id, work_date, start_time, amount, hours'),
       supabase.from('worker_payments').select('worker_id, amount'),
     ])
@@ -76,6 +80,22 @@ export default function TrabalhadoresPage() {
 
   const totalEmDivida = visiveis.reduce((s, l) => s + Math.max(0, l.saldo), 0)
   const totalHoras = visiveis.reduce((s, l) => s + l.horas, 0)
+
+  const elegiveis = visiveis.filter(l => l.email)
+  const escolhidos = elegiveis.filter(l => selecionados.has(l.id))
+  const todosEscolhidos = elegiveis.length > 0 && escolhidos.length === elegiveis.length
+
+  function alternar(id: string) {
+    setSelecionados(s => {
+      const novo = new Set(s)
+      if (novo.has(id)) novo.delete(id)
+      else novo.add(id)
+      return novo
+    })
+  }
+  function alternarTodos() {
+    setSelecionados(todosEscolhidos ? new Set() : new Set(elegiveis.map(l => l.id)))
+  }
 
   return (
     <AppLayout>
@@ -122,6 +142,15 @@ export default function TrabalhadoresPage() {
               checked={mostrarInativos} onChange={e => setMostrarInativos(e.target.checked)} />
             Mostrar inativos
           </label>
+          {podeEditar && (
+            <div className="flex items-center gap-2 ml-auto">
+              <span className="text-xs text-gray-400 hidden sm:inline">Só trabalhadores com e-mail podem ser selecionados</span>
+              <button className="btn-secondary text-sm" disabled={escolhidos.length === 0}
+                onClick={() => setEmailPara(escolhidos)}>
+                <Send className="w-4 h-4" /> Enviar e-mail aos selecionados ({escolhidos.length})
+              </button>
+            </div>
+          )}
         </div>
 
         {erro && (
@@ -146,6 +175,13 @@ export default function TrabalhadoresPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 text-left text-gray-500 text-xs uppercase">
+                  {podeEditar && (
+                    <th className="table-header w-8">
+                      <input type="checkbox" className="accent-emerald-600 w-4 h-4 align-middle"
+                        title={elegiveis.length === 0 ? 'Nenhum trabalhador visível tem e-mail' : 'Selecionar todos os que têm e-mail'}
+                        disabled={elegiveis.length === 0} checked={todosEscolhidos} onChange={alternarTodos} />
+                    </th>
+                  )}
                   <th className="table-header">Trabalhador</th>
                   <th className="table-header">Preço/hora</th>
                   <th className="table-header text-right">Horas</th>
@@ -158,6 +194,13 @@ export default function TrabalhadoresPage() {
               <tbody className="divide-y divide-gray-50">
                 {visiveis.map(l => (
                   <tr key={l.id} className="hover:bg-gray-50 transition-colors">
+                    {podeEditar && (
+                      <td className="table-cell w-8">
+                        <input type="checkbox" className="accent-emerald-600 w-4 h-4 align-middle disabled:opacity-40"
+                          title={l.email ? `Selecionar ${l.name}` : 'Sem e-mail — edita o trabalhador para o acrescentar'}
+                          disabled={!l.email} checked={!!l.email && selecionados.has(l.id)} onChange={() => alternar(l.id)} />
+                      </td>
+                    )}
                     <td className="table-cell">
                       <Link href={`/trabalhadores/${l.id}`} prefetch={false}
                         className="font-medium text-gray-900 hover:text-emerald-600 transition-colors">
@@ -168,6 +211,9 @@ export default function TrabalhadoresPage() {
                         <p className="text-xs text-gray-400 mt-0.5 break-all">
                           {[l.phone, l.email].filter(Boolean).join(' · ')}
                         </p>
+                      )}
+                      {podeEditar && !l.email && (
+                        <p className="text-xs text-gray-400 italic mt-0.5">sem e-mail — não pode receber e-mails</p>
                       )}
                     </td>
                     <td className="table-cell text-xs text-gray-600">
@@ -186,6 +232,13 @@ export default function TrabalhadoresPage() {
                     </td>
                     <td className="table-cell">
                       <div className="flex items-center justify-end gap-3">
+                        {podeEditar && (
+                          <button onClick={() => setEmailPara([l])} disabled={!l.email}
+                            title={l.email ? `Enviar e-mail a ${l.name}` : 'Sem e-mail — edita o trabalhador para o acrescentar'}
+                            className="text-gray-300 hover:text-emerald-600 disabled:hover:text-gray-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors inline-flex">
+                            <Mail className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                         {podeEditar && (
                           <button onClick={() => setAEditar(l)} title="Editar dados"
                             className="text-gray-300 hover:text-blue-500 transition-colors inline-flex">
@@ -219,6 +272,10 @@ export default function TrabalhadoresPage() {
           onClose={() => setAEditar(null)}
           onSaved={async () => { setAEditar(null); await carregar(true) }}
         />
+      )}
+
+      {emailPara && (
+        <WorkerEmailModal destinatarios={emailPara} onClose={() => setEmailPara(null)} />
       )}
     </AppLayout>
   )

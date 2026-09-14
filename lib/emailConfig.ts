@@ -10,6 +10,9 @@
 
 export const DEFAULT_SUBJECT_PREFIX = '[QdBV Severino] - '
 
+/** Remetente e assinatura dos e-mails redigidos na aplicação. */
+export const DEFAULT_SENDER_NAME = 'Miguel Severino'
+
 export function getSubjectPrefix(): string {
   return process.env.NEXT_PUBLIC_EMAIL_SUBJECT_PREFIX ?? DEFAULT_SUBJECT_PREFIX
 }

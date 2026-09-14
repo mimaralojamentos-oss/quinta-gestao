@@ -9,11 +9,18 @@
  *   3. Os pagamentos abatem sempre aos dias mais antigos primeiro.
  */
 
+/** Sistema operativo do telemóvel — decide as instruções de instalação enviadas por e-mail. */
+export type PhoneOs = 'iphone' | 'android'
+
+export const PHONE_OS_LABELS: Record<PhoneOs, string> = { iphone: 'iPhone', android: 'Android' }
+
 export interface Worker {
   id: string
   name: string
   phone: string | null
   email: string | null
+  /** A null está por definir. */
+  phone_os: PhoneOs | null
   nif: string | null
   notes: string | null
   hourly_rate: number
@@ -207,6 +214,8 @@ export interface DadosTrabalhadorForm {
   name: string
   phone: string
   email: string
+  /** '' = por definir. */
+  phone_os: PhoneOs | ''
   nif: string
   notes: string
   hourly_rate: string
@@ -215,13 +224,14 @@ export interface DadosTrabalhadorForm {
 }
 
 export const DADOS_TRABALHADOR_VAZIOS: DadosTrabalhadorForm = {
-  name: '', phone: '', email: '', nif: '', notes: '',
+  name: '', phone: '', email: '', phone_os: '', nif: '', notes: '',
   hourly_rate: '', hourly_rate_holiday: '', active: true,
 }
 
 export function dadosDoTrabalhador(w: Worker): DadosTrabalhadorForm {
   return {
-    name: w.name, phone: w.phone ?? '', email: w.email ?? '', nif: w.nif ?? '', notes: w.notes ?? '',
+    name: w.name, phone: w.phone ?? '', email: w.email ?? '', phone_os: w.phone_os ?? '',
+    nif: w.nif ?? '', notes: w.notes ?? '',
     hourly_rate: String(w.hourly_rate ?? ''),
     hourly_rate_holiday: w.hourly_rate_holiday != null ? String(w.hourly_rate_holiday) : '',
     active: w.active,
@@ -239,12 +249,13 @@ export function emailValido(email: string): boolean {
  * isso editar os dados não mexe no acesso que ele já tem no telemóvel.
  */
 export function validarDadosTrabalhador(f: DadosTrabalhadorForm):
-  { erro: string } | { campos: Pick<Worker, 'name' | 'phone' | 'email' | 'nif' | 'notes' | 'hourly_rate' | 'hourly_rate_holiday' | 'active'> } {
+  { erro: string } | { campos: Pick<Worker, 'name' | 'phone' | 'email' | 'phone_os' | 'nif' | 'notes' | 'hourly_rate' | 'hourly_rate_holiday' | 'active'> } {
   if (!f.name.trim()) return { erro: 'O nome é obrigatório' }
   const tarifa = parseFloat(f.hourly_rate)
   if (!tarifa || tarifa <= 0) return { erro: 'Indica o preço por hora' }
   const email = f.email.trim()
   if (email && !emailValido(email)) return { erro: 'O e-mail não parece válido' }
+  if (f.phone_os && !(f.phone_os in PHONE_OS_LABELS)) return { erro: 'Sistema do telemóvel inválido' }
   const tarifaAlta = f.hourly_rate_holiday ? parseFloat(f.hourly_rate_holiday) : null
   if (tarifaAlta != null && (isNaN(tarifaAlta) || tarifaAlta < 0)) return { erro: 'O preço de fim de semana e feriados não é válido' }
 
@@ -253,6 +264,7 @@ export function validarDadosTrabalhador(f: DadosTrabalhadorForm):
       name: f.name.trim(),
       phone: f.phone.trim() || null,
       email: email || null,
+      phone_os: f.phone_os || null,
       nif: f.nif.trim() || null,
       notes: f.notes.trim() || null,
       hourly_rate: tarifa,
