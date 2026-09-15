@@ -5,7 +5,7 @@ import { useEffect, useState, useMemo } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { CashFundMovement } from '@/lib/types'
 import { formatCurrency, formatDate, matchesSearch, getMonthLabel } from '@/lib/utils'
-import { Plus, TrendingUp, TrendingDown, Wallet, Trash2, Search, X, Calendar, ArrowRightLeft } from 'lucide-react'
+import { Plus, TrendingUp, TrendingDown, Wallet, Trash2, Pencil, Search, X, Calendar, ArrowRightLeft } from 'lucide-react'
 import CashModal from './CashModal'
 import TransferModal from './TransferModal'
 import { useAuth } from '@/lib/auth-context'
@@ -25,10 +25,11 @@ export default function CaixaPage() {
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [showTransfer, setShowTransfer] = useState(false)
+  // Movimento manual a editar (abre o CashModal em modo edição)
+  const [editing, setEditing] = useState<CashFundMovement | null>(null)
 
   // Saldo numa data específica
   const [saldoData, setSaldoData] = useState('')
-  const [saldoNaData, setSaldoNaData] = useState<number | null>(null)
 
   // filtros
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all')
@@ -58,13 +59,14 @@ export default function CaixaPage() {
     setLoading(false)
   }
 
-  function calcularSaldoNaData(data: string) {
-    if (!data) { setSaldoNaData(null); return }
-    const saldo = movements
-      .filter(m => m.movement_date <= data)
+  // Calculado a partir dos movimentos, por isso acompanha sozinho qualquer
+  // gravação, edição ou remoção (antes só mudava ao escolher outra data).
+  const saldoNaData = useMemo(() => {
+    if (!saldoData) return null
+    return movements
+      .filter(m => m.movement_date <= saldoData)
       .reduce((s, m) => s + m.amount, 0)
-    setSaldoNaData(saldo)
-  }
+  }, [movements, saldoData])
 
   async function handleDelete(id: string, source: string) {
     if (source !== 'manual') {
@@ -128,6 +130,10 @@ export default function CaixaPage() {
     if (source === 'despesa') return '💸 Despesa'
     if (source === 'documento') return '📄 Documento'
     if (source === 'transferencia_banco') return '🏦 Transferência'
+    // Também automáticos: sem estas etiquetas apareciam como "Manual",
+    // apesar de não se poderem editar nem apagar aqui.
+    if (source === 'divida') return '💰 Dívida'
+    if (source === 'eletricidade') return '⚡ Eletricidade'
     return '✋ Manual'
   }
 
@@ -228,7 +234,7 @@ export default function CaixaPage() {
                 type="date"
                 className="input text-xs py-0.5 h-6 w-full mb-0.5"
                 value={saldoData}
-                onChange={e => { setSaldoData(e.target.value); calcularSaldoNaData(e.target.value) }}
+                onChange={e => setSaldoData(e.target.value)}
               />
               {saldoNaData !== null && (
                 <p className={`text-sm font-bold ${saldoNaData >= 0 ? 'text-blue-600' : 'text-red-600'}`}>
@@ -329,7 +335,7 @@ export default function CaixaPage() {
                   <th className={thClass} style={{ width: '200px' }} onClick={() => handleSort('notes')}>
                     Notas <SortIcon field="notes" sortField={sortField} sortDir={sortDir} variant="chevron" />
                   </th>
-                  {(isAdmin || isCoAdmin) && <th className="px-3 py-2" style={{ width: '40px' }} />}
+                  {(isAdmin || isCoAdmin) && <th className="px-3 py-2" style={{ width: '70px' }} />}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
@@ -355,10 +361,26 @@ export default function CaixaPage() {
                     <td className="px-3 py-2 text-xs text-gray-500">{m.notes ?? '—'}</td>
                     {(isAdmin || isCoAdmin) && (
                       <td className="px-3 py-2">
-                        <button onClick={() => handleDelete(m.id, (m as any).source ?? 'manual')}
-                          className="text-gray-300 hover:text-red-500 transition-colors" title="Apagar">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        <div className="flex items-center gap-2">
+                          {((m as any).source ?? 'manual') === 'manual' ? (
+                            <button onClick={() => setEditing(m)}
+                              className="text-gray-300 hover:text-blue-500 transition-colors" title="Editar">
+                              <Pencil className="w-4 h-4" />
+                            </button>
+                          ) : (
+                            // O tooltip vai no span: um botão desativado não mostra o title em todos os navegadores.
+                            <span className="inline-flex" title="Movimento gerado automaticamente — edita a despesa/pagamento de origem">
+                              <button disabled aria-label="Editar (indisponível para movimentos automáticos)"
+                                className="text-gray-300 opacity-40 cursor-not-allowed">
+                                <Pencil className="w-4 h-4" />
+                              </button>
+                            </span>
+                          )}
+                          <button onClick={() => handleDelete(m.id, (m as any).source ?? 'manual')}
+                            className="text-gray-300 hover:text-red-500 transition-colors" title="Apagar">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </td>
                     )}
                   </tr>
@@ -376,6 +398,15 @@ export default function CaixaPage() {
         <CashModal
           onClose={() => setShowModal(false)}
           onSaved={() => { setShowModal(false); fetchData() }}
+        />
+      )}
+
+      {editing && (isAdmin || isCoAdmin) && (
+        <CashModal
+          key={editing.id}
+          movement={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); fetchData() }}
         />
       )}
 

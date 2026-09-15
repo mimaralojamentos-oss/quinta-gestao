@@ -2,42 +2,84 @@
 
 import { useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { CashFundMovement } from '@/lib/types'
 import { X } from 'lucide-react'
 
 interface Props {
   onClose: () => void
   onSaved: () => void
+  /**
+   * Movimento manual a editar. Sem ele, cria um novo. Só movimentos com
+   * source='manual' se editam aqui — os automáticos corrigem-se na origem,
+   * a mesma regra do apagar.
+   */
+  movement?: CashFundMovement | null
 }
 
-export default function CashModal({ onClose, onSaved }: Props) {
-  const [form, setForm] = useState({
-    movement_date: new Date().toISOString().slice(0, 10),
-    description: '',
-    amount: '',
-    type: 'entrada',
-    notes: '',
-  })
+export default function CashModal({ onClose, onSaved, movement }: Props) {
+  const editar = !!movement
+  const [form, setForm] = useState<{ movement_date: string; description: string; amount: string; type: string; notes: string }>(() =>
+    movement
+      ? {
+          movement_date: movement.movement_date,
+          description: movement.description ?? '',
+          // Na base de dados a saída guarda-se negativa; aqui escreve-se sempre o valor absoluto.
+          amount: String(Math.abs(Number(movement.amount))),
+          type: movement.type,
+          notes: movement.notes ?? '',
+        }
+      : {
+          movement_date: new Date().toISOString().slice(0, 10),
+          description: '',
+          amount: '',
+          type: 'entrada',
+          notes: '',
+        })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
   async function handleSave() {
-    if (!form.description || !form.amount) { setError('Descrição e valor são obrigatórios'); return }
-    setSaving(true); setError('')
+    if (!form.description.trim() || !form.amount) { setError('Descrição e valor são obrigatórios'); return }
+    const valor = Math.abs(parseFloat(String(form.amount).replace(',', '.')))
+    if (isNaN(valor) || valor === 0) { setError('Indica um valor válido'); return }
 
-    const signedAmount = form.type === 'saida'
-      ? -Math.abs(parseFloat(form.amount))
-      : Math.abs(parseFloat(form.amount))
+    // O sinal vem sempre do tipo: saída negativa, entrada positiva. Uma
+    // transferência manual é positiva ao criar (como sempre foi); ao editar
+    // mantém o sinal que já tinha, para não o inverter sem ninguém reparar.
+    const manterNegativo = form.type === 'transferencia' && movement?.type === 'transferencia' && Number(movement.amount) < 0
+    const signedAmount = form.type === 'saida' || manterNegativo ? -valor : valor
 
-    const { error: err } = await supabase.from('cash_fund_movements').insert({
+    const payload = {
       movement_date: form.movement_date,
-      description: form.description,
+      description: form.description.trim(),
       amount: signedAmount,
       type: form.type,
       notes: form.notes || null,
-    })
+    }
 
-    setSaving(false)
-    if (err) { setError(err.message); return }
+    setSaving(true); setError('')
+
+    if (movement) {
+      // O filtro de origem repete a regra no próprio pedido: mesmo que o botão
+      // fosse contornado, um movimento automático nunca é alterado aqui.
+      const { data, error: err } = await supabase
+        .from('cash_fund_movements')
+        .update(payload)
+        .eq('id', movement.id)
+        .or('source.eq.manual,source.is.null')
+        .select('id')
+      setSaving(false)
+      if (err) { setError(err.message); return }
+      if (!data || data.length === 0) {
+        setError('Não foi possível gravar: este movimento não é manual ou já não existe.')
+        return
+      }
+    } else {
+      const { error: err } = await supabase.from('cash_fund_movements').insert(payload)
+      setSaving(false)
+      if (err) { setError(err.message); return }
+    }
+
     onSaved()
   }
 
@@ -45,7 +87,7 @@ export default function CashModal({ onClose, onSaved }: Props) {
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
         <div className="flex items-center justify-between mb-5">
-          <h2 className="font-semibold text-lg text-gray-900">Novo Movimento de Caixa</h2>
+          <h2 className="font-semibold text-lg text-gray-900">{editar ? 'Editar Movimento de Caixa' : 'Novo Movimento de Caixa'}</h2>
           <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
         </div>
 
@@ -104,7 +146,7 @@ export default function CashModal({ onClose, onSaved }: Props) {
         <div className="flex justify-end gap-3 mt-6">
           <button className="btn-secondary" onClick={onClose}>Cancelar</button>
           <button className="btn-primary" onClick={handleSave} disabled={saving}>
-            {saving ? 'A guardar...' : 'Guardar'}
+            {saving ? 'A guardar...' : editar ? 'Guardar alterações' : 'Guardar'}
           </button>
         </div>
       </div>
