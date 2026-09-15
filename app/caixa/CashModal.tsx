@@ -43,11 +43,10 @@ export default function CashModal({ onClose, onSaved, movement }: Props) {
     const valor = Math.abs(parseFloat(String(form.amount).replace(',', '.')))
     if (isNaN(valor) || valor === 0) { setError('Indica um valor válido'); return }
 
-    // O sinal vem sempre do tipo: saída negativa, entrada positiva. Uma
-    // transferência manual é positiva ao criar (como sempre foi); ao editar
-    // mantém o sinal que já tinha, para não o inverter sem ninguém reparar.
-    const manterNegativo = form.type === 'transferencia' && movement?.type === 'transferencia' && Number(movement.amount) < 0
-    const signedAmount = form.type === 'saida' || manterNegativo ? -valor : valor
+    // O sinal vem sempre do tipo. Saída e transferência são dinheiro a SAIR da
+    // caixa → negativo (a mesma regra do TransferModal e dos filtros da página).
+    // Só a entrada é positiva. O utilizador escreve sempre o valor absoluto.
+    const signedAmount = form.type === 'saida' || form.type === 'transferencia' ? -valor : valor
 
     const payload = {
       movement_date: form.movement_date,
@@ -113,6 +112,12 @@ export default function CashModal({ onClose, onSaved, movement }: Props) {
                 </button>
               ))}
             </div>
+            {form.type === 'transferencia' && (
+              <p className="text-xs text-blue-700 mt-1.5">
+                Dinheiro que sai da caixa (ex.: depósito no banco) — o saldo desce, tal como numa saída.
+                Para transferências que queres conciliar com o extrato, usa &quot;Transferir para o banco&quot;.
+              </p>
+            )}
           </div>
 
           <div>
