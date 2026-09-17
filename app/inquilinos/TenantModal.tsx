@@ -114,6 +114,8 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
   const [allSpaces, setAllSpaces] = useState<any[]>([])
   const [assignedSpaces, setAssignedSpaces] = useState<string[]>([])
   const [savingSpaces, setSavingSpaces] = useState(false)
+  // Contrato ativo de cada espaço: esses espaços seguem o contrato, não se mexem à mão
+  const [contratoPorEspaco, setContratoPorEspaco] = useState<Record<string, { tenant_id: string; tenant_name: string | null }>>({})
 
   const [payments, setPayments] = useState<PaymentRow[]>([])
   const [leases, setLeases] = useState<any[]>([])
@@ -163,7 +165,15 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
   }, [tenant])
 
   async function fetchSpaces() {
-    const { data } = await supabase.from('spaces').select('id, ref, status, tenant_id').order('ref')
+    const [{ data }, { data: ativos }] = await Promise.all([
+      supabase.from('spaces').select('id, ref, status, tenant_id').order('ref'),
+      supabase.from('leases').select('space_id, tenant_id, tenant:tenants(name)').eq('status', 'ativo'),
+    ])
+    const porEspaco: Record<string, { tenant_id: string; tenant_name: string | null }> = {}
+    for (const l of (ativos ?? []) as any[]) {
+      if (l.space_id && !porEspaco[l.space_id]) porEspaco[l.space_id] = { tenant_id: l.tenant_id, tenant_name: l.tenant?.name ?? null }
+    }
+    setContratoPorEspaco(porEspaco)
     setAllSpaces(data ?? [])
     const assigned = (data ?? []).filter(s => s.tenant_id === tenant?.id).map(s => s.id)
     setAssignedSpaces(assigned)
@@ -534,6 +544,23 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
     if (!tenant) return
     const isAssigned = assignedSpaces.includes(spaceId)
     const space = allSpaces.find(s => s.id === spaceId)
+
+    // Os contratos mandam na ocupação. Confirma na base de dados (não só no
+    // que está no ecrã) se o espaço tem contrato ativo antes de mexer à mão.
+    const { data: ativos, error: erroContratos } = await supabase
+      .from('leases').select('tenant_id, tenant:tenants(name)')
+      .eq('space_id', spaceId).eq('status', 'ativo')
+    if (erroContratos) { alert(`Não foi possível confirmar os contratos do espaço: ${erroContratos.message}`); return }
+    const contrato = (ativos ?? [])[0] as any
+    if (contrato && isAssigned) {
+      alert(`O espaço ${space?.ref ?? ''} tem um contrato ativo — termina o contrato em vez de desassociar.\n\n(Inquilinos → botão "Contrato" → Estado: Terminado)`)
+      return
+    }
+    if (contrato && contrato.tenant_id !== tenant.id) {
+      alert(`O espaço ${space?.ref ?? ''} tem um contrato ativo de ${contrato.tenant?.name ?? 'outro inquilino'} — não pode ser associado a ${tenant.name}.`)
+      return
+    }
+
     setSavingSpaces(true)
     if (isAssigned) {
       await supabase.from('spaces').update({ tenant_id: null, status: 'disponivel' }).eq('id', spaceId)
@@ -1350,18 +1377,26 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
 
           {!isNew && tab === 'espacos' && (
             <div>
-              <p className="text-sm text-gray-500 mb-4">Clica num espaço para associar ou desassociar.</p>
+              <p className="text-sm text-gray-500 mb-1">Clica num espaço para associar ou desassociar à mão.</p>
+              <p className="text-xs text-gray-400 mb-4">
+                Serve para espaços ocupados sem contrato na app (ex.: uso próprio). Os espaços com contrato ativo seguem o
+                contrato: para os libertar ou ocupar usa o botão &quot;Contrato&quot;.
+              </p>
               {savingSpaces && <p className="text-xs text-emerald-600 mb-3">A guardar...</p>}
               <div className="grid grid-cols-4 gap-2">
                 {allSpaces.map(space => {
                   const isAssigned = assignedSpaces.includes(space.id)
-                  const isOtherTenant = space.tenant_id && space.tenant_id !== tenant?.id
+                  const contrato = contratoPorEspaco[space.id]
+                  const isOtherTenant = (space.tenant_id && space.tenant_id !== tenant?.id) || (contrato && contrato.tenant_id !== tenant?.id)
                   return (
-                    <button key={space.id} onClick={() => !isOtherTenant && handleToggleSpace(space.id)} disabled={isOtherTenant || savingSpaces}
+                    <button key={space.id} onClick={() => !isOtherTenant && handleToggleSpace(space.id)} disabled={!!isOtherTenant || savingSpaces}
+                      title={contrato
+                        ? `Contrato ativo${contrato.tenant_name ? ` de ${contrato.tenant_name}` : ''} — termina ou cria contratos no botão "Contrato"`
+                        : isAssigned ? 'Associado à mão (sem contrato) — clica para desassociar' : undefined}
                       className={`p-3 rounded-lg border-2 text-sm font-medium transition-all ${isAssigned ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : isOtherTenant ? 'border-gray-100 bg-gray-50 text-gray-300 cursor-not-allowed' : 'border-gray-200 bg-white text-gray-600 hover:border-emerald-300 hover:bg-emerald-50'}`}>
                       {space.ref}
-                      {isAssigned && <span className="block text-xs mt-0.5">✓</span>}
-                      {isOtherTenant && <span className="block text-xs mt-0.5 text-gray-300">ocupado</span>}
+                      {isAssigned && <span className="block text-xs mt-0.5">{contrato ? '✓ contrato' : '✓ à mão'}</span>}
+                      {isOtherTenant && <span className="block text-xs mt-0.5 text-gray-300">{contrato ? 'com contrato' : 'ocupado'}</span>}
                     </button>
                   )
                 })}
