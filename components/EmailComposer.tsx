@@ -119,6 +119,8 @@ export default function EmailComposer({
   }
   const [bulkResultados, setBulkResultados] = useState<{ name: string; email: string; ok: boolean; erro?: string }[]>([])
   const [bulkProgresso, setBulkProgresso] = useState(0)
+  // Resumo enviado aos administradores no fim do envio em massa
+  const [bulkResumo, setBulkResumo] = useState<{ total: number; enviados: number; falhados: string[] } | null>(null)
 
   const sugestoes = contacts
     .filter(c => {
@@ -304,12 +306,15 @@ export default function EmailComposer({
   /**
    * Envio em massa, depois de confirmado: um pedido a /api/send-email por
    * destinatário, um de cada vez — cada e-mail só tem o endereço desse
-   * inquilino no Para (os administradores em CC, como nos envios individuais),
-   * e cada um fica no registo de e-mails enviados pela própria API.
+   * inquilino no Para e vai SEM cópia aos administradores (skipAdminCc), para
+   * não lhes chegarem dezenas de cópias. Cada envio fica no registo de e-mails
+   * enviados pela própria API. No fim, cada administrador recebe um único
+   * resumo (enviarResumoAdmins). Os envios individuais mantêm o CC.
    */
   async function handleSendBulk() {
     if (!serverAllowsSend || !reviewed || bulkValidos.length === 0) return
-    setSending(true); setError(''); setBulkProgresso(0)
+    setSending(true); setError(''); setBulkProgresso(0); setBulkResumo(null)
+    const corpoEnviado = `${body}\n\nCom os melhores cumprimentos,\n${senderName}`
     const resultados: { name: string; email: string; ok: boolean; erro?: string }[] = []
     for (const r of bulkValidos) {
       try {
@@ -319,10 +324,12 @@ export default function EmailComposer({
           body: JSON.stringify({
             to: r.email,
             subject,               // o prefixo é aplicado no servidor
-            body: `${body}\n\nCom os melhores cumprimentos,\n${senderName}`,
+            body: corpoEnviado,
             senderName,
             recipientName: r.name,
             context: context ?? null,
+            // Em massa não há CC por destinatário: os administradores recebem um resumo no fim.
+            skipAdminCc: true,
           }),
         })
         const data = await res.json().catch(() => ({}))
@@ -342,10 +349,71 @@ export default function EmailComposer({
         (bulkExcluidos.length > 0 ? ` · ${bulkExcluidos.length} sem e-mail ficaram de fora` : ''),
     })
 
+    setBulkResumo(await enviarResumoAdmins(resultados, corpoEnviado))
+
     setBulkResultados(resultados)
     setSending(false)
     setStep('bulk_result')
     if (enviados.length > 0) onSent?.()
+  }
+
+  /**
+   * Um único e-mail por administrador com o resumo do envio em massa: data e
+   * hora, assunto, quem recebeu, quem falhou, quem ficou de fora (e porquê) e
+   * o texto enviado. Vai sem CC; fica no registo de e-mails enviados.
+   */
+  async function enviarResumoAdmins(
+    resultados: { name: string; email: string; ok: boolean; erro?: string }[],
+    corpoEnviado: string,
+  ): Promise<{ total: number; enviados: number; falhados: string[] }> {
+    if (adminEmails.length === 0) return { total: 0, enviados: 0, falhados: [] }
+
+    const quando = new Date().toLocaleString('pt-PT', { timeZone: 'Europe/Lisbon', dateStyle: 'short', timeStyle: 'short' })
+    const receberam = resultados.filter(r => r.ok)
+    const falharam = resultados.filter(r => !r.ok)
+    const linhas = [
+      'Resumo de um envio de e-mail em massa feito na aplicação.',
+      '',
+      `Data/hora: ${quando}`,
+      `Assunto: ${applySubjectPrefix(subject, subjectPrefix)}`,
+      `Enviados: ${receberam.length} · Falharam: ${falharam.length} · Ficaram de fora: ${bulkExcluidos.length}`,
+      '',
+      `RECEBERAM (${receberam.length}):`,
+      ...(receberam.length > 0 ? receberam.map(r => `• ${r.name} <${r.email}>`) : ['—']),
+    ]
+    if (falharam.length > 0) {
+      linhas.push('', `FALHARAM (${falharam.length}):`, ...falharam.map(r => `• ${r.name} <${r.email}> — ${r.erro ?? 'erro desconhecido'}`))
+    }
+    if (bulkExcluidos.length > 0) {
+      linhas.push('', `FICARAM DE FORA (${bulkExcluidos.length}):`, ...bulkExcluidos.map(e => `• ${e.name} — ${e.motivo}`))
+    }
+    linhas.push('', '────────────────────', 'TEXTO ENVIADO:', '', corpoEnviado)
+
+    const falhados: string[] = []
+    let enviados = 0
+    for (const admin of adminEmails) {
+      try {
+        const res = await fetch('/api/send-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            to: admin,
+            subject: `Resumo de envio em massa — ${subject}`,
+            body: linhas.join('\n'),
+            senderName,
+            recipientName: 'Administrador',
+            context: 'resumo_envio_massa',
+            skipAdminCc: true,
+          }),
+        })
+        const data = await res.json().catch(() => ({}))
+        if (res.ok && !data.error) enviados++
+        else falhados.push(`${admin}: ${data.error ?? 'erro desconhecido'}`)
+      } catch {
+        falhados.push(`${admin}: erro de ligação`)
+      }
+    }
+    return { total: adminEmails.length, enviados, falhados }
   }
 
   const finalSubject = applySubjectPrefix(subject, subjectPrefix)
@@ -362,7 +430,10 @@ export default function EmailComposer({
         </p>
         <p className="text-xs text-gray-500 mb-3">
           Cada inquilino só vê o seu próprio endereço.
-          {adminEmails.length > 0 && ` Os administradores (${adminEmails.length}) recebem cópia de cada e-mail, como nos envios individuais.`}
+          {' '}Sem cópias por e-mail:{' '}
+          {adminEmails.length > 0
+            ? `no fim, cada administrador (${adminEmails.length}) recebe um único resumo com os destinatários e o texto enviado.`
+            : 'não há administradores com e-mail para receber o resumo.'}
         </p>
 
         <p className="text-xs font-medium text-gray-600 mb-1">Destinatários</p>
@@ -408,6 +479,14 @@ export default function EmailComposer({
         <p className="text-sm text-gray-700 mb-3">
           {ok} de {bulkResultados.length} e-mail(s) enviado(s). Todos ficaram no registo de e-mails enviados.
         </p>
+        {bulkResumo && (
+          <p className={`text-xs mb-3 ${bulkResumo.falhados.length > 0 || bulkResumo.total === 0 ? 'text-amber-700' : 'text-gray-500'}`}>
+            {bulkResumo.total === 0
+              ? 'Não foi enviado resumo: não há administradores com e-mail.'
+              : `Resumo enviado a ${bulkResumo.enviados} de ${bulkResumo.total} administrador(es).`}
+            {bulkResumo.falhados.length > 0 && ` Falhou: ${bulkResumo.falhados.join('; ')}`}
+          </p>
+        )}
         <div className="border border-gray-100 rounded-lg max-h-64 overflow-y-auto divide-y divide-gray-50 mb-3">
           {bulkResultados.map(r => (
             <div key={r.email} className="flex items-start gap-2 px-3 py-1.5 text-sm">
@@ -664,9 +743,11 @@ export default function EmailComposer({
           <span className="text-gray-400 w-10 flex-shrink-0">Cc</span>
           <span className="text-gray-600 flex items-center gap-1 flex-wrap">
             <Users className="w-3.5 h-3.5 text-gray-400" />
-            {adminEmails.length > 0
-              ? adminEmails.join(', ')
-              : <span className="text-gray-400">administradores da aplicação</span>}
+            {bulk
+              ? <span className="text-gray-500">sem cópias — no fim, cada administrador recebe um único resumo</span>
+              : adminEmails.length > 0
+                ? adminEmails.join(', ')
+                : <span className="text-gray-400">administradores da aplicação</span>}
           </span>
         </div>
       </div>
