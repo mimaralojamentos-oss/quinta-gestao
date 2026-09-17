@@ -9,7 +9,7 @@ import { Plus, Search, FileText, Phone, Mail, X, AlertTriangle, ChevronDown, Tra
 import TenantModal from './TenantModal'
 import LeaseModal from './LeaseModal'
 import { useAuth } from '@/lib/auth-context'
-import EmailComposer from '@/components/EmailComposer'
+import EmailComposer, { type BulkRecipient } from '@/components/EmailComposer'
 import { logAccess } from '@/lib/logAccess'
 import { buildAppliedAdvanceMap } from '@/lib/advanceCredit'
 import { getDebtRemaining } from '@/lib/debts'
@@ -57,7 +57,7 @@ export default function InquilinosPage() {
   const spaceDropdownRef = useRef<HTMLDivElement>(null)
   const [filterSpaceType, setFilterSpaceType] = useState<'all' | 'pavilhao' | 'habitacao' | 'loja'>('all')
   const [filterDebt, setFilterDebt] = useState<'all' | 'com_divida' | 'sem_divida'>('all')
-  const [filterContract, setFilterContract] = useState<'all' | '30dias' | '60dias' | '90dias' | '180dias' | 'expirado'>('all')
+  const [filterContract, setFilterContract] = useState<'all' | 'ativo' | 'sem_ativo' | '30dias' | '60dias' | '90dias' | '180dias' | 'expirado'>('all')
   const { sortField, sortDir, handleSort } = useSort<SortField>('spaces', 'asc')
   const [showTenantModal, setShowTenantModal] = useState(false)
   const [showLeaseModal, setShowLeaseModal] = useState(false)
@@ -71,6 +71,8 @@ export default function InquilinosPage() {
   const [debts, setDebts] = useState<Debt[]>([])
   const [loadingDebts, setLoadingDebts] = useState(false)
   const [emailTenant, setEmailTenant] = useState<TenantWithLease | null>(null)
+  // E-mail aos inquilinos visíveis: um e-mail individual para cada um
+  const [emailBulk, setEmailBulk] = useState<BulkRecipient[] | null>(null)
   const [showNewDebt, setShowNewDebt] = useState(false)
   const [showNewPayment, setShowNewPayment] = useState<string | null>(null)
   const [savingDebt, setSavingDebt] = useState(false)
@@ -280,7 +282,12 @@ export default function InquilinosPage() {
     else if (filterDebt === 'sem_divida') matchDebt = debt <= 0
     const activeLease = t.leases?.find(l => l.status === 'ativo')
     let matchContract = true
-    if (filterContract !== 'all' && activeLease?.end_date) {
+    // Ativo = pelo menos um contrato com status 'ativo'
+    if (filterContract === 'ativo') {
+      matchContract = !!activeLease
+    } else if (filterContract === 'sem_ativo') {
+      matchContract = !activeLease
+    } else if (filterContract !== 'all' && activeLease?.end_date) {
       const endDate = new Date(activeLease.end_date)
       const diffDays = Math.ceil((endDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
       if (filterContract === 'expirado') matchContract = diffDays < 0
@@ -383,6 +390,8 @@ export default function InquilinosPage() {
           </select>
           <select className="input" value={filterContract} onChange={e => setFilterContract(e.target.value as any)}>
             <option value="all">Todos (contrato)</option>
+            <option value="ativo">✅ Com contrato ativo</option>
+            <option value="sem_ativo">➖ Sem contrato ativo</option>
             <option value="expirado">⛔ Contrato expirado</option>
             <option value="30dias">🔴 Expira em 30 dias</option>
             <option value="60dias">🟠 Expira em 60 dias</option>
@@ -391,12 +400,23 @@ export default function InquilinosPage() {
           </select>
         </div>
 
-        {hasFilters && (
-          <p className="text-sm text-gray-500 mb-3">
-            {filtered.length} resultado(s)
-            <button onClick={() => { setSearch(''); setFilterSpaces([]); setFilterSpaceType('all'); setFilterDebt('all'); setFilterContract('all') }}
-              className="ml-2 text-xs text-emerald-600 hover:underline">Limpar filtros</button>
-          </p>
+        {(hasFilters || ((isAdmin || isCoAdmin) && !loading)) && (
+          <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+            {hasFilters ? (
+              <p className="text-sm text-gray-500">
+                {filtered.length} resultado(s)
+                <button onClick={() => { setSearch(''); setFilterSpaces([]); setFilterSpaceType('all'); setFilterDebt('all'); setFilterContract('all') }}
+                  className="ml-2 text-xs text-emerald-600 hover:underline">Limpar filtros</button>
+              </p>
+            ) : <span />}
+            {(isAdmin || isCoAdmin) && !loading && (
+              <button className="btn-secondary text-sm" disabled={filtered.length === 0}
+                onClick={() => setEmailBulk(filtered.map(t => ({ name: t.name, email: t.email })))}
+                title="Um e-mail individual para cada inquilino visível na lista">
+                ✉️ E-mail aos {filtered.length} visíveis
+              </button>
+            )}
+          </div>
         )}
 
         {loading ? (
@@ -778,6 +798,16 @@ export default function InquilinosPage() {
           tenantEmail={emailTenant.email}
           spaceRef={emailTenant.spaces?.[0]?.ref ?? emailTenant.leases?.find((l: any) => l.status === 'ativo')?.space?.ref}
           onClose={() => setEmailTenant(null)}
+        />
+      )}
+
+      {emailBulk && (
+        <EmailComposer
+          context="geral"
+          tenantName="inquilinos"
+          tenantEmail={null}
+          bulkRecipients={emailBulk}
+          onClose={() => setEmailBulk(null)}
         />
       )}
 

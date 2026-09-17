@@ -49,11 +49,23 @@ export interface EmailComposerProps {
    * escolhe primeiro a abordagem do e-mail e o texto discrimina os valores.
    */
   items?: EmailItem[]
+  /**
+   * Envio em massa: o mesmo texto vai para cada destinatário num e-mail
+   * INDIVIDUAL (nunca vários endereços no mesmo Para/CC). Quem não tem e-mail
+   * válido fica de fora e é mostrado antes de enviar. O texto não tem
+   * variáveis por destinatário — é igual para todos.
+   */
+  bulkRecipients?: BulkRecipient[]
   onClose: () => void
   onSent?: () => void
 }
 
-type Step = 'tom' | 'compose' | 'review' | 'preview' | 'sent'
+export interface BulkRecipient {
+  name: string
+  email: string | null | undefined
+}
+
+type Step = 'tom' | 'compose' | 'review' | 'preview' | 'sent' | 'confirm_bulk' | 'bulk_result'
 
 /**
  * Módulo único de envio de e-mails da aplicação.
@@ -70,7 +82,7 @@ type Step = 'tom' | 'compose' | 'review' | 'preview' | 'sent'
  */
 export default function EmailComposer({
   context, tenantName, tenantEmail, spaceRef, amount, periods, date,
-  senderName = DEFAULT_SENDER_NAME, freeMode = false, contacts = [], items, onClose, onSent,
+  senderName = DEFAULT_SENDER_NAME, freeMode = false, contacts = [], items, bulkRecipients, onClose, onSent,
 }: EmailComposerProps) {
   // Havendo detalhe da dívida, começa por perguntar a abordagem.
   const temItens = (items?.length ?? 0) > 0
@@ -92,6 +104,21 @@ export default function EmailComposer({
     : tenantName
 
   const emailValido = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipientEmail)
+
+  // Envio em massa: quem recebe (sem repetir endereços) e quem fica de fora.
+  const bulk = !!bulkRecipients
+  const bulkValidos: { name: string; email: string }[] = []
+  const bulkExcluidos: { name: string; motivo: string }[] = []
+  for (const r of bulkRecipients ?? []) {
+    const email = String(r.email ?? '').trim()
+    if (!email) { bulkExcluidos.push({ name: r.name, motivo: 'sem e-mail' }); continue }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { bulkExcluidos.push({ name: r.name, motivo: `e-mail inválido: ${email}` }); continue }
+    const repetido = bulkValidos.find(v => v.email.toLowerCase() === email.toLowerCase())
+    if (repetido) { repetido.name = `${repetido.name} / ${r.name}`; continue }
+    bulkValidos.push({ name: r.name, email })
+  }
+  const [bulkResultados, setBulkResultados] = useState<{ name: string; email: string; ok: boolean; erro?: string }[]>([])
+  const [bulkProgresso, setBulkProgresso] = useState(0)
 
   const sugestoes = contacts
     .filter(c => {
@@ -135,7 +162,7 @@ export default function EmailComposer({
 
   // No modo com inquilino, a IA escreve logo ao abrir — exceto se houver
   // abordagem a escolher primeiro. No modo livre começa em branco.
-  useEffect(() => { if (!freeMode && !temItens) generate() }, [])
+  useEffect(() => { if (!freeMode && !temItens && !bulk) generate() }, [])
 
   async function generate(notes?: string, toneOverride?: EmailTone) {
     setGenerating(true); setError('')
@@ -143,7 +170,8 @@ export default function EmailComposer({
     try {
       const payload: EmailContextData & { senderName: string } = {
         context,
-        tenantName: freeMode ? (recipientName || 'destinatário') : tenantName,
+        // Em massa o texto é igual para todos: a IA escreve sem nome próprio.
+        tenantName: bulk ? 'inquilino' : freeMode ? (recipientName || 'destinatário') : tenantName,
         spaceRef, amount, periods, date,
         items,
         tone: toneOverride ?? tone,
@@ -226,6 +254,14 @@ export default function EmailComposer({
 
   async function handleSend() {
     if (!serverAllowsSend) { setError('O teu nível de acesso permite redigir e rever e-mails, mas não enviá-los.'); return }
+    if (bulk) {
+      // Em massa, "Enviar" leva primeiro à lista de destinatários para confirmar.
+      if (bulkValidos.length === 0) { setError('Nenhum dos inquilinos visíveis tem e-mail válido.'); return }
+      if (!reviewed) { setError('É preciso rever a ortografia antes de enviar.'); return }
+      setError('')
+      setStep('confirm_bulk')
+      return
+    }
     if (!recipientEmail) {
       setError(freeMode ? 'Indica o endereço de destino.' : 'Este inquilino não tem e-mail registado.')
       return
@@ -265,9 +301,137 @@ export default function EmailComposer({
     }
   }
 
+  /**
+   * Envio em massa, depois de confirmado: um pedido a /api/send-email por
+   * destinatário, um de cada vez — cada e-mail só tem o endereço desse
+   * inquilino no Para (os administradores em CC, como nos envios individuais),
+   * e cada um fica no registo de e-mails enviados pela própria API.
+   */
+  async function handleSendBulk() {
+    if (!serverAllowsSend || !reviewed || bulkValidos.length === 0) return
+    setSending(true); setError(''); setBulkProgresso(0)
+    const resultados: { name: string; email: string; ok: boolean; erro?: string }[] = []
+    for (const r of bulkValidos) {
+      try {
+        const res = await fetch('/api/send-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            to: r.email,
+            subject,               // o prefixo é aplicado no servidor
+            body: `${body}\n\nCom os melhores cumprimentos,\n${senderName}`,
+            senderName,
+            recipientName: r.name,
+            context: context ?? null,
+          }),
+        })
+        const data = await res.json().catch(() => ({}))
+        resultados.push({ ...r, ok: res.ok && !data.error, erro: data.error })
+      } catch {
+        resultados.push({ ...r, ok: false, erro: 'Erro de ligação' })
+      }
+      setBulkProgresso(resultados.length)
+    }
+
+    const enviados = resultados.filter(r => r.ok)
+    await logAccess({
+      action: 'email',
+      page: '/email',
+      details: `E-mail "${applySubjectPrefix(subject, subjectPrefix)}" enviado individualmente a ${enviados.length} de ${resultados.length} inquilino(s)` +
+        (enviados.length > 0 ? `: ${enviados.map(r => r.name).join(', ')}` : '') +
+        (bulkExcluidos.length > 0 ? ` · ${bulkExcluidos.length} sem e-mail ficaram de fora` : ''),
+    })
+
+    setBulkResultados(resultados)
+    setSending(false)
+    setStep('bulk_result')
+    if (enviados.length > 0) onSent?.()
+  }
+
   const finalSubject = applySubjectPrefix(subject, subjectPrefix)
   const canSend = serverAllowsSend && reviewed && !!body.trim() && !!subject.trim()
-    && (freeMode ? emailValido : !!tenantEmail)
+    && (bulk ? bulkValidos.length > 0 : freeMode ? emailValido : !!tenantEmail)
+
+  // ── Ecrã: confirmar envio em massa ──
+  if (step === 'confirm_bulk') {
+    return (
+      <Shell onClose={onClose} title="Confirmar envio">
+        <p className="text-sm text-gray-700 mb-1">
+          Vão ser enviados <strong>{bulkValidos.length}</strong> e-mail(s) individuais com o assunto{' '}
+          <span className="font-mono text-xs">{finalSubject}</span>.
+        </p>
+        <p className="text-xs text-gray-500 mb-3">
+          Cada inquilino só vê o seu próprio endereço.
+          {adminEmails.length > 0 && ` Os administradores (${adminEmails.length}) recebem cópia de cada e-mail, como nos envios individuais.`}
+        </p>
+
+        <p className="text-xs font-medium text-gray-600 mb-1">Destinatários</p>
+        <div className="border border-gray-200 rounded-lg max-h-56 overflow-y-auto divide-y divide-gray-50 mb-3">
+          {bulkValidos.map(r => (
+            <div key={r.email} className="px-3 py-1.5 text-sm flex justify-between gap-3">
+              <span className="text-gray-800">{r.name}</span>
+              <span className="text-xs text-gray-500 truncate">{r.email}</span>
+            </div>
+          ))}
+        </div>
+
+        {bulkExcluidos.length > 0 && (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3 text-xs text-amber-800">
+            <p className="font-medium mb-1">Ficam de fora ({bulkExcluidos.length}):</p>
+            <ul className="space-y-0.5">
+              {bulkExcluidos.map((e, i) => <li key={i}>{e.name} — {e.motivo}</li>)}
+            </ul>
+          </div>
+        )}
+
+        {error && <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg mb-3">{error}</p>}
+
+        <div className="flex justify-between">
+          <button className="btn-secondary" onClick={() => setStep('compose')} disabled={sending}>
+            <ArrowLeft className="w-4 h-4" /> Voltar
+          </button>
+          <button className="btn-primary" onClick={handleSendBulk} disabled={sending || !canSend}>
+            {sending
+              ? <><Loader2 className="w-4 h-4 animate-spin" /> A enviar {bulkProgresso}/{bulkValidos.length}...</>
+              : <><Send className="w-4 h-4" /> Confirmar e enviar {bulkValidos.length}</>}
+          </button>
+        </div>
+      </Shell>
+    )
+  }
+
+  // ── Ecrã: resultado do envio em massa ──
+  if (step === 'bulk_result') {
+    const ok = bulkResultados.filter(r => r.ok).length
+    return (
+      <Shell onClose={onClose} title="Resultado do envio">
+        <p className="text-sm text-gray-700 mb-3">
+          {ok} de {bulkResultados.length} e-mail(s) enviado(s). Todos ficaram no registo de e-mails enviados.
+        </p>
+        <div className="border border-gray-100 rounded-lg max-h-64 overflow-y-auto divide-y divide-gray-50 mb-3">
+          {bulkResultados.map(r => (
+            <div key={r.email} className="flex items-start gap-2 px-3 py-1.5 text-sm">
+              {r.ok
+                ? <CheckCircle className="w-4 h-4 text-emerald-500 mt-0.5 flex-shrink-0" />
+                : <AlertTriangle className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" />}
+              <div className="min-w-0">
+                <p className="text-gray-800">{r.name} <span className="text-xs text-gray-400">{r.email}</span></p>
+                {!r.ok && <p className="text-xs text-red-600">Falhou: {r.erro ?? 'erro desconhecido'}</p>}
+              </div>
+            </div>
+          ))}
+        </div>
+        {bulkExcluidos.length > 0 && (
+          <p className="text-xs text-amber-700 mb-3">
+            Não enviados por falta de e-mail válido: {bulkExcluidos.map(e => e.name).join(', ')}
+          </p>
+        )}
+        <div className="flex justify-end">
+          <button className="btn-primary" onClick={onClose}>Fechar</button>
+        </div>
+      </Shell>
+    )
+  }
 
   // ── Ecrã: enviado ──
   if (step === 'sent') {
@@ -409,7 +573,7 @@ export default function EmailComposer({
 
   // ── Ecrã principal: redação ──
   return (
-    <Shell onClose={onClose} title="Enviar e-mail">
+    <Shell onClose={onClose} title={bulk ? `Enviar e-mail a ${bulkValidos.length} inquilino(s)` : 'Enviar e-mail'}>
       {!serverAllowsSend && (
         <div className="mb-4 flex items-start gap-2 text-xs text-blue-800 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
           <Eye className="w-4 h-4 flex-shrink-0 mt-0.5" />
@@ -428,7 +592,30 @@ export default function EmailComposer({
 
       {/* Destinatários */}
       <div className="mb-4 space-y-1.5 text-sm">
-        {freeMode ? (
+        {bulk ? (
+          <div>
+            <div className="flex gap-2">
+              <span className="text-gray-400 w-10 flex-shrink-0">Para</span>
+              <span className="text-gray-900">
+                <strong>{bulkValidos.length}</strong> inquilino(s) — um e-mail individual para cada um
+              </span>
+            </div>
+            <details className="ml-12 mt-1">
+              <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-700">Ver destinatários</summary>
+              <ul className="mt-1 max-h-40 overflow-y-auto text-xs text-gray-600 space-y-0.5">
+                {bulkValidos.map(r => <li key={r.email}>{r.name} &lt;{r.email}&gt;</li>)}
+              </ul>
+            </details>
+            {bulkExcluidos.length > 0 && (
+              <p className="ml-12 mt-1 text-xs text-amber-700">
+                ⚠ {bulkExcluidos.length} fica(m) de fora: {bulkExcluidos.map(e => `${e.name} (${e.motivo})`).join(', ')}
+              </p>
+            )}
+            <p className="ml-12 mt-1 text-xs text-gray-500">
+              O mesmo texto vai para todos — escreve sem nomes próprios (não há substituição de variáveis como {'{nome}'}).
+            </p>
+          </div>
+        ) : freeMode ? (
           <div className="relative">
             <label className="label">Para *</label>
             <input
@@ -525,7 +712,7 @@ export default function EmailComposer({
             disabled={generating}
           >
             <Sparkles className="w-3 h-3" />
-            {generating ? 'A gerar...' : freeMode && !body.trim() ? 'Escrever com IA' : 'Gerar de novo'}
+            {generating ? 'A gerar...' : (freeMode || bulk) && !body.trim() ? 'Escrever com IA' : 'Gerar de novo'}
           </button>
         </div>
         {generating ? (
