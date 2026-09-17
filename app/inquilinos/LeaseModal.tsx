@@ -7,6 +7,7 @@ import { X, Upload, FileText, Loader2, Sparkles } from 'lucide-react'
 import { formatCurrency, openStorageDocument, slugifyFilename, getMonthLabel } from '@/lib/utils'
 import { logAccess } from '@/lib/logAccess'
 import { useFileDrop } from '@/lib/useFileDrop'
+import { ocuparEspaco, reavaliarEspaco } from '@/lib/spaceOccupancy'
 
 interface Props {
   tenant: Tenant
@@ -165,8 +166,30 @@ export default function LeaseModal({ tenant, onClose, onSaved }: Props) {
     const rentChanged = !!existingLease && originalRent !== '' && form.monthly_rent !== originalRent
 
     let err
+    // Problemas a atualizar o espaço não desfazem o contrato gravado, mas
+    // ficam à vista em vez de passarem em silêncio.
+    const avisosEspaco: string[] = []
+    const terminou = !!existingLease && form.status !== 'ativo'
     if (existingLease) {
       ;({ error: err } = await supabase.from('leases').update(payload).eq('id', existingLease.id))
+      if (!err) {
+        // Espaços coerentes com o contrato: ao mudar de espaço, o novo fica
+        // ocupado; o antigo — ou o atual, se o contrato terminou — só fica
+        // livre se não houver lá outro contrato ativo.
+        const mudouEspaco = existingLease.space_id !== form.space_id
+        if (form.status === 'ativo' && mudouEspaco) {
+          const e = await ocuparEspaco(supabase, form.space_id, tenant.id)
+          if (e) avisosEspaco.push(e)
+        }
+        if (mudouEspaco && existingLease.space_id) {
+          const e = await reavaliarEspaco(supabase, existingLease.space_id)
+          if (e) avisosEspaco.push(e)
+        }
+        if (terminou) {
+          const e = await reavaliarEspaco(supabase, form.space_id)
+          if (e) avisosEspaco.push(e)
+        }
+      }
       if (!err && rentChanged) {
         // Seed renda inicial no histórico se ainda não existir
         if (rentHistory.length === 0) {
@@ -195,7 +218,11 @@ export default function LeaseModal({ tenant, onClose, onSaved }: Props) {
           effective_date: form.start_date,
           notes: 'Renda inicial',
         })
-        await supabase.from('spaces').update({ status: 'arrendado' }).eq('id', form.space_id)
+        // Igual ao TenantModal: o espaço fica arrendado E com o inquilino.
+        if (form.status === 'ativo') {
+          const e = await ocuparEspaco(supabase, form.space_id, tenant.id)
+          if (e) avisosEspaco.push(e)
+        }
       }
     }
 
@@ -205,8 +232,11 @@ export default function LeaseModal({ tenant, onClose, onSaved }: Props) {
     await logAccess({
       action: existingLease ? 'editar' : 'criar',
       page: '/inquilinos',
-      details: `${existingLease ? 'Editou' : 'Criou'} contrato de "${tenant.name}" no espaço ${space?.ref ?? ''} (${formatCurrency(parseFloat(form.monthly_rent))}/mês)`,
+      details: `${!existingLease ? 'Criou' : terminou ? 'Terminou' : 'Editou'} contrato de "${tenant.name}" no espaço ${space?.ref ?? ''} (${formatCurrency(parseFloat(form.monthly_rent))}/mês)`,
     })
+    if (avisosEspaco.length > 0) {
+      alert(`O contrato foi gravado, mas não foi possível atualizar o estado do espaço:\n\n${avisosEspaco.join('\n')}\n\nConfirma o espaço em Espaços.`)
+    }
     onSaved()
   }
 

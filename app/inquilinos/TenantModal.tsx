@@ -521,7 +521,8 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
       start_date: contractForm.start_date, end_date: contractForm.end_date || null,
       notes: contractForm.notes || null, status: contractForm.status, contract_file_path: contractPath,
     })
-    if (!err) await supabase.from('spaces').update({ status: 'arrendado', tenant_id: tenantId }).eq('id', contractForm.space_id)
+    // Só um contrato ativo ocupa o espaço (um contrato já terminado não o deve marcar como arrendado).
+    if (!err && contractForm.status === 'ativo') await supabase.from('spaces').update({ status: 'arrendado', tenant_id: tenantId }).eq('id', contractForm.space_id)
     setSavingContract(false)
     if (err) { setContractError(err.message); return }
     const space = spaces.find(s => s.id === contractForm.space_id)
