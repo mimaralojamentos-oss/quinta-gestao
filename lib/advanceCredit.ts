@@ -192,11 +192,36 @@ export function appliedAdvanceFor(
   return map[`${leaseId}__${String(month).slice(0, 7)}`] ?? 0
 }
 
+/**
+ * Adiantamento consumido antes de o destino passar a ser gravado (08/08/2026).
+ *
+ * O código antigo só marcava `used = true`. A migração que criou os campos de
+ * destino carimbou esses registos como 'eletricidade', com `applied_at` igual
+ * ao `created_at` e sem cobrança ligada — mas muitos foram na verdade
+ * aplicados a rendas. Sem cobrança ligada, o destino real não é conhecido.
+ * (O motor atual grava sempre a hora real da aplicação, nunca igual à de
+ * criação, por isso os registos novos não caem aqui.)
+ */
+export function isLegacyAdvanceWithoutTarget(row: {
+  applied_to_type?: string | null
+  applied_to_id?: string | null
+  applied_at?: string | null
+  created_at?: string | null
+}): boolean {
+  if (row.applied_to_type !== 'eletricidade' || row.applied_to_id) return false
+  if (!row.applied_at) return true
+  return !!row.created_at && new Date(row.applied_at).getTime() === new Date(row.created_at).getTime()
+}
+
 /** Texto a mostrar na linha de um adiantamento já consumido. */
 export function describeAdvanceTarget(row: {
   applied_to_type?: string | null
   applied_to_month?: string | null
+  applied_to_id?: string | null
+  applied_at?: string | null
+  created_at?: string | null
 }): string {
+  if (isLegacyAdvanceWithoutTarget(row)) return '✓ Aplicado (registo antigo, destino não registado)'
   if (row.applied_to_type === 'renda' && row.applied_to_month) {
     return `✓ Aplicado à renda de ${String(row.applied_to_month).slice(0, 7)}`
   }
