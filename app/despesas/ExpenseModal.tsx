@@ -241,7 +241,7 @@ export default function ExpenseModal({ expense, duplicateFrom, onClose, onSaved 
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
+      <div {...invoiceDrop.dropProps} className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-5">
           <h2 className="font-semibold text-lg text-gray-900">
             {expense ? 'Editar Despesa' : modoDuplicar ? 'Duplicar Despesa' : 'Nova Despesa'}

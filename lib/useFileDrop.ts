@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 interface UseFileDropOptions {
   /** Extensões aceites, ex: ['.pdf', '.jpg']. Vazio = aceita tudo. */
@@ -11,6 +11,13 @@ interface UseFileDropOptions {
   onFiles: (files: File[]) => void
   /** Desativa o arrastar (ex: enquanto está a processar). */
   disabled?: boolean
+  /**
+   * Ouvir a JANELA inteira em vez de um elemento — para largar ficheiros em
+   * qualquer ponto da página (ver app/documentos/page.tsx). Continua a valer
+   * a mesma validação; um modal aberto que trate o mesmo ficheiro trava o
+   * evento antes de ele chegar aqui.
+   */
+  onWindow?: boolean
 }
 
 /**
@@ -49,7 +56,7 @@ export function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1).replace('.', ',')} MB`
 }
 
-export function useFileDrop({ accept, multiple = false, onFiles, disabled = false }: UseFileDropOptions) {
+export function useFileDrop({ accept, multiple = false, onFiles, disabled = false, onWindow = false }: UseFileDropOptions) {
   const [isDragging, setIsDragging] = useState(false)
   const depth = useRef(0)
 
@@ -63,6 +70,24 @@ export function useFileDrop({ accept, multiple = false, onFiles, disabled = fals
     depth.current = 0
     setIsDragging(false)
   }, [])
+
+  /** Validação comum ao arrasto num elemento e ao arrasto na janela. */
+  const entregar = useCallback((dropped: File[]) => {
+    if (dropped.length === 0) return
+
+    const valid = dropped.filter(matchesAccept)
+    const rejected = dropped.length - valid.length
+
+    if (valid.length === 0) {
+      alert(`Formato não suportado. Aceita: ${(accept ?? []).join(', ')}`)
+      return
+    }
+    if (rejected > 0) {
+      alert(`${rejected} ficheiro(s) ignorado(s) por não serem ${(accept ?? []).join(', ')}.`)
+    }
+
+    onFiles(multiple ? valid : [valid[0]])
+  }, [matchesAccept, accept, multiple, onFiles])
 
   const onDragEnter = useCallback((e: React.DragEvent) => {
     if (disabled) return
@@ -89,23 +114,56 @@ export function useFileDrop({ accept, multiple = false, onFiles, disabled = fals
     if (disabled) return
     e.preventDefault(); e.stopPropagation()
     reset()
+    entregar(Array.from(e.dataTransfer?.files ?? []))
+  }, [disabled, reset, entregar])
 
-    const dropped = Array.from(e.dataTransfer?.files ?? [])
-    if (dropped.length === 0) return
+  /**
+   * Modo janela: os mesmos passos, mas em toda a página. Só mexe em arrastos
+   * que tragam ficheiros — assim o "arrastar e largar" de texto ou de links
+   * continua a funcionar como no browser.
+   */
+  useEffect(() => {
+    if (!onWindow || disabled || typeof window === 'undefined') return
 
-    const valid = dropped.filter(matchesAccept)
-    const rejected = dropped.length - valid.length
+    const temFicheiros = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes('Files')
 
-    if (valid.length === 0) {
-      alert(`Formato não suportado. Aceita: ${(accept ?? []).join(', ')}`)
-      return
+    const enter = (e: DragEvent) => {
+      if (!temFicheiros(e)) return
+      e.preventDefault()
+      depth.current++
+      setIsDragging(true)
     }
-    if (rejected > 0) {
-      alert(`${rejected} ficheiro(s) ignorado(s) por não serem ${(accept ?? []).join(', ')}.`)
+    const over = (e: DragEvent) => {
+      if (!temFicheiros(e)) return
+      // Impede o browser de abrir o ficheiro numa aba nova.
+      e.preventDefault()
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+    }
+    const leave = (e: DragEvent) => {
+      if (!temFicheiros(e)) return
+      depth.current--
+      // relatedTarget a null = o ponteiro saiu mesmo da janela.
+      if (depth.current <= 0 || !e.relatedTarget) reset()
+    }
+    const drop = (e: DragEvent) => {
+      if (!temFicheiros(e)) return
+      e.preventDefault()
+      reset()
+      entregar(Array.from(e.dataTransfer?.files ?? []))
     }
 
-    onFiles(multiple ? valid : [valid[0]])
-  }, [disabled, reset, matchesAccept, onFiles, multiple, accept])
+    window.addEventListener('dragenter', enter)
+    window.addEventListener('dragover', over)
+    window.addEventListener('dragleave', leave)
+    window.addEventListener('drop', drop)
+    return () => {
+      window.removeEventListener('dragenter', enter)
+      window.removeEventListener('dragover', over)
+      window.removeEventListener('dragleave', leave)
+      window.removeEventListener('drop', drop)
+      reset()
+    }
+  }, [onWindow, disabled, entregar, reset])
 
   return {
     isDragging,

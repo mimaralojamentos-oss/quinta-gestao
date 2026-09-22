@@ -615,7 +615,7 @@ export default function ContadoresAguaPage() {
       {/* Modal Contador */}
       {showModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+          <div {...meterPdfDrop.dropProps} className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
             <div className="flex items-center justify-between mb-5">
               <h2 className="font-semibold text-lg text-gray-900">{editMeter ? 'Editar Contador' : 'Novo Contador'}</h2>
               <button onClick={() => setShowModal(false)}><X className="w-5 h-5 text-gray-400" /></button>
@@ -691,7 +691,7 @@ export default function ContadoresAguaPage() {
       {/* Modal Leitura Manual */}
       {showReadingModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+          <div {...readingPdfDrop.dropProps} className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
             <div className="flex items-center justify-between mb-5">
               <h2 className="font-semibold text-lg text-gray-900">Nova Leitura</h2>
               <button onClick={() => setShowReadingModal(null)}><X className="w-5 h-5 text-gray-400" /></button>

@@ -225,6 +225,19 @@ export default function DocumentosPage() {
     onFiles: addUploadFiles,
   })
 
+  /**
+   * Arrastar para QUALQUER ponto da página abre o mesmo fluxo do botão
+   * "Carregar Documento", já com os ficheiros escolhidos — incluindo a
+   * leitura por IA e a revisão antes de confirmar.
+   */
+  const pageDrop = useFileDrop({
+    accept: ['.pdf', '.jpg', '.jpeg', '.png'],
+    multiple: true,
+    onWindow: true,
+    disabled: uploading,
+    onFiles: incoming => { addUploadFiles(incoming); setShowUpload(true) },
+  })
+
   useEffect(() => { fetchAll() }, [])
 
   async function fetchAll() {
@@ -998,10 +1011,20 @@ async function handleSaveEdit() {
         </div>
       )}
 
+      {/* Sobreposição do arrastar para a página */}
+      {pageDrop.isDragging && (
+        <div className="fixed inset-0 z-[60] bg-emerald-900/30 flex items-center justify-center p-6 pointer-events-none">
+          <div className="bg-white border-2 border-dashed border-emerald-500 rounded-2xl shadow-xl px-10 py-8 text-center">
+            <p className="text-lg font-semibold text-emerald-700">Larga aqui para carregar os documentos</p>
+            <p className="text-sm text-gray-500 mt-1">PDF, JPG ou PNG — podes largar vários de uma vez</p>
+          </div>
+        </div>
+      )}
+
       {/* Modal Upload */}
       {showUpload && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
+          <div {...uploadDrop.dropProps} className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-5">
               <h2 className="font-semibold text-lg text-gray-900">Carregar Documento</h2>
               <button onClick={handleClose}><X className="w-5 h-5 text-gray-400" /></button>

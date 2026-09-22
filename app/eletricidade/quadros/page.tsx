@@ -699,7 +699,7 @@ export default function QuadrosPage() {
       {/* Modal Upload PDF */}
       {showUploadModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
+          <div {...edpDrop.dropProps} className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-5">
               <h2 className="font-semibold text-lg text-gray-900">Upload Fatura EDP</h2>
               <button onClick={closeUploadModal}><X className="w-5 h-5 text-gray-400" /></button>
@@ -818,7 +818,7 @@ export default function QuadrosPage() {
       {/* Modal Quadro */}
       {showModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+          <div {...meterPdfDrop.dropProps} className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
             <div className="flex items-center justify-between mb-5">
               <h2 className="font-semibold text-lg text-gray-900">{editMeter ? 'Editar Quadro' : 'Novo Quadro'}</h2>
               <button onClick={() => setShowModal(false)}><X className="w-5 h-5 text-gray-400" /></button>
