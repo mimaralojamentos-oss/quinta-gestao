@@ -332,6 +332,54 @@ export function calcularConta(entries: WorkEntry[], payments: WorkerPayment[]): 
   }
 }
 
+// ------------------------------------------------- correções do trabalhador
+
+/** Horas que o trabalhador tem para corrigir um registo seu, a contar da criação. */
+export const HORAS_PARA_CORRIGIR = 12
+
+/**
+ * Fim do prazo de correção. Conta sempre desde a CRIAÇÃO do registo
+ * (created_at), não da data do trabalho — e corrigir não o reinicia.
+ */
+export function limiteCorrecao(createdAt?: string | null): Date | null {
+  if (!createdAt) return null
+  const criado = new Date(createdAt)
+  if (isNaN(criado.getTime())) return null
+  return new Date(criado.getTime() + HORAS_PARA_CORRIGIR * 60 * 60 * 1000)
+}
+
+/**
+ * Um trabalhador só corrige ou apaga um registo seu enquanto estiver POR
+ * PAGAR e dentro do prazo. Fora disso é com o gestor.
+ *
+ * Devolve também o motivo da recusa, para o servidor poder explicar porquê.
+ */
+export function podeTrabalhadorCorrigir(
+  entry: { created_at?: string | null; estado?: 'pago' | 'parcial' | 'por_pagar' },
+  agora: Date = new Date(),
+): { pode: true } | { pode: false; motivo: string } {
+  if (entry.estado && entry.estado !== 'por_pagar') {
+    return { pode: false, motivo: 'Este registo já foi pago — fala com o gestor para o corrigir.' }
+  }
+  const limite = limiteCorrecao(entry.created_at)
+  if (!limite) {
+    return { pode: false, motivo: 'Este registo já não pode ser corrigido aqui — fala com o gestor.' }
+  }
+  if (agora.getTime() > limite.getTime()) {
+    return { pode: false, motivo: `Passaram mais de ${HORAS_PARA_CORRIGIR} horas desde que registaste — fala com o gestor para corrigir.` }
+  }
+  return { pode: true }
+}
+
+/** "podes corrigir até às 05:15". Null quando o prazo já passou. */
+export function textoLimiteCorrecao(createdAt?: string | null, agora: Date = new Date()): string | null {
+  const limite = limiteCorrecao(createdAt)
+  if (!limite || agora.getTime() > limite.getTime()) return null
+  const horas = limite.toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' })
+  const mesmoDia = limite.toDateString() === agora.toDateString()
+  return mesmoDia ? `podes corrigir até às ${horas}` : `podes corrigir até amanhã às ${horas}`
+}
+
 /** Token do link secreto: 40 caracteres, impossível de adivinhar. */
 export function gerarToken(): string {
   const alfabeto = 'abcdefghijklmnopqrstuvwxyz0123456789'

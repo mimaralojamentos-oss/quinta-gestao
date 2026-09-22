@@ -2,8 +2,11 @@
 
 import { useEffect, useState, use } from 'react'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { formatarHoras, motivoDiaEspecial, calcularHoras } from '@/lib/ponto'
-import { Clock, Loader2, CheckCircle, Plus, LogOut, Smartphone, X } from 'lucide-react'
+import {
+  formatarHoras, motivoDiaEspecial, calcularHoras,
+  podeTrabalhadorCorrigir, textoLimiteCorrecao, HORAS_PARA_CORRIGIR,
+} from '@/lib/ponto'
+import { Clock, Loader2, CheckCircle, Plus, LogOut, Smartphone, X, Pencil, Trash2 } from 'lucide-react'
 
 /**
  * Folha de ponto do trabalhador.
@@ -98,7 +101,9 @@ export default function PontoPage({ params }: { params: Promise<{ token: string 
 
   const [mostrarForm, setMostrarForm] = useState(false)
   const [guardando, setGuardando] = useState(false)
-  const [sucesso, setSucesso] = useState(false)
+  const [sucesso, setSucesso] = useState<string | null>(null)
+  /** Registo que está a ser corrigido (null = registo novo). */
+  const [editandoId, setEditandoId] = useState<string | null>(null)
 
   const hojeISO = new Date().toISOString().slice(0, 10)
   const [form, setForm] = useState({
@@ -122,16 +127,17 @@ export default function PontoPage({ params }: { params: Promise<{ token: string 
     entrarAutomaticamente()
   }, [])
 
-  async function carregar(codigo: string, acao?: 'registar') {
+  async function carregar(codigo: string, acao?: 'registar' | 'editar' | 'apagar', dados?: Record<string, unknown>) {
     setErro('')
-    if (acao !== 'registar') setACarregar(true)
+    if (!acao) setACarregar(true)
     try {
+      const corpo: Record<string, unknown> = { token, pin: codigo }
+      if (acao) { corpo.acao = acao; Object.assign(corpo, dados ?? {}) }
+
       const res = await fetch('/api/ponto', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(
-          acao === 'registar' ? { token, pin: codigo, acao, ...form } : { token, pin: codigo }
-        ),
+        body: JSON.stringify(corpo),
       })
       const json = await res.json()
       if (!res.ok || json.error) {
@@ -154,19 +160,57 @@ export default function PontoPage({ params }: { params: Promise<{ token: string 
     }
   }
 
-  async function registar() {
+  function avisar(texto: string) {
+    setSucesso(texto)
+    setTimeout(() => setSucesso(null), 4000)
+  }
+
+  async function guardar() {
     if (!form.work_date || !form.start_time || !form.end_time) {
       setErro('Preenche a data e as horas.')
       return
     }
     setGuardando(true)
-    const ok = await carregar(pin, 'registar')
+    const ok = editandoId
+      ? await carregar(pin, 'editar', { ...form, entry_id: editandoId })
+      : await carregar(pin, 'registar', { ...form })
     setGuardando(false)
     if (ok) {
       setMostrarForm(false)
-      setSucesso(true)
+      avisar(editandoId ? 'Registo corrigido.' : 'Horas registadas.')
+      setEditandoId(null)
       setForm(f => ({ ...f, description: '' }))
-      setTimeout(() => setSucesso(false), 4000)
+    }
+  }
+
+  /** Abre o formulário já preenchido com o registo a corrigir. */
+  function corrigir(e: any) {
+    setForm({
+      work_date: e.work_date,
+      start_time: String(e.start_time).slice(0, 5),
+      end_time: String(e.end_time).slice(0, 5),
+      description: e.description ?? '',
+    })
+    setEditandoId(e.id)
+    setErro('')
+    setMostrarForm(true)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  async function apagarRegisto(e: any) {
+    if (!window.confirm(
+      `Apagar o registo de ${formatDate(e.work_date)}?\n\n` +
+      `${String(e.start_time).slice(0, 5)} às ${String(e.end_time).slice(0, 5)} · ` +
+      `${formatarHoras(e.hours)} · ${formatCurrency(e.amount)}\n\n` +
+      'Isto não pode ser desfeito. Se foi engano, podes registar as horas outra vez.'
+    )) return
+
+    setGuardando(true)
+    const ok = await carregar(pin, 'apagar', { entry_id: e.id })
+    setGuardando(false)
+    if (ok) {
+      if (editandoId === e.id) { setEditandoId(null); setMostrarForm(false) }
+      avisar('Registo apagado.')
     }
   }
 
@@ -245,7 +289,7 @@ export default function PontoPage({ params }: { params: Promise<{ token: string 
         {sucesso && (
           <div className="bg-white border border-emerald-200 rounded-xl p-3 mb-3 flex items-center gap-2 shadow-sm">
             <CheckCircle className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-            <p className="text-sm text-emerald-700 font-medium">Horas registadas.</p>
+            <p className="text-sm text-emerald-700 font-medium">{sucesso}</p>
           </div>
         )}
 
@@ -257,7 +301,12 @@ export default function PontoPage({ params }: { params: Promise<{ token: string 
 
         {mostrarForm && (
           <div className="bg-white border border-gray-100 rounded-xl p-4 mb-3 shadow-sm space-y-3">
-            <h2 className="font-semibold text-gray-900">Registar horas</h2>
+            <h2 className="font-semibold text-gray-900">{editandoId ? 'Corrigir registo' : 'Registar horas'}</h2>
+            {editandoId && (
+              <p className="text-xs text-gray-500 -mt-2">
+                Podes corrigir até {HORAS_PARA_CORRIGIR} horas depois de teres registado. O valor é recalculado com o mesmo preço/hora.
+              </p>
+            )}
 
             <div>
               <label className="text-xs text-gray-500 block mb-1">Dia</label>
@@ -291,12 +340,12 @@ export default function PontoPage({ params }: { params: Promise<{ token: string 
 
             <div className="flex gap-2 pt-1">
               <button className="flex-1 py-2.5 rounded-lg border border-gray-200 text-gray-600 font-medium"
-                onClick={() => { setMostrarForm(false); setErro('') }}>
+                onClick={() => { setMostrarForm(false); setEditandoId(null); setErro('') }}>
                 Cancelar
               </button>
               <button className="flex-1 py-2.5 rounded-lg bg-emerald-600 text-white font-semibold disabled:opacity-50"
-                onClick={registar} disabled={guardando}>
-                {guardando ? 'A guardar...' : 'Guardar'}
+                onClick={guardar} disabled={guardando}>
+                {guardando ? 'A guardar...' : editandoId ? 'Guardar correção' : 'Guardar'}
               </button>
             </div>
           </div>
@@ -338,6 +387,24 @@ export default function PontoPage({ params }: { params: Promise<{ token: string 
                     </p>
                   </div>
                 </div>
+
+                {/* Corrigir/apagar só enquanto está dentro do prazo e por pagar.
+                    Fora disso não aparece nada — é com o gestor. */}
+                {podeTrabalhadorCorrigir(e).pode && (
+                  <div className="flex items-center justify-between gap-3 mt-3 pt-2.5 border-t border-gray-50">
+                    <span className="text-[11px] text-gray-400">{textoLimiteCorrecao(e.created_at)}</span>
+                    <div className="flex items-center gap-4">
+                      <button onClick={() => corrigir(e)} disabled={guardando}
+                        className="text-xs text-blue-600 font-medium inline-flex items-center gap-1 disabled:opacity-50">
+                        <Pencil className="w-3.5 h-3.5" /> Corrigir
+                      </button>
+                      <button onClick={() => apagarRegisto(e)} disabled={guardando}
+                        className="text-xs text-red-500 font-medium inline-flex items-center gap-1 disabled:opacity-50">
+                        <Trash2 className="w-3.5 h-3.5" /> Apagar
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -386,7 +453,7 @@ export default function PontoPage({ params }: { params: Promise<{ token: string 
 
       {!mostrarForm && (
         <div className="fixed bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-gray-50 via-gray-50">
-          <button onClick={() => { setMostrarForm(true); setErro(''); setSucesso(false) }}
+          <button onClick={() => { setMostrarForm(true); setEditandoId(null); setErro(''); setSucesso(null) }}
             className="w-full py-3.5 rounded-xl bg-emerald-600 text-white font-semibold shadow-lg flex items-center justify-center gap-2">
             <Plus className="w-5 h-5" /> Registar horas
           </button>

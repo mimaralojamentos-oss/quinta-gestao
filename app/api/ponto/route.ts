@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import {
-  calcularHoras, calcularConta, tarifaDoDia, ehDiaEspecial,
+  calcularHoras, calcularConta, tarifaDoDia, ehDiaEspecial, podeTrabalhadorCorrigir,
   type Worker,
 } from '@/lib/ponto'
 
@@ -108,6 +108,18 @@ async function autenticar(token: string, pin: string) {
   return { worker: worker as Worker, supabase }
 }
 
+/** Validações comuns ao registar e ao corrigir: dia não futuro e horário plausível. */
+function validarHorario(work_date: string, start_time: string, end_time: string): { erro: string } | { horas: number } {
+  const hoje = new Date()
+  const hojeISO = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}-${String(hoje.getDate()).padStart(2, '0')}`
+  if (work_date > hojeISO) return { erro: 'Não é possível registar horas de um dia que ainda não chegou.' }
+
+  const horas = calcularHoras(start_time, end_time)
+  if (horas <= 0) return { erro: 'A hora de saída tem de ser depois da hora de entrada.' }
+  if (horas > 16) return { erro: 'Mais de 16 horas seguidas? Confirma as horas, deve haver engano.' }
+  return { horas }
+}
+
 /** Dados do trabalhador: registos, pagamentos e saldo. */
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => ({}))
@@ -126,20 +138,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Indica a data, a hora de entrada e a hora de saída.' }, { status: 400 })
     }
 
-    // Não deixar registar dias futuros — evita enganos na data.
-    const hoje = new Date()
-    const hojeISO = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}-${String(hoje.getDate()).padStart(2, '0')}`
-    if (String(work_date) > hojeISO) {
-      return NextResponse.json({ error: 'Não é possível registar horas de um dia que ainda não chegou.' }, { status: 400 })
-    }
-
-    const horas = calcularHoras(String(start_time), String(end_time))
-    if (horas <= 0) {
-      return NextResponse.json({ error: 'A hora de saída tem de ser depois da hora de entrada.' }, { status: 400 })
-    }
-    if (horas > 16) {
-      return NextResponse.json({ error: 'Mais de 16 horas seguidas? Confirma as horas, deve haver engano.' }, { status: 400 })
-    }
+    // Dia não futuro e horário plausível — evita enganos na data.
+    const validacao = validarHorario(String(work_date), String(start_time), String(end_time))
+    if ('erro' in validacao) return NextResponse.json({ error: validacao.erro }, { status: 400 })
+    const { horas } = validacao
 
     // A tarifa é decidida aqui, com base no dia. Nunca vem do telemóvel.
     const tarifa = tarifaDoDia(worker, String(work_date))
@@ -163,6 +165,71 @@ export async function POST(request: NextRequest) {
 
     await registarAcesso(supabase, worker.name, 'criar',
       `Trabalhador registou ${horas}h em ${work_date} (${start_time}-${end_time}) — ${valor.toFixed(2)} EUR`)
+  }
+
+  // ------------------------------------------------- corrigir / apagar
+  //
+  // O ecrã do telemóvel já esconde o que não se pode mexer, mas quem manda é
+  // esta verificação: o link é um acesso público com código. Confirma-se aqui
+  // que o registo é DESTE trabalhador, que está por pagar e que ainda está
+  // dentro do prazo de 12 horas desde que foi criado.
+  if (acao === 'editar' || acao === 'apagar') {
+    const entryId = String(body.entry_id ?? '')
+    if (!entryId) return NextResponse.json({ error: 'Falta indicar o registo.' }, { status: 400 })
+
+    const [{ data: registos }, { data: pagos }] = await Promise.all([
+      supabase.from('work_entries').select('*').eq('worker_id', worker.id),
+      supabase.from('worker_payments').select('id, payment_date, amount').eq('worker_id', worker.id),
+    ])
+
+    // A conta é feita só com os registos deste trabalhador: um id de outra
+    // pessoa simplesmente não aparece na lista.
+    const conta = calcularConta(registos ?? [], (pagos ?? []) as any)
+    const alvo = conta.entradas.find(e => e.id === entryId)
+    if (!alvo) return NextResponse.json({ error: 'Esse registo não existe ou não é teu.' }, { status: 404 })
+
+    const permissao = podeTrabalhadorCorrigir(alvo)
+    if (!permissao.pode) return NextResponse.json({ error: permissao.motivo }, { status: 403 })
+
+    const horario = `${String(alvo.start_time).slice(0, 5)}-${String(alvo.end_time).slice(0, 5)}`
+
+    if (acao === 'apagar') {
+      const { error } = await supabase.from('work_entries')
+        .delete().eq('id', entryId).eq('worker_id', worker.id)
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+      await registarAcesso(supabase, worker.name, 'apagar',
+        `Trabalhador apagou pelo link o registo de ${alvo.work_date} (${horario}) — ${Number(alvo.amount).toFixed(2)} EUR`)
+    } else {
+      const { work_date, start_time, end_time, description } = body
+      if (!work_date || !start_time || !end_time) {
+        return NextResponse.json({ error: 'Indica a data, a hora de entrada e a hora de saída.' }, { status: 400 })
+      }
+
+      const validacao = validarHorario(String(work_date), String(start_time), String(end_time))
+      if ('erro' in validacao) return NextResponse.json({ error: validacao.erro }, { status: 400 })
+      const { horas } = validacao
+
+      // A tarifa é a que o registo já tem gravada — corrigir as horas nunca
+      // muda o preço nem a marca de fds/feriado com que foi registado.
+      const tarifa = Number(alvo.hourly_rate)
+      const valor = parseFloat((horas * tarifa).toFixed(2))
+
+      const { error } = await supabase.from('work_entries').update({
+        work_date,
+        start_time,
+        end_time,
+        hours: horas,
+        amount: valor,
+        description: description ? String(description).slice(0, 500) : null,
+      }).eq('id', entryId).eq('worker_id', worker.id)
+
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+      await registarAcesso(supabase, worker.name, 'editar',
+        `Trabalhador corrigiu pelo link o registo de ${alvo.work_date} (${horario}) para ${work_date} ` +
+        `(${String(start_time).slice(0, 5)}-${String(end_time).slice(0, 5)}) — ${horas}h, ${valor.toFixed(2)} EUR`)
+    }
   }
 
   // ---------------------------------------------------------- devolver
