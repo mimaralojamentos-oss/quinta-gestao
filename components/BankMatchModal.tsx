@@ -10,7 +10,7 @@
 
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
-import { formatCurrency, formatDate, matchesSearch, getMonthLabel } from '@/lib/utils'
+import { formatCurrency, formatDate, matchesSearch, getMonthLabel, openStorageDocument } from '@/lib/utils'
 import { EXPENSE_CATEGORIES } from '@/lib/expenseCategories'
 import { Search, X, Sparkles, FileText, CheckCircle } from 'lucide-react'
 import { mergeCategories, normalizeCategory } from '@/lib/incomeCategories'
@@ -128,6 +128,20 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
   onSaveRule: () => void
   onClose: () => void
 }) {
+  /**
+   * Fatura/documento ligado a uma despesa. É o que permite ver a compra antes
+   * de confirmar — a sugestão já não se aceita sem passar por aqui.
+   */
+  function documentoDaDespesa(expenseId?: string | null) {
+    if (!expenseId) return null
+    return documents.find((d: any) => d.expense_id === expenseId) ?? null
+  }
+
+  async function abrirDocumento(doc: any) {
+    if (!doc?.file_path) { alert('Este documento não tem ficheiro guardado.'); return }
+    await openStorageDocument(supabase, doc.file_path)
+  }
+
   const [type, setType] = useState(tx.confirmed_type ?? (tx.amount > 0 ? 'renda' : 'despesa'))
   const [tenantId, setTenantId] = useState(tx.confirmed_tenant_id ?? '')
   const [expenseId, setExpenseId] = useState(tx.confirmed_expense_id ?? '')
@@ -430,6 +444,17 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
                     </p>
                     <p className="text-xs text-blue-600 mt-0.5">{match.reason}</p>
                     {match.expense && <p className="text-xs text-blue-500">{formatDate(match.expense.expense_date)} · {formatCurrency(match.expense.amount)}</p>}
+                    {match.expense && (() => {
+                      const doc = documentoDaDespesa(match.expense.id)
+                      return doc ? (
+                        <button type="button" onClick={() => abrirDocumento(doc)}
+                          className="mt-1 text-xs text-blue-700 hover:underline inline-flex items-center gap-1 font-medium">
+                          <FileText className="w-3 h-3" /> Abrir documento
+                        </button>
+                      ) : (
+                        <p className="text-[11px] text-blue-400 mt-1">Esta despesa não tem documento anexado</p>
+                      )
+                    })()}
                   </div>
                   <div className="flex items-center gap-2 ml-3 flex-shrink-0">
                     <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${match.confidence === 'high' ? 'bg-emerald-100 text-emerald-700' : match.confidence === 'medium' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-600'}`}>
@@ -456,6 +481,15 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-medium text-orange-800 truncate">💸 {e.description ?? '—'}</p>
                     <p className="text-xs text-orange-600">{formatDate(e.expense_date)} · {formatCurrency(e.amount)}</p>
+                    {(() => {
+                      const doc = documentoDaDespesa(e.id)
+                      return doc ? (
+                        <button type="button" onClick={() => abrirDocumento(doc)}
+                          className="mt-1 text-xs text-orange-700 hover:underline inline-flex items-center gap-1 font-medium">
+                          <FileText className="w-3 h-3" /> Abrir documento
+                        </button>
+                      ) : null
+                    })()}
                   </div>
                   <button onClick={() => { setType('despesa'); setExpenseId(e.id) }} className="text-xs bg-orange-500 text-white px-2 py-1 rounded-lg hover:bg-orange-600 ml-3 flex-shrink-0">Usar</button>
                 </div>
@@ -849,6 +883,16 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
                             {diffDays === 0 ? 'hoje' : `${diffDays}d`}
                           </span>
                         )}
+                        {(() => {
+                          const doc = documentoDaDespesa(e.id)
+                          return doc ? (
+                            <button type="button" title="Abrir o documento desta despesa"
+                              onClick={ev => { ev.stopPropagation(); abrirDocumento(doc) }}
+                              className="text-xs text-blue-600 hover:underline inline-flex items-center gap-1 flex-shrink-0">
+                              <FileText className="w-3 h-3" /> Ver
+                            </button>
+                          ) : null
+                        })()}
                         {expenseId === e.id && <CheckCircle className="w-4 h-4 text-emerald-500 flex-shrink-0 ml-1" />}
                       </div>
                     )
@@ -908,6 +952,13 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
                           <span className="text-xs px-1.5 py-0.5 rounded-full bg-gray-200 text-gray-500 flex-shrink-0 font-medium whitespace-nowrap" title="Esta fatura já está associada a outra transação bancária">
                             já usada
                           </span>
+                        )}
+                        {d.file_path && (
+                          <button type="button" title="Abrir esta fatura"
+                            onClick={ev => { ev.stopPropagation(); abrirDocumento(d) }}
+                            className="text-xs text-blue-600 hover:underline inline-flex items-center gap-1 flex-shrink-0">
+                            <FileText className="w-3 h-3" /> Ver
+                          </button>
                         )}
                         {documentId === d.id && <CheckCircle className="w-4 h-4 text-emerald-500 flex-shrink-0" />}
                       </div>

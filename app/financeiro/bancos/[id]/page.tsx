@@ -1213,16 +1213,16 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
                                 </span>
                               )}
                             </div>
-                            {!matchInfo.confirmed && autoMatches && autoMatches.length > 0 && (
+                            {/* A sugestão não se confirma daqui: o único caminho é
+                                abrir a revisão, ver a despesa e a fatura, e só
+                                então confirmar. */}
+                            {!matchInfo.confirmed && autoMatches && autoMatches.length > 1 && (
                               <div className="flex items-center gap-2 mt-1">
-                                {autoMatches[0]?.confidence === 'high' && (
-                                  <button onClick={() => confirmAutoMatch(tx)} className="text-xs text-emerald-600 hover:underline font-medium">✓ Confirmar</button>
-                                )}
-                                {autoMatches.length > 1 && <span className="text-xs text-gray-400">+{autoMatches.length - 1} sugestão(ões)</span>}
+                                <span className="text-xs text-gray-400">+{autoMatches.length - 1} sugestão(ões)</span>
                               </div>
                             )}
                             <button onClick={() => setMatchModal(tx)} className="text-xs text-gray-400 hover:text-blue-500 transition-colors mt-0.5">
-                              <Edit2 className="w-3 h-3 inline" /> {matchInfo.confirmed ? 'Editar' : 'Ver todas'}
+                              <Edit2 className="w-3 h-3 inline" /> {matchInfo.confirmed ? 'Editar' : 'Rever e confirmar'}
                             </button>
                           </div>
                         ) : (
