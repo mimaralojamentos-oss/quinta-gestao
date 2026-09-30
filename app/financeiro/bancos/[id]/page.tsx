@@ -9,7 +9,8 @@ import { ensureExpenseForTransaction, emptySummary, addToSummary, describeSummar
 import { useAuth } from '@/lib/auth-context'
 import { incomeCategoryLabel } from '@/lib/incomeCategories'
 import BankMatchModal from '@/components/BankMatchModal'
-import BankImportModal from '@/components/BankImportModal'
+import BankImportModal, { EXTRATO_ACCEPT } from '@/components/BankImportModal'
+import { useFileDrop } from '@/lib/useFileDrop'
 
 import {
   Upload, CheckCircle, Clock, XCircle, ArrowUpRight,
@@ -79,6 +80,28 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
   const [validatingAll, setValidatingAll] = useState(false)
   const [validatingAllHigh, setValidatingAllHigh] = useState(false)
   const [showImport, setShowImport] = useState(false)
+  /** Extrato arrastado para a página, entregue ao modal de importação. */
+  const [importFile, setImportFile] = useState<File | null>(null)
+
+  /**
+   * Arrastar um extrato para qualquer ponto da página abre a importação
+   * DESTE banco com o ficheiro já escolhido. Fica desligado com o modal
+   * aberto: aí é o próprio modal que trata do arrasto (e que o bloqueia
+   * enquanto está a importar).
+   */
+  const pageDrop = useFileDrop({
+    accept: EXTRATO_ACCEPT,
+    multiple: true,
+    onWindow: true,
+    disabled: showImport,
+    onFiles: dropped => {
+      if (dropped.length > 1) {
+        alert(`Só se importa um extrato de cada vez. Vou usar o primeiro: ${dropped[0].name}`)
+      }
+      setImportFile(dropped[0])
+      setShowImport(true)
+    },
+  })
 
   const [filterStatus, setFilterStatus] = useState<'all' | 'por_validar' | 'validado' | 'ignorado'>('all')
   const [filterConfidence, setFilterConfidence] = useState<'all' | 'high' | 'medium' | 'low'>('all')
@@ -1274,13 +1297,25 @@ export default function BankDetailPage({ params }: { params: Promise<{ id: strin
         />
       )}
 
+      {pageDrop.isDragging && (
+        <div className="fixed inset-0 z-[60] bg-emerald-900/30 flex items-center justify-center p-6 pointer-events-none">
+          <div className="bg-white border-2 border-dashed border-emerald-500 rounded-2xl shadow-xl px-10 py-8 text-center">
+            <p className="text-lg font-semibold text-emerald-700">Larga aqui para importar o extrato</p>
+            <p className="text-sm text-gray-500 mt-1">
+              {bank?.name ? `Conta: ${bank.name} · ` : ''}Excel ou CSV
+            </p>
+          </div>
+        </div>
+      )}
+
       {showImport && (
         <BankImportModal
           bankId={bankId}
           bankName={bank?.name}
           columnMapping={bank?.column_mapping}
+          initialFile={importFile}
           onImported={fetchData}
-          onClose={() => setShowImport(false)}
+          onClose={() => { setShowImport(false); setImportFile(null) }}
         />
       )}
 

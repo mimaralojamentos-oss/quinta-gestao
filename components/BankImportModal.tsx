@@ -7,7 +7,7 @@
 //   - diretamente no cartão de cada banco (/financeiro/bancos)
 // Assim é possível importar sem abrir o extrato.
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { Upload, X, Loader2, ArrowRight } from 'lucide-react'
 import { useFileDrop } from '@/lib/useFileDrop'
@@ -37,10 +37,15 @@ async function generateHash(str: string): Promise<string> {
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 32)
 }
 
-export default function BankImportModal({ bankId, bankName, columnMapping, onImported, onClose }: {
+/** Tipos de ficheiro que a importação aceita — também usados por quem arrasta para a página. */
+export const EXTRATO_ACCEPT = ['.xlsx', '.xls', '.csv']
+
+export default function BankImportModal({ bankId, bankName, columnMapping, initialFile, onImported, onClose }: {
   bankId: string
   bankName?: string
   columnMapping?: any
+  /** Ficheiro já escolhido (ex.: arrastado para a página): entra direto na leitura. */
+  initialFile?: File | null
   onImported: () => void
   onClose: () => void
 }) {
@@ -53,10 +58,19 @@ export default function BankImportModal({ bankId, bankName, columnMapping, onImp
   const [importFile, setImportFile] = useState<File | null>(null)
 
   const extratoDrop = useFileDrop({
-    accept: ['.xlsx', '.xls', '.csv'],
+    accept: EXTRATO_ACCEPT,
     onFiles: dropped => { if (dropped[0]) handleFileSelect(dropped[0]) },
     disabled: importing,
   })
+
+  // Ficheiro que veio já escolhido de fora (arrastado para a página): faz o
+  // mesmo que escolhê-lo aqui. O ref evita repetir a leitura em cada render.
+  const ficheiroInicialTratado = useRef(false)
+  useEffect(() => {
+    if (!initialFile || ficheiroInicialTratado.current) return
+    ficheiroInicialTratado.current = true
+    handleFileSelect(initialFile)
+  }, [initialFile])
 
   async function handleFileSelect(file: File) {
     setImportFile(file); setImporting(true)

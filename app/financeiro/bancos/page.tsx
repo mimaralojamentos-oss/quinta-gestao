@@ -10,7 +10,7 @@ import { useAuth } from '@/lib/auth-context'
 import { buildRentPaymentPlan, applyRentPaymentPlan, type DestinoPagamento, type RentPaymentPlan } from '@/lib/rentPaymentPlan'
 import { ensureExpenseForTransaction } from '@/lib/bankExpense'
 import BankMatchModal from '@/components/BankMatchModal'
-import BankImportModal from '@/components/BankImportModal'
+import BankImportModal, { EXTRATO_ACCEPT } from '@/components/BankImportModal'
 import Link from 'next/link'
 
 const supabase = createClient()
@@ -68,6 +68,36 @@ export default function BancosPage() {
   const [matchModal, setMatchModal] = useState<any | null>(null)
   // Banco cujo extrato está a ser importado, a partir do próprio cartão
   const [importBank, setImportBank] = useState<Bank | null>(null)
+  /** Extrato arrastado para a página, à espera de conta escolhida ou já entregue ao modal. */
+  const [importFile, setImportFile] = useState<File | null>(null)
+  const [escolherConta, setEscolherConta] = useState(false)
+
+  const bancosAtivos = banks.filter(b => b.active)
+
+  /**
+   * Arrastar um extrato para qualquer ponto da página. Com uma só conta ativa
+   * abre logo a importação dessa conta; com várias, pergunta primeiro qual —
+   * o banco nunca é adivinhado pelo nome do ficheiro. Fica desligado enquanto
+   * uma importação está aberta (é o modal que trata do arrasto nessa altura).
+   */
+  const pageDrop = useFileDrop({
+    accept: EXTRATO_ACCEPT,
+    multiple: true,
+    onWindow: true,
+    disabled: !!importBank,
+    onFiles: dropped => {
+      if (dropped.length > 1) {
+        alert(`Só se importa um extrato de cada vez. Vou usar o primeiro: ${dropped[0].name}`)
+      }
+      if (bancosAtivos.length === 0) {
+        alert('Não há contas bancárias ativas. Cria ou reativa uma conta antes de importar o extrato.')
+        return
+      }
+      setImportFile(dropped[0])
+      if (bancosAtivos.length === 1) setImportBank(bancosAtivos[0])
+      else setEscolherConta(true)
+    },
+  })
   const [showCredits, setShowCredits] = useState(true)
   const [creditSearch, setCreditSearch] = useState('')
   const [creditYear, setCreditYear] = useState('all')
@@ -771,13 +801,58 @@ export default function BancosPage() {
         />
       )}
 
+      {pageDrop.isDragging && (
+        <div className="fixed inset-0 z-[60] bg-emerald-900/30 flex items-center justify-center p-6 pointer-events-none">
+          <div className="bg-white border-2 border-dashed border-emerald-500 rounded-2xl shadow-xl px-10 py-8 text-center">
+            <p className="text-lg font-semibold text-emerald-700">Larga aqui para importar o extrato</p>
+            <p className="text-sm text-gray-500 mt-1">
+              {bancosAtivos.length === 1 ? `Conta: ${bancosAtivos[0].name} · ` : 'Escolhes a conta a seguir · '}Excel ou CSV
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Escolher a conta quando há mais do que um banco ativo.
+          O banco nunca é adivinhado pelo nome do ficheiro. */}
+      {escolherConta && importFile && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="font-semibold text-lg text-gray-900">Importar extrato</h2>
+              <button onClick={() => { setEscolherConta(false); setImportFile(null) }}>
+                <X className="w-5 h-5 text-gray-400" />
+              </button>
+            </div>
+            <p className="text-sm text-gray-500 mb-4">
+              Ficheiro: <span className="font-medium text-gray-700">{importFile.name}</span>.
+              Para que conta é este extrato?
+            </p>
+            <div className="space-y-2 max-h-72 overflow-y-auto">
+              {bancosAtivos.map(b => (
+                <button key={b.id} onClick={() => { setEscolherConta(false); setImportBank(b) }}
+                  className="w-full text-left border border-gray-200 rounded-lg px-4 py-3 hover:border-emerald-400 hover:bg-emerald-50 transition-colors">
+                  <p className="font-medium text-gray-900">{b.name}</p>
+                  {b.iban && <p className="text-xs text-gray-500 font-mono mt-0.5">{b.iban}</p>}
+                </button>
+              ))}
+            </div>
+            <div className="flex justify-end mt-5">
+              <button className="btn-secondary" onClick={() => { setEscolherConta(false); setImportFile(null) }}>
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {importBank && (
         <BankImportModal
           bankId={importBank.id}
           bankName={importBank.name}
           columnMapping={(importBank as any).column_mapping}
+          initialFile={importFile}
           onImported={fetchBanks}
-          onClose={() => setImportBank(null)}
+          onClose={() => { setImportBank(null); setImportFile(null) }}
         />
       )}
 
