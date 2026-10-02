@@ -7,8 +7,8 @@ import { formatCurrency, formatDate, openStorageDocument, slugifyFilename, delet
 
 import {
   calcularConta, calcularHoras, formatarHoras, tarifaAoGuardar, ehDiaEspecial,
-  motivoDiaEspecial,
-  type Worker, type WorkEntry, type WorkerPayment, type ResumoConta,
+  motivoDiaEspecial, ehValorFixo,
+  type Worker, type WorkEntry, type WorkerPayment, type ResumoConta, type TipoRegisto,
 } from '@/lib/ponto'
 import { useAuth } from '@/lib/auth-context'
 import { logAccess } from '@/lib/logAccess'
@@ -56,7 +56,10 @@ export default function TrabalhadorPage({ params }: { params: Promise<{ id: stri
   // Registo de horas (pelo gestor). Ao editar, hourly_rate/is_holiday são os
   // do registo existente: a tarifa guardada nunca é recalculada.
   const [formHoras, setFormHoras] = useState<{
-    id?: string; work_date: string; start_time: string; end_time: string; description: string
+    id?: string; tipo: TipoRegisto
+    work_date: string; start_time: string; end_time: string; description: string
+    /** Só no valor fixo: o valor combinado, como está escrito no formulário. */
+    amount?: string
     hourly_rate?: number; is_holiday?: boolean
   } | null>(null)
   const [guardandoHoras, setGuardandoHoras] = useState(false)
@@ -105,26 +108,57 @@ export default function TrabalhadorPage({ params }: { params: Promise<{ id: stri
   // ------------------------------------------------------------ horas
   async function guardarHoras() {
     if (!worker || !formHoras) return
-    const horas = calcularHoras(formHoras.start_time, formHoras.end_time)
-    if (horas <= 0) { alert('A hora de saída tem de ser depois da entrada.'); return }
 
-    setGuardandoHoras(true)
-    // Registo novo: tarifa do dia. Registo existente: mantém a tarifa com que
-    // foi registado (e a marca de fds/feriado que lhe corresponde).
-    const tarifa = tarifaAoGuardar(worker, formHoras.work_date, formHoras.hourly_rate)
-    const payload = {
-      worker_id: worker.id,
-      work_date: formHoras.work_date,
-      start_time: formHoras.start_time,
-      end_time: formHoras.end_time,
-      hours: horas,
-      is_holiday: formHoras.id ? !!formHoras.is_holiday : ehDiaEspecial(formHoras.work_date),
-      hourly_rate: tarifa,
-      amount: parseFloat((horas * tarifa).toFixed(2)),
-      description: formHoras.description.trim() || null,
-      created_by: 'gestor',
+    const valorFixo = formHoras.tipo === 'valor_fixo'
+    let payload: Record<string, any>
+    let detalhe: string
+
+    if (valorFixo) {
+      // Valor combinado: data + descrição + valor. Sem horário nem tarifa —
+      // a base de dados recusa um valor fixo com horário.
+      const valor = parseFloat(String(formHoras.amount ?? '').replace(',', '.'))
+      if (isNaN(valor) || valor <= 0) { alert('Indica o valor combinado.'); return }
+      if (!formHoras.description.trim()) { alert('Descreve o trabalho — é o que identifica este registo.'); return }
+
+      payload = {
+        worker_id: worker.id,
+        work_date: formHoras.work_date,
+        start_time: null,
+        end_time: null,
+        hours: 0,
+        is_holiday: false,
+        hourly_rate: 0,
+        amount: parseFloat(valor.toFixed(2)),
+        description: formHoras.description.trim(),
+        created_by: 'gestor',
+        entry_type: 'valor_fixo',
+      }
+      detalhe = `${formHoras.id ? 'Editou' : 'Registou'} valor fixo de ${formatCurrency(valor)} ` +
+        `de "${worker.name}" em ${formatDate(formHoras.work_date)} (${formHoras.description.trim()})`
+    } else {
+      const horas = calcularHoras(formHoras.start_time, formHoras.end_time)
+      if (horas <= 0) { alert('A hora de saída tem de ser depois da entrada.'); return }
+
+      // Registo novo: tarifa do dia. Registo existente: mantém a tarifa com que
+      // foi registado (e a marca de fds/feriado que lhe corresponde).
+      const tarifa = tarifaAoGuardar(worker, formHoras.work_date, formHoras.hourly_rate)
+      payload = {
+        worker_id: worker.id,
+        work_date: formHoras.work_date,
+        start_time: formHoras.start_time,
+        end_time: formHoras.end_time,
+        hours: horas,
+        is_holiday: formHoras.id ? !!formHoras.is_holiday : ehDiaEspecial(formHoras.work_date),
+        hourly_rate: tarifa,
+        amount: parseFloat((horas * tarifa).toFixed(2)),
+        description: formHoras.description.trim() || null,
+        created_by: 'gestor',
+        entry_type: 'horas',
+      }
+      detalhe = `${formHoras.id ? 'Editou' : 'Registou'} ${formatarHoras(horas)} de "${worker.name}" em ${formatDate(formHoras.work_date)}`
     }
 
+    setGuardandoHoras(true)
     const { error } = formHoras.id
       ? await supabase.from('work_entries').update(payload).eq('id', formHoras.id)
       : await supabase.from('work_entries').insert(payload)
@@ -132,17 +166,16 @@ export default function TrabalhadorPage({ params }: { params: Promise<{ id: stri
     setGuardandoHoras(false)
     if (error) { alert(`Não foi possível guardar: ${error.message}`); return }
 
-    await logAccess({
-      action: formHoras.id ? 'editar' : 'criar',
-      page: '/trabalhadores',
-      details: `${formHoras.id ? 'Editou' : 'Registou'} ${formatarHoras(horas)} de "${worker.name}" em ${formatDate(formHoras.work_date)}`,
-    })
+    await logAccess({ action: formHoras.id ? 'editar' : 'criar', page: '/trabalhadores', details: detalhe })
     setFormHoras(null)
     await carregar(true)
   }
 
   async function apagarHoras(e: any) {
-    if (!confirm(`Apagar o registo de ${formatDate(e.work_date)} (${formatarHoras(e.hours)} · ${formatCurrency(e.amount)})?`)) return
+    const resumo = ehValorFixo(e)
+      ? `${e.description ?? 'valor fixo'} · ${formatCurrency(e.amount)}`
+      : `${formatarHoras(e.hours)} · ${formatCurrency(e.amount)}`
+    if (!confirm(`Apagar o registo de ${formatDate(e.work_date)} (${resumo})?`)) return
     const { error } = await supabase.from('work_entries').delete().eq('id', e.id)
     if (error) { alert(`Não foi possível apagar: ${error.message}`); return }
     await logAccess({ action: 'apagar', page: '/trabalhadores', details: `Apagou registo de horas de "${worker?.name}" em ${formatDate(e.work_date)}` })
@@ -447,8 +480,8 @@ export default function TrabalhadorPage({ params }: { params: Promise<{ id: stri
           <h2 className="font-semibold text-gray-900">Dias trabalhados</h2>
           {podeEditar && (
             <button className="btn-secondary text-sm"
-              onClick={() => setFormHoras({ work_date: new Date().toISOString().slice(0, 10), start_time: '08:00', end_time: '17:00', description: '' })}>
-              <Plus className="w-4 h-4" /> Registar horas
+              onClick={() => setFormHoras({ tipo: 'horas', work_date: new Date().toISOString().slice(0, 10), start_time: '08:00', end_time: '17:00', description: '', amount: '' })}>
+              <Plus className="w-4 h-4" /> Registar trabalho
             </button>
           )}
         </div>
@@ -479,13 +512,19 @@ export default function TrabalhadorPage({ params }: { params: Promise<{ id: stri
                       {e.is_holiday && <span className="ml-1.5 text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">fds/feriado</span>}
                     </td>
                     <td className="table-cell text-xs text-gray-500 whitespace-nowrap">
-                      {String(e.start_time).slice(0, 5)} — {String(e.end_time).slice(0, 5)}
+                      {ehValorFixo(e)
+                        ? <span className="text-xs bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded-full">valor fixo</span>
+                        : `${String(e.start_time).slice(0, 5)} — ${String(e.end_time).slice(0, 5)}`}
                     </td>
-                    <td className="table-cell text-right whitespace-nowrap">{formatarHoras(e.hours)}</td>
+                    <td className="table-cell text-right whitespace-nowrap">
+                      {ehValorFixo(e) ? <span className="text-gray-300">—</span> : formatarHoras(e.hours)}
+                    </td>
                     <td className="table-cell text-xs text-gray-600">{e.description ?? '—'}</td>
                     <td className="table-cell text-right whitespace-nowrap">
                       <span className="font-semibold text-gray-900">{formatCurrency(e.amount)}</span>
-                      <span className="block text-xs text-gray-400">{formatCurrency(e.hourly_rate)}/h</span>
+                      {!ehValorFixo(e) && (
+                        <span className="block text-xs text-gray-400">{formatCurrency(e.hourly_rate)}/h</span>
+                      )}
                     </td>
                     <td className="table-cell whitespace-nowrap">
                       <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
@@ -502,10 +541,13 @@ export default function TrabalhadorPage({ params }: { params: Promise<{ id: stri
                       <td className="table-cell">
                         <div className="flex items-center gap-2">
                           <button onClick={() => setFormHoras({
-                            id: e.id, work_date: e.work_date,
-                            start_time: String(e.start_time).slice(0, 5),
-                            end_time: String(e.end_time).slice(0, 5),
+                            id: e.id,
+                            tipo: ehValorFixo(e) ? 'valor_fixo' : 'horas',
+                            work_date: e.work_date,
+                            start_time: String(e.start_time ?? '08:00').slice(0, 5),
+                            end_time: String(e.end_time ?? '17:00').slice(0, 5),
                             description: e.description ?? '',
+                            amount: ehValorFixo(e) ? String(Number(e.amount)) : undefined,
                             hourly_rate: Number(e.hourly_rate),
                             is_holiday: e.is_holiday,
                           })} className="text-gray-300 hover:text-blue-500 transition-colors" title="Editar">
@@ -586,20 +628,43 @@ export default function TrabalhadorPage({ params }: { params: Promise<{ id: stri
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
             <div className="flex items-center justify-between p-5 border-b border-gray-100">
-              <h2 className="font-semibold text-lg text-gray-900">{formHoras.id ? 'Editar registo' : 'Registar horas'}</h2>
+              <h2 className="font-semibold text-lg text-gray-900">
+                {formHoras.id
+                  ? (formHoras.tipo === 'valor_fixo' ? 'Editar valor fixo' : 'Editar registo')
+                  : 'Registar trabalho'}
+              </h2>
               <button onClick={() => setFormHoras(null)}><X className="w-5 h-5 text-gray-400" /></button>
             </div>
             <div className="p-5 space-y-3">
+              {/* Ao editar não se troca o tipo de registo: para isso, apaga-se
+                  e lança-se de novo. */}
+              {!formHoras.id && (
+                <div className="grid grid-cols-2 gap-2">
+                  {([
+                    { tipo: 'horas' as TipoRegisto, titulo: 'Por horas', nota: 'horário × preço/hora' },
+                    { tipo: 'valor_fixo' as TipoRegisto, titulo: 'Valor fixo', nota: 'valor combinado' },
+                  ]).map(opt => (
+                    <button key={opt.tipo} type="button"
+                      onClick={() => setFormHoras(f => f && ({ ...f, tipo: opt.tipo }))}
+                      className={`rounded-lg border px-3 py-2 text-left transition-colors ${
+                        formHoras.tipo === opt.tipo ? 'border-emerald-500 bg-emerald-50' : 'border-gray-200 bg-white hover:bg-gray-50'
+                      }`}>
+                      <p className={`text-sm font-medium ${formHoras.tipo === opt.tipo ? 'text-emerald-800' : 'text-gray-700'}`}>{opt.titulo}</p>
+                      <p className="text-xs text-gray-500">{opt.nota}</p>
+                    </button>
+                  ))}
+                </div>
+              )}
               <div>
                 <label className="label">Dia</label>
                 <input className="input" type="date" value={formHoras.work_date}
                   onChange={e => setFormHoras(f => f && ({ ...f, work_date: e.target.value }))} />
-                {!formHoras.id && motivoDiaEspecial(formHoras.work_date) && (
+                {formHoras.tipo === 'horas' && !formHoras.id && motivoDiaEspecial(formHoras.work_date) && (
                   <p className="text-xs text-amber-600 mt-1 font-medium">
                     É {motivoDiaEspecial(formHoras.work_date)} — conta como fds/feriado (usa o preço de fds/feriados, se estiver definido)
                   </p>
                 )}
-                {formHoras.id && ehDiaEspecial(formHoras.work_date) !== !!formHoras.is_holiday && (
+                {formHoras.tipo === 'horas' && formHoras.id && ehDiaEspecial(formHoras.work_date) !== !!formHoras.is_holiday && (
                   <p className="text-xs text-amber-600 mt-1 font-medium">
                     O dia passou a ser {ehDiaEspecial(formHoras.work_date) ? (motivoDiaEspecial(formHoras.work_date) ?? 'dia de fds/feriado') : 'dia normal'},
                     mas o registo mantém o preço com que foi registado. Se o preço tiver de mudar,
@@ -607,27 +672,44 @@ export default function TrabalhadorPage({ params }: { params: Promise<{ id: stri
                   </p>
                 )}
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div><label className="label">Entrada</label>
-                  <input className="input" type="time" value={formHoras.start_time}
-                    onChange={e => setFormHoras(f => f && ({ ...f, start_time: e.target.value }))} /></div>
-                <div><label className="label">Saída</label>
-                  <input className="input" type="time" value={formHoras.end_time}
-                    onChange={e => setFormHoras(f => f && ({ ...f, end_time: e.target.value }))} /></div>
-              </div>
-              <div className="bg-gray-50 rounded-lg px-3 py-2 text-sm">
-                <span className="text-gray-500">Dá </span>
-                <strong className="text-gray-900">{formatarHoras(calcularHoras(formHoras.start_time, formHoras.end_time))}</strong>
-                <span className="text-gray-500"> × {formatCurrency(tarifaAoGuardar(worker, formHoras.work_date, formHoras.hourly_rate))}/h = </span>
-                <strong className="text-gray-900">
-                  {formatCurrency(calcularHoras(formHoras.start_time, formHoras.end_time) * tarifaAoGuardar(worker, formHoras.work_date, formHoras.hourly_rate))}
-                </strong>
-                {formHoras.id && (
-                  <span className="block text-xs text-gray-400 mt-0.5">Preço guardado neste registo — não muda com o preço atual.</span>
-                )}
-              </div>
+              {formHoras.tipo === 'horas' ? (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div><label className="label">Entrada</label>
+                      <input className="input" type="time" value={formHoras.start_time}
+                        onChange={e => setFormHoras(f => f && ({ ...f, start_time: e.target.value }))} /></div>
+                    <div><label className="label">Saída</label>
+                      <input className="input" type="time" value={formHoras.end_time}
+                        onChange={e => setFormHoras(f => f && ({ ...f, end_time: e.target.value }))} /></div>
+                  </div>
+                  <div className="bg-gray-50 rounded-lg px-3 py-2 text-sm">
+                    <span className="text-gray-500">Dá </span>
+                    <strong className="text-gray-900">{formatarHoras(calcularHoras(formHoras.start_time, formHoras.end_time))}</strong>
+                    <span className="text-gray-500"> × {formatCurrency(tarifaAoGuardar(worker, formHoras.work_date, formHoras.hourly_rate))}/h = </span>
+                    <strong className="text-gray-900">
+                      {formatCurrency(calcularHoras(formHoras.start_time, formHoras.end_time) * tarifaAoGuardar(worker, formHoras.work_date, formHoras.hourly_rate))}
+                    </strong>
+                    {formHoras.id && (
+                      <span className="block text-xs text-gray-400 mt-0.5">Preço guardado neste registo — não muda com o preço atual.</span>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <div>
+                  <label className="label">Valor combinado (€) *</label>
+                  <input className="input" type="number" step="0.01" min="0" placeholder="ex: 30.00"
+                    value={formHoras.amount ?? ''}
+                    onChange={e => setFormHoras(f => f && ({ ...f, amount: e.target.value }))} />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Sem horário nem preço/hora. Entra na folha com este valor e conta para o Ganho e o Por pagar
+                    como qualquer outro registo. Só tu podes lançar, corrigir ou apagar registos de valor fixo.
+                  </p>
+                </div>
+              )}
               <div>
-                <label className="label">Trabalho realizado</label>
+                <label className="label">
+                  Trabalho realizado{formHoras.tipo === 'valor_fixo' ? ' *' : ''}
+                </label>
                 <textarea className="input" rows={3} value={formHoras.description}
                   onChange={e => setFormHoras(f => f && ({ ...f, description: e.target.value }))} />
               </div>

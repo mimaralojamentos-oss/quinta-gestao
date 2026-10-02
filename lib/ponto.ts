@@ -32,12 +32,23 @@ export interface Worker {
   created_at?: string
 }
 
+/**
+ * Como o registo foi lançado:
+ *   'horas'      — data + horário, valor = horas × tarifa (o caso normal)
+ *   'valor_fixo' — data + descrição + valor combinado, sem horário nem tarifa
+ *                  (só o gestor os lança, no backoffice)
+ */
+export type TipoRegisto = 'horas' | 'valor_fixo'
+
 export interface WorkEntry {
   id: string
   worker_id: string
   work_date: string        // AAAA-MM-DD
-  start_time: string       // HH:MM
-  end_time: string         // HH:MM
+  /** Vazio nos registos de valor fixo. */
+  start_time: string | null   // HH:MM
+  /** Vazio nos registos de valor fixo. */
+  end_time: string | null     // HH:MM
+  /** 0 nos registos de valor fixo. */
   hours: number
   is_holiday: boolean
   hourly_rate: number
@@ -45,6 +56,16 @@ export interface WorkEntry {
   description: string | null
   created_by: string | null
   created_at?: string
+  entry_type?: TipoRegisto
+}
+
+/**
+ * Registo de valor fixo. A base de dados garante a coerência (por horas tem
+ * horário, valor fixo não tem), por isso a ausência de horário serve de
+ * reserva quando a consulta não trouxe a coluna.
+ */
+export function ehValorFixo(e: { entry_type?: string | null; start_time?: string | null }): boolean {
+  return (e.entry_type ?? (e.start_time ? 'horas' : 'valor_fixo')) === 'valor_fixo'
 }
 
 export interface WorkerPayment {
@@ -301,7 +322,8 @@ export function calcularConta(entries: WorkEntry[], payments: WorkerPayment[]): 
   const ordenadas = [...(entries ?? [])].sort((a, b) => {
     const d = String(a.work_date).localeCompare(String(b.work_date))
     if (d !== 0) return d
-    return String(a.start_time).localeCompare(String(b.start_time))
+    // Sem horário (valor fixo) conta como início do dia, para a ordem ser estável.
+    return String(a.start_time ?? '').localeCompare(String(b.start_time ?? ''))
   })
 
   const totalGanho = parseFloat(ordenadas.reduce((s, e) => s + Number(e.amount ?? 0), 0).toFixed(2))
@@ -355,9 +377,19 @@ export function limiteCorrecao(createdAt?: string | null): Date | null {
  * Devolve também o motivo da recusa, para o servidor poder explicar porquê.
  */
 export function podeTrabalhadorCorrigir(
-  entry: { created_at?: string | null; estado?: 'pago' | 'parcial' | 'por_pagar' },
+  entry: {
+    created_at?: string | null
+    estado?: 'pago' | 'parcial' | 'por_pagar'
+    entry_type?: string | null
+    start_time?: string | null
+  },
   agora: Date = new Date(),
 ): { pode: true } | { pode: false; motivo: string } {
+  // Os registos de valor fixo são lançados pelo gestor: o trabalhador vê-os,
+  // mas nunca os corrige nem apaga, mesmo dentro do prazo das 12 horas.
+  if (ehValorFixo(entry)) {
+    return { pode: false, motivo: 'Este registo foi lançado pelo gestor — só ele o pode corrigir ou apagar.' }
+  }
   if (entry.estado && entry.estado !== 'por_pagar') {
     return { pode: false, motivo: 'Este registo já foi pago — fala com o gestor para o corrigir.' }
   }

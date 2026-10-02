@@ -159,6 +159,9 @@ export async function POST(request: NextRequest) {
       amount: valor,
       description: description ? String(description).slice(0, 500) : null,
       created_by: 'trabalhador',
+      // Pelo link só se registam horas. Os registos de valor fixo são
+      // lançados pelo gestor no backoffice.
+      entry_type: 'horas',
     })
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
@@ -194,8 +197,10 @@ export async function POST(request: NextRequest) {
     const horario = `${String(alvo.start_time).slice(0, 5)}-${String(alvo.end_time).slice(0, 5)}`
 
     if (acao === 'apagar') {
+      // O filtro entry_type repete a regra no proprio pedido: um registo de
+      // valor fixo nunca é apagado por aqui, mesmo que algo falhe acima.
       const { error } = await supabase.from('work_entries')
-        .delete().eq('id', entryId).eq('worker_id', worker.id)
+        .delete().eq('id', entryId).eq('worker_id', worker.id).eq('entry_type', 'horas')
       if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
       await registarAcesso(supabase, worker.name, 'apagar',
@@ -222,7 +227,7 @@ export async function POST(request: NextRequest) {
         hours: horas,
         amount: valor,
         description: description ? String(description).slice(0, 500) : null,
-      }).eq('id', entryId).eq('worker_id', worker.id)
+      }).eq('id', entryId).eq('worker_id', worker.id).eq('entry_type', 'horas')
 
       if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 

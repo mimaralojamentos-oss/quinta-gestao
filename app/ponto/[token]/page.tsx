@@ -3,7 +3,7 @@
 import { useEffect, useState, use } from 'react'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import {
-  formatarHoras, motivoDiaEspecial, calcularHoras,
+  formatarHoras, motivoDiaEspecial, calcularHoras, ehValorFixo,
   podeTrabalhadorCorrigir, textoLimiteCorrecao, HORAS_PARA_CORRIGIR,
 } from '@/lib/ponto'
 import { Clock, Loader2, CheckCircle, Plus, LogOut, Smartphone, X, Pencil, Trash2 } from 'lucide-react'
@@ -369,9 +369,16 @@ export default function PontoPage({ params }: { params: Promise<{ token: string 
                       {formatDate(e.work_date)}
                       {e.is_holiday && <span className="ml-2 text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">fds/feriado</span>}
                     </p>
-                    <p className="text-xs text-gray-500 mt-0.5">
-                      {String(e.start_time).slice(0, 5)} às {String(e.end_time).slice(0, 5)} · {formatarHoras(e.hours)}
-                    </p>
+                    {ehValorFixo(e) ? (
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        <span className="bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded-full">valor fixo</span>
+                        <span className="ml-1.5">lançado pelo gestor</span>
+                      </p>
+                    ) : (
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        {String(e.start_time).slice(0, 5)} às {String(e.end_time).slice(0, 5)} · {formatarHoras(e.hours)}
+                      </p>
+                    )}
                     {e.description && <p className="text-xs text-gray-600 mt-1">{e.description}</p>}
                   </div>
                   <div className="text-right flex-shrink-0">
