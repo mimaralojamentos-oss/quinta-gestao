@@ -8,6 +8,8 @@ import { meterReadingExists } from '@/lib/meterReadings'
 import { findUnlinkedExpenseByAmount } from '@/lib/expenseDuplicates'
 import { createExpense } from '@/lib/createExpense'
 import { extractWaterInvoice, importWaterInvoiceReading, waterInvoiceMediaBlock, type WaterReadingImportResult } from '@/lib/waterInvoiceExtraction'
+import { extrairLinhasDaFatura, type ResultadoExtracao } from '@/lib/purchaseItemsExtraction'
+import { buildAliasMap, resolveSupplier } from '@/lib/suppliers'
 
 export async function POST(request: Request) {
   const auth = await requireRole(['admin', 'coadmin', 'electrician'])
@@ -442,7 +444,43 @@ IMPORTANTE sobre o valor ("amount"):
       if (newIncome) autoIncome = true
     }
 
-    return NextResponse.json({ success: true, document: doc, autoExpense, expenseError, autoIncome, duplicate: false, expenseId, meterReadingCreated, meterMatchReason, waterReading, cashMovementCreated, detectedTipo: tipo })
+    // ── LINHAS DE COMPRA: catálogo de itens (Extras → Compras) ──
+    //
+    // Só faturas de compras: as de luz e de água são consumos, não itens.
+    // O ficheiro já está em memória, por isso não há nada a descarregar.
+    // A gravação é a substituição em bloco, logo isto nunca duplica linhas.
+    let purchaseItems: ResultadoExtracao | null = null
+    if (tipo === 'fatura' && doc && (isPdf || isImage)) {
+      try {
+        const { data: aliases } = await supabase.from('supplier_aliases').select('*')
+        const supplierName = extracted.supplier_name
+          ? resolveSupplier(extracted.supplier_name, buildAliasMap(aliases ?? []))
+          : null
+
+        let projectId: string | null = null
+        if (expenseId) {
+          const { data: despesa } = await supabase.from('expenses').select('project_id').eq('id', expenseId).maybeSingle()
+          projectId = despesa?.project_id ?? null
+        }
+
+        const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
+        purchaseItems = await extrairLinhasDaFatura(anthropic, supabase, {
+          documentId: doc.id,
+          base64: buffer.toString('base64'),
+          mediaType: isPdf ? 'application/pdf' : file.type,
+          purchaseDate: extracted.doc_date ?? null,
+          supplierName,
+          projectId,
+        })
+      } catch (e: any) {
+        // Nunca impedir o upload por causa do catálogo de compras: a fatura
+        // fica guardada e pode ser processada depois na página Compras.
+        console.error('[process-document] linhas de compra:', e)
+        purchaseItems = { status: 'erro', linhas: 0, erro: e?.message ?? 'erro desconhecido' }
+      }
+    }
+
+    return NextResponse.json({ success: true, document: doc, autoExpense, expenseError, autoIncome, duplicate: false, expenseId, meterReadingCreated, meterMatchReason, waterReading, purchaseItems, cashMovementCreated, detectedTipo: tipo })
 
   } catch (e: any) {
     console.error(e)

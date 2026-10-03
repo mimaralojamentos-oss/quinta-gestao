@@ -2,7 +2,7 @@
 
 import AppLayout from '@/components/layout/AppLayout'
 import Link from 'next/link'
-import { Mail, Truck, ChevronRight, ShieldCheck } from 'lucide-react'
+import { Mail, Truck, ChevronRight, ShieldCheck, ShoppingCart } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 
 /**
@@ -26,6 +26,14 @@ const cards = [
     description: 'Tudo o que foi criado, alterado ou apagado nos dados, com o antes e o depois e quem o fez.',
     roles: ['admin'],
     color: 'bg-emerald-50 text-emerald-600 border-emerald-100',
+  },
+  {
+    href: '/extras/compras',
+    icon: ShoppingCart,
+    title: 'Compras',
+    description: 'Catálogo de tudo o que foi comprado, linha a linha, tirado das faturas — para consultar preços e fornecedores de materiais.',
+    roles: ['admin', 'coadmin', 'super_reader', 'viewer', 'electrician'],
+    color: 'bg-indigo-50 text-indigo-600 border-indigo-100',
   },
   {
     href: '/extras/fornecedores',
