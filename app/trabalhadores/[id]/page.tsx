@@ -64,6 +64,13 @@ export default function TrabalhadorPage({ params }: { params: Promise<{ id: stri
   } | null>(null)
   const [guardandoHoras, setGuardandoHoras] = useState(false)
 
+  /**
+   * Filtro da lista "Dias trabalhados". Começa em "Por pagar", que é o que
+   * interessa no dia a dia. Não mexe nos cartões do topo: esses são o resumo
+   * da conta do trabalhador, não da vista.
+   */
+  const [filtroEstado, setFiltroEstado] = useState<'por_pagar' | 'pagos' | 'todos'>('por_pagar')
+
   // Pagamento
   const [formPagamento, setFormPagamento] = useState<{ payment_date: string; amount: string; notes: string } | null>(null)
   const [guardandoPagamento, setGuardandoPagamento] = useState(false)
@@ -94,6 +101,19 @@ export default function TrabalhadorPage({ params }: { params: Promise<{ id: stri
   const linkPonto = typeof window !== 'undefined' && worker
     ? `${window.location.origin}/ponto/${worker.access_token}`
     : ''
+
+  // Um registo pago em parte conta como "por pagar": ainda falta dinheiro.
+  const entradas = conta?.entradas ?? []
+  const entradasPagas = entradas.filter(e => e.estado === 'pago')
+  const entradasPorPagar = entradas.filter(e => e.estado !== 'pago')
+  const entradasVisiveis = filtroEstado === 'todos'
+    ? entradas
+    : filtroEstado === 'pagos' ? entradasPagas : entradasPorPagar
+  const FILTROS_ESTADO: { key: typeof filtroEstado; label: string }[] = [
+    { key: 'por_pagar', label: `Por pagar (${entradasPorPagar.length})` },
+    { key: 'pagos', label: `Pagos (${entradasPagas.length})` },
+    { key: 'todos', label: `Todos (${entradas.length})` },
+  ]
 
   async function copiar(texto: string, qual: 'link' | 'pin') {
     try {
@@ -486,9 +506,38 @@ export default function TrabalhadorPage({ params }: { params: Promise<{ id: stri
           )}
         </div>
 
-        {(conta?.entradas.length ?? 0) === 0 ? (
+        {entradas.length > 0 && (
+          <div className="flex items-center gap-1.5 flex-wrap mb-2">
+            {FILTROS_ESTADO.map(f => (
+              <button key={f.key} onClick={() => setFiltroEstado(f.key)}
+                className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
+                  filtroEstado === f.key ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}>
+                {f.label}
+              </button>
+            ))}
+            {entradasVisiveis.length < entradas.length && (
+              <span className="text-xs text-gray-400 ml-1">
+                A mostrar {entradasVisiveis.length} de {entradas.length} — os restantes estão em &quot;Todos&quot;.
+              </span>
+            )}
+          </div>
+        )}
+
+        {entradas.length === 0 ? (
           <div className="bg-white border border-gray-100 rounded-xl p-8 text-center mb-6">
             <p className="text-sm text-gray-400">Ainda não há horas registadas.</p>
+          </div>
+        ) : entradasVisiveis.length === 0 ? (
+          <div className="bg-white border border-gray-100 rounded-xl p-8 text-center mb-6">
+            <p className="text-sm text-gray-400">
+              {filtroEstado === 'por_pagar'
+                ? 'Não há dias por pagar — está tudo pago.'
+                : 'Ainda não há dias pagos.'}
+            </p>
+            <button onClick={() => setFiltroEstado('todos')} className="text-xs text-emerald-600 hover:underline mt-2">
+              Ver todos os {entradas.length} registo(s)
+            </button>
           </div>
         ) : (
           <div className="bg-white border border-gray-100 rounded-xl overflow-hidden mb-6">
@@ -505,7 +554,7 @@ export default function TrabalhadorPage({ params }: { params: Promise<{ id: stri
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {conta!.entradas.map(e => (
+                {entradasVisiveis.map(e => (
                   <tr key={e.id} className="hover:bg-gray-50 transition-colors">
                     <td className="table-cell whitespace-nowrap">
                       {formatDate(e.work_date)}
