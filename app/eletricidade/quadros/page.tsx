@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, formatDate, normalizeText, openStorageDocument, formatMonthShort } from '@/lib/utils'
 import { meterReadingExists } from '@/lib/meterReadings'
+import { recusaPorRegressao } from '@/lib/readingValidation'
 import { createExpense } from '@/lib/createExpense'
 import { Plus, Zap, Trash2, X, ChevronDown, ChevronRight, Upload, Loader2, RefreshCw, CheckCircle, AlertCircle, BarChart2, Eye, Search } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
@@ -290,6 +291,16 @@ export default function QuadrosPage() {
     if (!showReadingModal || !readingForm.reading_date || !readingForm.reading_value) return
     const jaExiste = await meterReadingExists(supabase, showReadingModal, readingForm.reading_date, readingForm.invoice_number || null)
     if (jaExiste && !confirm('Já existe uma leitura para este quadro nesta data (ou com este nº de fatura). Registar mesmo assim?')) return
+
+    // Um contador não anda para trás. O valor 0 é a exceção: nos quadros
+    // significa "fatura sem leitura" e a página mostra-o como "—".
+    const recusa = await recusaPorRegressao(supabase, {
+      tabela: 'meter_readings', coluna: 'meter_id', id: showReadingModal,
+      dataISO: readingForm.reading_date, novoValor: parseFloat(readingForm.reading_value),
+      unidade: 'kWh', zeroEhSemLeitura: true,
+    })
+    if (recusa) { alert(recusa); return }
+
     setSaving(true)
     await supabase.from('meter_readings').insert({
       meter_id: showReadingModal,

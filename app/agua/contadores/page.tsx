@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, formatDate, formatMonthShort, openStorageDocument, normalizeText } from '@/lib/utils'
 import { waterMeterReadingExists } from '@/lib/waterMeterReadings'
+import { recusaPorRegressao } from '@/lib/readingValidation'
 import { Plus, Droplet, Trash2, X, ChevronDown, ChevronRight, BarChart2, Eye, Search, Upload, Loader2, CheckCircle } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import { useFileDrop } from '@/lib/useFileDrop'
@@ -318,6 +319,16 @@ export default function ContadoresAguaPage() {
     if (!showReadingModal || !readingForm.reading_date || !readingForm.reading_value) return
     const jaExiste = await waterMeterReadingExists(supabase, showReadingModal, readingForm.reading_date, readingForm.invoice_number || null)
     if (jaExiste && !confirm('Já existe uma leitura para este contador nesta data (ou com este nº de fatura). Registar mesmo assim?')) return
+
+    // Um contador não anda para trás. O valor 0 é a exceção: nos contadores
+    // gerais significa "fatura sem leitura" e a página mostra-o como "—".
+    const recusa = await recusaPorRegressao(supabase, {
+      tabela: 'water_meter_readings', coluna: 'meter_id', id: showReadingModal,
+      dataISO: readingForm.reading_date, novoValor: parseFloat(readingForm.reading_value),
+      unidade: 'm³', zeroEhSemLeitura: true,
+    })
+    if (recusa) { alert(recusa); return }
+
     setSaving(true)
     await supabase.from('water_meter_readings').insert({
       meter_id: showReadingModal,

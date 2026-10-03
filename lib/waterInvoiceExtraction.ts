@@ -1,5 +1,6 @@
 import type Anthropic from '@anthropic-ai/sdk'
 import { waterMeterReadingExists } from './waterMeterReadings'
+import { recusaPorRegressao } from './readingValidation'
 
 // Lógica partilhada das faturas de água: extração por IA, correspondência com
 // o contador geral e criação da leitura. Usada por /api/extract-water-meter
@@ -176,7 +177,8 @@ export function findWaterMeter<M extends WaterMeterLike>(
 }
 
 export interface WaterReadingImportResult {
-  status: 'created' | 'duplicate' | 'no_meter' | 'no_date' | 'error'
+  /** 'regressao' = a leitura da fatura é menor do que a anterior do contador. */
+  status: 'created' | 'duplicate' | 'no_meter' | 'no_date' | 'regressao' | 'error'
   meterName?: string
   matchReason?: WaterMeterMatchReason
   reading?: any
@@ -225,6 +227,16 @@ export async function importWaterInvoiceReading(
   if (await waterMeterReadingExists(supabase, match.meter.id, readingDate, invoiceNumber)) {
     return { status: 'duplicate', ...base }
   }
+
+  // Um contador não anda para trás: uma leitura menor do que a anterior é
+  // leitura mal lida. O documento fica arquivado na mesma e o resultado
+  // avisa, para se registar a leitura à mão depois de confirmar a fatura.
+  const recusa = await recusaPorRegressao(supabase, {
+    tabela: 'water_meter_readings', coluna: 'meter_id', id: match.meter.id,
+    dataISO: readingDate, novoValor: data.reading_value ?? 0,
+    unidade: 'm³', zeroEhSemLeitura: true,
+  })
+  if (recusa) return { status: 'regressao', ...base, error: recusa }
 
   const notes = [
     `Importado automaticamente do documento ${fileName}`,

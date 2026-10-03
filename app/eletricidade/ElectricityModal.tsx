@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { recusaPorRegressao } from '@/lib/readingValidation'
 import { X } from 'lucide-react'
 
 interface Props {
@@ -53,6 +54,16 @@ export default function ElectricityModal({ onClose, onSaved }: Props) {
       if (err) { setError(err.message); setSaving(false); return }
     } else {
       if (!form.space_id || !form.reading_value) { setError('Espaço e leitura são obrigatórios'); setSaving(false); return }
+
+      // Um contador não anda para trás (a mesma regra da página dos quadros
+      // dos espaços, que é por onde as leituras entram normalmente).
+      const recusa = await recusaPorRegressao(supabase, {
+        tabela: 'electricity_readings', coluna: 'space_id', id: form.space_id,
+        dataISO: form.charge_date, novoValor: parseFloat(form.reading_value),
+        unidade: 'kWh', comReset: true,
+      })
+      if (recusa) { setError(recusa); setSaving(false); return }
+
       const { error: err } = await supabase.from('electricity_readings').insert({
         space_id: form.space_id,
         reading_date: form.charge_date,

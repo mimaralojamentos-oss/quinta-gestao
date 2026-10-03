@@ -16,6 +16,7 @@ import {
 import {
   NOTA_RESET, cadeiaRecalculada, ehArranqueDeContador, leituraDeArranque, validarDataDoReset,
 } from '@/lib/meterReset'
+import { recusaDeLeitura, recusaPorRegressao } from '@/lib/readingValidation'
 import MeterShareModal from '@/components/MeterShareModal'
 import { SharePreview, ShareSplitDetails } from '@/components/ShareSplitView'
 
@@ -331,10 +332,16 @@ export default function QuadrosEspacosPage() {
 
   async function executeReset() {
     if (!resetModal) return
+    const novoValorFecho = parseFloat(String(resetForm.reading_value).replace(',', '.'))
+    const recusaFecho = recusaDeLeitura({
+      novoValor: novoValorFecho, anterior: resetModal.lastReading, unidade: 'kWh', comReset: true,
+    })
+    if (recusaFecho) { alert(recusaFecho); return }
+
     setResetting(true)
     try {
       const { space, lastReading, pendingCharges } = resetModal
-      const novoValor = parseFloat(String(resetForm.reading_value).replace(',', '.'))
+      const novoValor = novoValorFecho
       const anterior = lastReading?.reading_value ?? null
       const kwh = anterior != null ? parseFloat((novoValor - anterior).toFixed(2)) : null
 
@@ -618,6 +625,20 @@ export default function QuadrosEspacosPage() {
     const newValue = parseFloat(String(editForm.reading_value).replace(',', '.'))
     if (isNaN(newValue)) { alert('O valor da leitura não é um número válido.'); return }
 
+    // A data pode mudar aqui, por isso a leitura anterior vai à base pela
+    // data nova — e a própria leitura editada não se compara consigo mesma.
+    // Um arranque de contador que continua a 0 é a exceção legítima: tem de
+    // poder corrigir-se a data sem a validação o tomar por um retrocesso.
+    const continuaArranque = ehArranqueDeContador({ reading_value: newValue }) && ehArranqueDeContador(editReadingModal)
+    if (!continuaArranque) {
+      const recusa = await recusaPorRegressao(supabase, {
+        tabela: 'electricity_readings', coluna: 'space_id', id: editReadingModal.space_id,
+        dataISO: editForm.reading_date, novoValor: newValue, unidade: 'kWh',
+        ignorarId: editReadingModal.id, comReset: true,
+      })
+      if (recusa) { alert(recusa); return }
+    }
+
     setSaving(true)
 
     // A data e o valor mudam aqui; o consumo e os montantes são refeitos a
@@ -785,10 +806,17 @@ export default function QuadrosEspacosPage() {
    */
   async function saveReading(destino: 'cobrar' | 'acumular' | 'oferta') {
     if (!readingModal || !readingForm.reading_value) return
-    setSaving(true)
 
     const { space, lastReading } = readingModal
     const newValue = parseFloat(readingForm.reading_value)
+
+    // Um contador não anda para trás.
+    const recusa = recusaDeLeitura({
+      novoValor: newValue, anterior: lastReading, unidade: 'kWh', comReset: true,
+    })
+    if (recusa) { alert(recusa); return }
+
+    setSaving(true)
     const prevValue = lastReading?.reading_value ?? null
     const kwhConsumed = prevValue != null ? parseFloat((newValue - prevValue).toFixed(2)) : null
     const accumulatedSoFar = getAccumulatedAmount(space.id)
@@ -1658,7 +1686,7 @@ export default function QuadrosEspacosPage() {
                         : 'text-gray-600 bg-gray-50'
                     }`}>
                       {parseFloat(resetForm.reading_value) < resetModal.lastReading.reading_value
-                        ? '⚠️ O valor é inferior à última leitura. Confirma que não te enganaste.'
+                        ? `⚠️ O valor é inferior à última leitura (${resetModal.lastReading.reading_value} kWh). Um contador não anda para trás — corrige o valor. Se o contador foi trocado, usa o "🔄 Reset do contador".`
                         : `Consumo desde a última leitura: ${(parseFloat(resetForm.reading_value) - resetModal.lastReading.reading_value).toFixed(2)} kWh — não vai ser cobrado a ninguém.`}
                     </p>
                   )}
@@ -1688,7 +1716,14 @@ export default function QuadrosEspacosPage() {
 
                 <div className="flex justify-end gap-3 mt-6">
                   <button className="btn-secondary" onClick={() => setResetModal(null)}>Cancelar</button>
-                  <button className="btn-primary" disabled={!resetForm.reading_value || resetLoading}
+                  <button className="btn-primary"
+                    disabled={
+                      !resetForm.reading_value || resetLoading ||
+                      !!recusaDeLeitura({
+                        novoValor: parseFloat(String(resetForm.reading_value).replace(',', '.')),
+                        anterior: resetModal.lastReading, unidade: 'kWh', comReset: true,
+                      })
+                    }
                     onClick={() => setResetConfirm(true)}>
                     Continuar
                   </button>

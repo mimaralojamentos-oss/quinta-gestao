@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { createHash } from 'crypto'
+import { recusaPorRegressao } from '@/lib/readingValidation'
 import { requireRole } from '@/lib/require-role'
 import { checkFileSize } from '@/lib/fileUpload'
 import { meterReadingExists } from '@/lib/meterReadings'
@@ -270,6 +271,7 @@ IMPORTANTE sobre o valor ("amount"):
 
     let meterReadingCreated = false
     let meterMatchReason: string | null = null
+    let meterReadingSkipped: string | null = null
 
     if (tipo === 'fatura_luz') {
       let meter: any = null
@@ -315,7 +317,18 @@ IMPORTANTE sobre o valor ("amount"):
         if (readingDate) {
           const jaExiste = await meterReadingExists(supabase, meter.id, readingDate, extracted.doc_number)
 
-          if (!jaExiste) {
+          // Um contador não anda para trás: uma leitura menor do que a
+          // anterior é leitura mal lida pelo OCR. O documento fica arquivado
+          // na mesma (e a despesa criada); só a leitura é que não entra.
+          if (!jaExiste && extracted.edp_reading_value != null) {
+            meterReadingSkipped = await recusaPorRegressao(supabase, {
+              tabela: 'meter_readings', coluna: 'meter_id', id: meter.id,
+              dataISO: readingDate, novoValor: Number(extracted.edp_reading_value),
+              unidade: 'kWh', zeroEhSemLeitura: true,
+            })
+          }
+
+          if (!jaExiste && !meterReadingSkipped) {
             await supabase.from('meter_readings').insert({
               meter_id: meter.id,
               reading_date: readingDate,
@@ -480,7 +493,7 @@ IMPORTANTE sobre o valor ("amount"):
       }
     }
 
-    return NextResponse.json({ success: true, document: doc, autoExpense, expenseError, autoIncome, duplicate: false, expenseId, meterReadingCreated, meterMatchReason, waterReading, purchaseItems, cashMovementCreated, detectedTipo: tipo })
+    return NextResponse.json({ success: true, document: doc, autoExpense, expenseError, autoIncome, duplicate: false, expenseId, meterReadingCreated, meterReadingSkipped, meterMatchReason, waterReading, purchaseItems, cashMovementCreated, detectedTipo: tipo })
 
   } catch (e: any) {
     console.error(e)

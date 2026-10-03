@@ -109,7 +109,9 @@ interface UploadResult {
   duplicate?: any
   detectedTipo?: string
   /** Só em faturas de água: o que aconteceu ao criar a leitura no contador geral. */
-  waterReading?: { status: 'created' | 'duplicate' | 'no_meter' | 'no_date' | 'error'; meterName?: string; matchReason?: string; error?: string } | null
+  waterReading?: { status: 'created' | 'duplicate' | 'no_meter' | 'no_date' | 'regressao' | 'error'; meterName?: string; matchReason?: string; error?: string } | null
+  /** Faturas da luz: a leitura não foi criada por ser menor do que a anterior. */
+  meterReadingSkipped?: string | null
 }
 
 type SortField = 'tipo' | 'nome' | 'associado' | 'data' | 'valor' | 'despesa' | 'banco' | 'carregado' | null
@@ -435,7 +437,7 @@ async function handleSaveEdit() {
     if (data.error) {
       setUploadResults(prev => prev.map((r, i) => i === index ? { ...r, status: 'error', error: data.error } : r))
     } else {
-      setUploadResults(prev => prev.map((r, i) => i === index ? { ...r, status: 'success', autoExpense: data.autoExpense, expenseError: data.expenseError, cashMovementCreated: data.cashMovementCreated, detectedTipo: data.detectedTipo, waterReading: data.waterReading } : r))
+      setUploadResults(prev => prev.map((r, i) => i === index ? { ...r, status: 'success', autoExpense: data.autoExpense, expenseError: data.expenseError, cashMovementCreated: data.cashMovementCreated, detectedTipo: data.detectedTipo, waterReading: data.waterReading, meterReadingSkipped: data.meterReadingSkipped } : r))
       await logAccess({ action: 'criar', page: '/documentos', details: `Carregou documento "${file.name}"` })
     }
     return 'done'
@@ -1160,8 +1162,14 @@ async function handleSaveEdit() {
                       {r.status === 'success' && r.waterReading?.status === 'no_date' && (
                         <p className="text-xs text-amber-600">⚠ A fatura não tem data de leitura — leitura não criada</p>
                       )}
+                      {r.status === 'success' && r.waterReading?.status === 'regressao' && (
+                        <p className="text-xs text-amber-600">⚠ Leitura não criada no contador &quot;{r.waterReading.meterName}&quot;: é menor do que a anterior. Confirma a fatura e registo-a à mão.</p>
+                      )}
                       {r.status === 'success' && r.waterReading?.status === 'error' && (
                         <p className="text-xs text-red-600">⚠ Leitura de água não criada: {r.waterReading.error}</p>
+                      )}
+                      {r.status === 'success' && r.meterReadingSkipped && (
+                        <p className="text-xs text-amber-600">⚠ Leitura não criada no quadro: é menor do que a anterior. Confirma a fatura e registo-a à mão.</p>
                       )}
                       {r.status === 'success' && (r as any).autoIncome && <p className="text-xs text-emerald-600">✓ Receita criada automaticamente</p>}
                       {r.status === 'success' && r.cashMovementCreated && <p className="text-xs text-emerald-600">✓ Movimento criado no Fundo de Maneio</p>}
