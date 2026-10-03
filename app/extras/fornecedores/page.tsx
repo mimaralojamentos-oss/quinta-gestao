@@ -11,7 +11,8 @@ import {
   normalizeSupplier, buildAliasMap, groupSuppliers,
   type SupplierAlias, type SupplierGroup,
 } from '@/lib/suppliers'
-import { Truck, Search, ChevronLeft, ChevronDown, ChevronRight, X, Link2, Undo2, ArrowUpDown, ArrowUp, ArrowDown, FileText } from 'lucide-react'
+import { type FornecedorExcluido } from '@/lib/purchaseExclusions'
+import { Truck, Search, ChevronLeft, ChevronDown, ChevronRight, X, Link2, Undo2, ArrowUpDown, ArrowUp, ArrowDown, FileText, ShoppingCart } from 'lucide-react'
 import Link from 'next/link'
 
 const supabase = createClient()
@@ -35,6 +36,7 @@ export default function FornecedoresPage() {
 
   const [docs, setDocs] = useState<any[]>([])
   const [aliases, setAliases] = useState<SupplierAlias[]>([])
+  const [exclusoes, setExclusoes] = useState<FornecedorExcluido[]>([])
   const [loading, setLoading] = useState(true)
   const [erro, setErro] = useState('')
   const [pesquisa, setPesquisa] = useState('')
@@ -51,18 +53,66 @@ export default function FornecedoresPage() {
 
   async function carregar() {
     setLoading(true)
-    const [docsRes, aliasRes] = await Promise.all([
+    const [docsRes, aliasRes, exclRes] = await Promise.all([
       supabase.from('documents')
         .select('id, supplier_name, amount, doc_date, tipo, status, original_name, doc_number, items_summary, file_path')
         .eq('status', 'ativo')
         .not('supplier_name', 'is', null),
       supabase.from('supplier_aliases').select('*'),
+      supabase.from('purchase_supplier_exclusions').select('*'),
     ])
     if (docsRes.error) setErro(docsRes.error.message)
     if (aliasRes.error) setErro(aliasRes.error.message)
     setDocs(docsRes.data ?? [])
     setAliases(aliasRes.data ?? [])
+    setExclusoes(exclRes.data ?? [])
     setLoading(false)
+  }
+
+  /**
+   * A marca que tira este fornecedor das Compras, se existir.
+   *
+   * Apanha também as variantes que começam pelo nome marcado — marcar "MEO"
+   * cobre "MEO - SERVIÇOS DE COMUNICAÇÕES, S.A.". É a mesma regra que a base
+   * de dados usa na extração.
+   */
+  function exclusaoDoGrupo(nome: string): FornecedorExcluido | null {
+    const chave = normalizeSupplier(nome)
+    return exclusoes.find(x =>
+      chave === x.supplier_normalized || chave.startsWith(`${x.supplier_normalized} `)) ?? null
+  }
+
+  async function alternarExclusao(nome: string) {
+    const atual = exclusaoDoGrupo(nome)
+
+    if (atual) {
+      const aviso = normalizeSupplier(nome) === atual.supplier_normalized
+        ? `Voltar a incluir "${nome}" nas Compras?\n\nAs faturas dele só entram no catálogo depois de serem processadas na página Compras.`
+        : `A marca é no fornecedor "${atual.supplier_name}", que também cobre "${nome}".\n\nRetirar essa marca volta a incluir todos os fornecedores que começam por "${atual.supplier_name}". Continuar?`
+      if (!confirm(aviso)) return
+
+      const { error } = await supabase.from('purchase_supplier_exclusions').delete().eq('id', atual.id)
+      if (error) { alert(`Não foi possível retirar a marca: ${error.message}`); return }
+      await logAccess({
+        action: 'apagar', page: '/extras/fornecedores',
+        details: `Voltou a incluir o fornecedor "${atual.supplier_name}" nas Compras`,
+      })
+    } else {
+      if (!confirm(`Excluir "${nome}" das Compras?\n\nAs faturas dele deixam de entrar no catálogo de itens, antigas e futuras. As despesas e os totais não mudam.`)) return
+
+      const { error } = await supabase.from('purchase_supplier_exclusions').insert({
+        supplier_name: nome,
+        supplier_normalized: normalizeSupplier(nome),
+        notes: 'Marcado na página Fornecedores',
+      })
+      if (error) { alert(`Não foi possível excluir: ${error.message}`); return }
+      await logAccess({
+        action: 'criar', page: '/extras/fornecedores',
+        details: `Excluiu o fornecedor "${nome}" das Compras`,
+      })
+    }
+
+    await carregar()
   }
 
   const aliasMap = buildAliasMap(aliases)
@@ -249,6 +299,12 @@ export default function FornecedoresPage() {
                               {g.variants.length} nomes
                             </span>
                           )}
+                          {exclusaoDoGrupo(g.name) && (
+                            <span className="text-xs px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 font-medium whitespace-nowrap"
+                              title="As faturas deste fornecedor não entram no catálogo de Compras">
+                              fora das Compras
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td className="px-4 py-2.5 text-right text-gray-600">{g.docs}</td>
@@ -298,6 +354,30 @@ export default function FornecedoresPage() {
                               Só administradores podem alterar as equivalências.
                             </p>
                           )}
+
+                          {/* Compras: mensalidades de serviços não são compras de materiais */}
+                          {podeEditar && (() => {
+                            const excl = exclusaoDoGrupo(g.name)
+                            return (
+                              <div className="mt-4 flex items-start gap-3 bg-white border border-gray-100 rounded-lg px-3 py-2">
+                                <ShoppingCart className="w-4 h-4 text-gray-400 flex-shrink-0 mt-0.5" />
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-xs text-gray-700">
+                                    {excl
+                                      ? <>As faturas deste fornecedor <strong>não entram</strong> no catálogo de Compras{normalizeSupplier(g.name) !== excl.supplier_normalized ? <> (pela marca em &quot;{excl.supplier_name}&quot;)</> : null}.</>
+                                      : <>As faturas deste fornecedor entram no catálogo de Compras.</>}
+                                  </p>
+                                  <p className="text-xs text-gray-400 mt-0.5">
+                                    Serve para mensalidades de serviços e outras faturas que não são compra de materiais.
+                                  </p>
+                                </div>
+                                <button onClick={() => alternarExclusao(g.name)}
+                                  className="text-xs text-emerald-700 hover:underline whitespace-nowrap flex-shrink-0">
+                                  {excl ? 'Voltar a incluir' : 'Excluir das Compras'}
+                                </button>
+                              </div>
+                            )
+                          })()}
 
                           {/* Faturas deste fornecedor — para perceber de onde vêm os valores */}
                           <p className="text-xs text-gray-500 mb-2 mt-4">Faturas ({g.docs}):</p>

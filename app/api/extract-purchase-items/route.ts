@@ -4,6 +4,7 @@ import { createClient } from '@supabase/supabase-js'
 import { requireRole } from '@/lib/require-role'
 import { buildAliasMap, resolveSupplier } from '@/lib/suppliers'
 import { extrairLinhasDaFatura, mediaTypeDoFicheiro } from '@/lib/purchaseItemsExtraction'
+import { excluirDocumento, motivoExclusaoDocumento } from '@/lib/purchaseExclusions'
 
 /**
  * Extrai as linhas de itens de UMA fatura já guardada nos Documentos.
@@ -44,6 +45,15 @@ export async function POST(request: Request) {
     }
     if (!doc.file_path) {
       return NextResponse.json({ error: 'Este documento não tem ficheiro guardado.' }, { status: 400 })
+    }
+
+    // Documento fora das Compras: marca-o e vai-se embora, sem descarregar o
+    // ficheiro nem gastar uma leitura de IA.
+    const motivo = await motivoExclusaoDocumento(supabase, doc.id)
+    if (motivo) {
+      const r = await excluirDocumento(supabase, doc.id, motivo)
+      if (r.erro) return NextResponse.json({ error: r.erro }, { status: 500 })
+      return NextResponse.json({ success: true, status: 'excluido', linhas: 0, motivo })
     }
 
     const mediaType = mediaTypeDoFicheiro(doc.file_path)

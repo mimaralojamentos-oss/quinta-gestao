@@ -1,4 +1,5 @@
 import type Anthropic from '@anthropic-ai/sdk'
+import { carregarRegras, filtrarLinhasExcluidas, motivoExclusaoDocumento } from '@/lib/purchaseExclusions'
 
 /**
  * Linhas de compra das faturas: leitura por IA e gravação.
@@ -13,7 +14,8 @@ import type Anthropic from '@anthropic-ai/sdk'
  * como processado, tudo numa transação. Reprocessar substitui, nunca soma.
  */
 
-export type PurchaseItemsStatus = 'ok' | 'sem_linhas' | 'erro'
+/** 'excluido' = documento que não entra no catálogo (ver lib/purchaseExclusions). */
+export type PurchaseItemsStatus = 'ok' | 'sem_linhas' | 'erro' | 'excluido'
 
 /** Linha tal como a IA a devolve. */
 export interface PurchaseLineRaw {
@@ -171,12 +173,15 @@ export function prepararLinhas(
 /** Substituição em bloco (apaga as antigas + grava as novas + marca o documento). */
 export async function guardarLinhasCompra(
   supabase: any,
-  { documentId, linhas, status }: { documentId: string; linhas: PurchaseLine[]; status: PurchaseItemsStatus },
+  { documentId, linhas, status, motivo }: {
+    documentId: string; linhas: PurchaseLine[]; status: PurchaseItemsStatus; motivo?: string | null
+  },
 ): Promise<{ linhas: number } | { erro: string }> {
   const { data, error } = await supabase.rpc('replace_purchase_items', {
     p_document_id: documentId,
     p_items: linhas,
     p_status: status,
+    p_motivo: motivo ?? null,
   })
   if (error) return { erro: error.message }
   return { linhas: Number(data ?? 0) }
@@ -186,12 +191,23 @@ export interface ResultadoExtracao {
   status: PurchaseItemsStatus
   linhas: number
   erro?: string
+  /** Porque é que o documento ficou fora do catálogo. */
+  motivo?: string
+  /** Linhas que as regras de item removeram nesta leitura. */
+  removidasPorRegra?: number
 }
 
 /**
- * Lê e grava as linhas de uma fatura. Uma fatura que a IA não consiga ler
- * fica marcada como 'erro' e não volta a aparecer no lote — mas pode sempre
- * ser reprocessada à mão.
+ * Lê e grava as linhas de uma fatura.
+ *
+ * Antes de gastar uma leitura, pergunta à base de dados se o documento está
+ * excluído das Compras (documento gerado pela app, despesa de pessoal,
+ * fornecedor marcado, ou exclusão à mão): se estiver, marca-o e não lê nada.
+ *
+ * Depois de ler, tira as linhas que as regras de item apanham.
+ *
+ * Uma fatura que a IA não consiga ler fica marcada como 'erro' e não volta a
+ * aparecer no lote — mas pode sempre ser reprocessada à mão.
  */
 export async function extrairLinhasDaFatura(
   anthropic: Anthropic,
@@ -205,6 +221,18 @@ export async function extrairLinhasDaFatura(
     projectId: string | null
   },
 ): Promise<ResultadoExtracao> {
+  // 1. Regras do documento — a decisão é sempre da base de dados, para a
+  //    extração, a limpeza em lote e o ecrã concordarem entre si.
+  const motivo = await motivoExclusaoDocumento(supabase, params.documentId)
+  if (motivo) {
+    const gravado = await guardarLinhasCompra(supabase, {
+      documentId: params.documentId, linhas: [], status: 'excluido', motivo,
+    })
+    if ('erro' in gravado) return { status: 'erro', linhas: 0, erro: gravado.erro }
+    return { status: 'excluido', linhas: 0, motivo }
+  }
+
+  // 2. Leitura
   let raw: PurchaseLineRaw[] | null = null
   let erroLeitura: string | null = null
 
@@ -214,18 +242,29 @@ export async function extrairLinhasDaFatura(
     erroLeitura = e?.message ?? 'erro desconhecido na leitura'
   }
 
-  const linhas = raw ? prepararLinhas(raw, {
+  const lidas = raw ? prepararLinhas(raw, {
     purchaseDate: params.purchaseDate,
     supplierName: params.supplierName,
     projectId: params.projectId,
   }) : []
 
-  const status: PurchaseItemsStatus = (!raw || erroLeitura) ? 'erro' : linhas.length > 0 ? 'ok' : 'sem_linhas'
+  // 3. Regras de item (texto na descrição)
+  const regras = await carregarRegras(supabase)
+  const { mantidas, removidas } = filtrarLinhasExcluidas(lidas, regras)
 
-  const gravado = await guardarLinhasCompra(supabase, { documentId: params.documentId, linhas, status })
+  const status: PurchaseItemsStatus = (!raw || erroLeitura)
+    ? 'erro'
+    : mantidas.length > 0 ? 'ok' : 'sem_linhas'
+
+  const gravado = await guardarLinhasCompra(supabase, { documentId: params.documentId, linhas: mantidas, status })
   if ('erro' in gravado) return { status: 'erro', linhas: 0, erro: gravado.erro }
 
-  return { status, linhas: gravado.linhas, erro: erroLeitura ?? undefined }
+  return {
+    status,
+    linhas: gravado.linhas,
+    erro: erroLeitura ?? undefined,
+    removidasPorRegra: removidas.length || undefined,
+  }
 }
 
 /** Tipo de conteúdo a partir do nome do ficheiro guardado. */

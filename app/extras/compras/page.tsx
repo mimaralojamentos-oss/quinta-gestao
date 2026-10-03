@@ -8,8 +8,13 @@ import { useAuth } from '@/lib/auth-context'
 import { logAccess } from '@/lib/logAccess'
 import { useSort } from '@/lib/useSort'
 import {
+  aplicarRegrasCompras, carregarRegras, contarLinhasDaRegra, excluirDocumento,
+  motivoExclusaoDocumento, normalizarPadrao, reincluirDocumento,
+  type FornecedorExcluido, type RegraExclusao,
+} from '@/lib/purchaseExclusions'
+import {
   ShoppingCart, Search, ChevronLeft, FileText, Pencil, Trash2, X,
-  RefreshCw, ArrowUpDown, ArrowUp, ArrowDown, Loader2,
+  RefreshCw, ArrowUpDown, ArrowUp, ArrowDown, Loader2, Ban, Settings2, Undo2,
 } from 'lucide-react'
 import Link from 'next/link'
 
@@ -48,7 +53,7 @@ const num = (v: string): number | null => {
 const txt = (v: number | null | undefined) => (v === null || v === undefined ? '' : String(v))
 
 export default function ComprasPage() {
-  const { profile } = useAuth()
+  const { profile, user } = useAuth()
   const podeEditar = ['admin', 'coadmin'].includes(profile?.role ?? '')
 
   const [linhas, setLinhas] = useState<any[]>([])
@@ -68,6 +73,16 @@ export default function ComprasPage() {
 
   // Reprocessar um documento
   const [aReprocessar, setAReprocessar] = useState<string | null>(null)
+
+  // Exclusões: regras de item, fornecedores marcados e documentos de fora
+  const [regras, setRegras] = useState<RegraExclusao[]>([])
+  const [fornecedoresFora, setFornecedoresFora] = useState<FornecedorExcluido[]>([])
+  const [docsExcluidos, setDocsExcluidos] = useState<any[]>([])
+  const [verRegras, setVerRegras] = useState(false)
+  const [novaRegra, setNovaRegra] = useState('')
+  const [ocupadoRegras, setOcupadoRegras] = useState(false)
+  const [aAplicar, setAAplicar] = useState(false)
+  const [limpeza, setLimpeza] = useState<string | null>(null)
 
   // Janela de correção
   const [editar, setEditar] = useState<any | null>(null)
@@ -107,7 +122,20 @@ export default function ComprasPage() {
     setComErro(err.count ?? 0)
   }
 
-  useEffect(() => { carregar(); carregarPendentes() }, [])
+  async function carregarExclusoes() {
+    const [fornecedores, excluidos] = await Promise.all([
+      supabase.from('purchase_supplier_exclusions').select('*').order('supplier_name'),
+      supabase.from('documents')
+        .select('id, doc_date, supplier_name, original_name, doc_number, file_path, purchase_items_motivo')
+        .eq('purchase_items_status', 'excluido')
+        .order('doc_date', { ascending: false, nullsFirst: false }),
+    ])
+    setRegras(await carregarRegras(supabase))
+    setFornecedoresFora(fornecedores.data ?? [])
+    setDocsExcluidos(excluidos.data ?? [])
+  }
+
+  useEffect(() => { carregar(); carregarPendentes(); carregarExclusoes() }, [])
 
   // ── Pesquisa instantânea (fornecedor e descrição) + ordenação ──
   const q = normalizeText(pesquisa)
@@ -212,6 +240,128 @@ export default function ComprasPage() {
       details: `Processou faturas antigas: ${feitos} de ${ids.length}, ${totalLinhas} linha(s), ${falhas} falha(s)`,
     })
     await Promise.all([carregar(), carregarPendentes()])
+  }
+
+  // ── Exclusões ──
+
+  /** Corre todas as regras sobre o que já está na base. Repetir não faz mal. */
+  async function aplicarRegras() {
+    setAAplicar(true); setLimpeza(null)
+    const r = await aplicarRegrasCompras(supabase)
+    setAAplicar(false)
+
+    if ('erro' in r) { alert(`Não foi possível aplicar as regras: ${r.erro}`); return }
+
+    setLimpeza(
+      r.documentos_excluidos === 0 && r.linhas_removidas_por_regra === 0
+        ? 'Nada a excluir — já estava tudo em ordem.'
+        : `${r.documentos_excluidos} documento(s) excluído(s), ${r.linhas_removidas_dos_documentos} linha(s) removida(s) por documento e ${r.linhas_removidas_por_regra} por regra de descrição.`
+    )
+    if (r.documentos_excluidos > 0 || r.linhas_removidas_por_regra > 0) {
+      await logAccess({
+        action: 'editar', page: '/extras/compras',
+        details: `Aplicou as regras de exclusão: ${r.documentos_excluidos} documento(s), ${r.linhas_removidas_dos_documentos + r.linhas_removidas_por_regra} linha(s)`,
+      })
+    }
+    await Promise.all([carregar(), carregarPendentes(), carregarExclusoes()])
+  }
+
+  /** Exclusão avulsa, para os casos que as regras não apanham. */
+  async function excluirEsteDocumento(l: any) {
+    const nome = l.document?.doc_number ? `nº ${l.document.doc_number}` : (l.supplier_name ?? 'este documento')
+    if (!confirm(`Excluir a fatura ${nome} das Compras?\n\nAs linhas dela saem do catálogo e a fatura passa a ser ignorada pela leitura automática. A fatura, a despesa e os totais não são tocados.`)) return
+
+    const r = await excluirDocumento(supabase, l.document_id, 'excluído à mão')
+    if (r.erro) { alert(`Não foi possível excluir: ${r.erro}`); return }
+    await logAccess({
+      action: 'editar', page: '/extras/compras',
+      details: `Excluiu das Compras a fatura ${nome} (${l.supplier_name ?? 'sem fornecedor'})`,
+    })
+    await Promise.all([carregar(), carregarPendentes(), carregarExclusoes()])
+  }
+
+  /** Voltar a incluir um documento — avisa se uma regra o continua a excluir. */
+  async function reincluir(doc: any) {
+    const motivo = await motivoExclusaoDocumento(supabase, doc.id)
+    const aviso = motivo
+      ? `Atenção: este documento continua a ser excluído por uma regra (${motivo}).\n\nSe o reincluíres agora, a próxima leitura volta a excluí-lo. Para ele entrar no catálogo tens de tirar primeiro a regra ou a marca do fornecedor.\n\nReincluir mesmo assim?`
+      : `Voltar a incluir este documento nas Compras?\n\nFica "por processar": as linhas só aparecem depois de o processar (botão das faturas antigas ou "Reprocessar").`
+    if (!confirm(aviso)) return
+
+    const r = await reincluirDocumento(supabase, doc.id)
+    if (r.erro) { alert(`Não foi possível reincluir: ${r.erro}`); return }
+    await logAccess({
+      action: 'editar', page: '/extras/compras',
+      details: `Voltou a incluir nas Compras o documento ${doc.doc_number ?? doc.original_name ?? doc.id}`,
+    })
+    await Promise.all([carregarPendentes(), carregarExclusoes()])
+  }
+
+  /** Regra nova por texto na descrição: mostra o que remove e pede confirmação. */
+  async function adicionarRegra() {
+    const texto = novaRegra.trim()
+    if (texto.length < 3) { alert('Escreve pelo menos 3 letras, para a regra não apanhar linhas a mais.'); return }
+
+    setOcupadoRegras(true)
+    const quantas = await contarLinhasDaRegra(supabase, texto)
+    setOcupadoRegras(false)
+
+    const confirmado = confirm(
+      quantas === 0
+        ? `Criar a regra "${texto}"?\n\nNão há linhas no catálogo com este texto — a regra vai valer para as faturas que forem lidas de agora em diante.`
+        : `Criar a regra "${texto}"?\n\nVai remover ${quantas} linha(s) que já estão no catálogo, e passa a valer para as faturas lidas de agora em diante.\n\nApagar uma regra não repõe as linhas: para as recuperar usa o "Reprocessar" da fatura.`
+    )
+    if (!confirmado) return
+
+    setOcupadoRegras(true)
+    const { error } = await supabase.from('purchase_exclusion_rules').insert({
+      rule_type: 'descricao',
+      pattern: texto,
+      pattern_normalized: normalizarPadrao(texto),
+      created_by: user?.email ?? null,
+    })
+    if (error) {
+      setOcupadoRegras(false)
+      alert(error.message.includes('duplicate') || error.message.includes('purchase_exclusion_rules_key')
+        ? 'Já existe uma regra com este texto.'
+        : `Não foi possível criar a regra: ${error.message}`)
+      return
+    }
+
+    await logAccess({
+      action: 'criar', page: '/extras/compras',
+      details: `Criou a regra de exclusão "${texto}" (removeu ${quantas} linha(s) já existentes)`,
+    })
+
+    const r = await aplicarRegrasCompras(supabase)
+    setOcupadoRegras(false)
+    setNovaRegra('')
+    if (!('erro' in r)) {
+      setLimpeza(`Regra criada — ${r.linhas_removidas_por_regra} linha(s) removida(s).`)
+    }
+    await Promise.all([carregar(), carregarPendentes(), carregarExclusoes()])
+  }
+
+  async function apagarRegra(r: RegraExclusao) {
+    if (!confirm(`Apagar a regra "${r.pattern}"?\n\nAs linhas que ela já removeu NÃO voltam — para as recuperar usa o "Reprocessar" da fatura. A regra deixa de valer para as leituras futuras.`)) return
+    const { error } = await supabase.from('purchase_exclusion_rules').delete().eq('id', r.id)
+    if (error) { alert(`Não foi possível apagar: ${error.message}`); return }
+    await logAccess({
+      action: 'apagar', page: '/extras/compras',
+      details: `Apagou a regra de exclusão "${r.pattern}"`,
+    })
+    await carregarExclusoes()
+  }
+
+  async function removerFornecedorFora(x: FornecedorExcluido) {
+    if (!confirm(`Voltar a incluir "${x.supplier_name}" nas Compras?\n\nAs faturas dele só entram no catálogo depois de serem processadas.`)) return
+    const { error } = await supabase.from('purchase_supplier_exclusions').delete().eq('id', x.id)
+    if (error) { alert(`Não foi possível remover a marca: ${error.message}`); return }
+    await logAccess({
+      action: 'apagar', page: '/extras/compras',
+      details: `Voltou a incluir o fornecedor "${x.supplier_name}" nas Compras`,
+    })
+    await carregarExclusoes()
   }
 
   // ── Correção de linhas ──
@@ -347,6 +497,16 @@ export default function ComprasPage() {
                     Repetir as falhadas ({comErro})
                   </button>
                 )}
+                <button className="btn-secondary text-sm inline-flex items-center gap-2"
+                  onClick={aplicarRegras} disabled={aAplicar}
+                  title="Tira do catálogo o que as regras de exclusão apanham. Pode correr-se quantas vezes se quiser.">
+                  {aAplicar ? <Loader2 className="w-4 h-4 animate-spin" /> : <Ban className="w-4 h-4" />}
+                  {aAplicar ? 'A aplicar...' : 'Aplicar regras de exclusão'}
+                </button>
+                <button className="btn-secondary text-sm inline-flex items-center gap-2"
+                  onClick={() => setVerRegras(true)}>
+                  <Settings2 className="w-4 h-4" /> Regras de exclusão
+                </button>
               </>
             )}
           </div>
@@ -357,6 +517,18 @@ export default function ComprasPage() {
         <p className="text-xs text-gray-400 mb-4">
           As faturas novas são lidas sozinhas quando entram na app. O botão só lê as que
           ainda não foram processadas — carregar nele várias vezes dá sempre o mesmo resultado.
+          Mensalidades de serviços, recibos internos e pagamentos a pessoal ficam de fora pelas
+          regras de exclusão.
+        </p>
+      )}
+
+      {limpeza && (
+        <p className="text-sm text-gray-700 bg-gray-50 border border-gray-100 rounded-lg px-3 py-2 mb-4 flex items-start gap-2">
+          <Ban className="w-4 h-4 text-gray-400 flex-shrink-0 mt-0.5" />
+          <span className="flex-1">{limpeza}</span>
+          <button onClick={() => setLimpeza(null)} className="text-gray-400 hover:text-gray-600">
+            <X className="w-4 h-4" />
+          </button>
         </p>
       )}
 
@@ -455,6 +627,11 @@ export default function ComprasPage() {
                               className="text-gray-300 hover:text-red-500" title="Apagar esta linha">
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
+                            <button onClick={() => excluirEsteDocumento(l)}
+                              className="text-gray-300 hover:text-amber-600"
+                              title="Excluir esta fatura das Compras (tira todas as linhas dela)">
+                              <Ban className="w-3.5 h-3.5" />
+                            </button>
                             <button onClick={() => reprocessar(l.document_id)}
                               disabled={aReprocessar === l.document_id}
                               className="text-gray-300 hover:text-gray-600 disabled:opacity-50"
@@ -485,6 +662,150 @@ export default function ComprasPage() {
             * IVA calculado a partir da taxa da fatura, por não vir discriminado nessa linha.
           </p>
         </>
+      )}
+
+      {/* Regras de exclusão: itens, fornecedores e documentos de fora */}
+      {verRegras && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between p-5 border-b border-gray-100">
+              <div>
+                <h2 className="font-semibold text-gray-900">Regras de exclusão</h2>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  O que não entra no catálogo de Compras
+                </p>
+              </div>
+              <button onClick={() => setVerRegras(false)}><X className="w-5 h-5 text-gray-400" /></button>
+            </div>
+
+            <div className="p-5 space-y-6">
+              {/* 1. Regras por texto na descrição */}
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900">Texto na descrição</h3>
+                <p className="text-xs text-gray-500 mt-0.5 mb-3">
+                  Qualquer linha cuja descrição contenha o texto é removida do catálogo —
+                  ex.: &quot;portes&quot;, &quot;taxa de serviço&quot;, &quot;aluguer&quot;. Não distingue
+                  maiúsculas nem acentos. Aplica-se às linhas futuras e, ao criar, também às
+                  que já existem (diz-te quantas antes de remover).
+                </p>
+
+                <div className="flex gap-2 mb-3">
+                  <input className="input flex-1" placeholder="ex: portes" value={novaRegra}
+                    onChange={e => setNovaRegra(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter' && !ocupadoRegras) adicionarRegra() }} />
+                  <button className="btn-primary text-sm whitespace-nowrap"
+                    onClick={adicionarRegra} disabled={ocupadoRegras || !novaRegra.trim()}>
+                    {ocupadoRegras ? 'A tratar...' : 'Adicionar'}
+                  </button>
+                </div>
+
+                {regras.length === 0 ? (
+                  <p className="text-xs text-gray-400">Ainda não há regras de descrição.</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {regras.map(r => (
+                      <div key={r.id} className="flex items-center gap-3 bg-gray-50 rounded-lg px-3 py-2">
+                        <span className="text-sm text-gray-800 flex-1 truncate">{r.pattern}</span>
+                        {r.created_by && (
+                          <span className="text-xs text-gray-400 whitespace-nowrap hidden sm:inline">{r.created_by}</span>
+                        )}
+                        <button onClick={() => apagarRegra(r)}
+                          className="text-gray-400 hover:text-red-500 flex-shrink-0" title="Apagar esta regra">
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* 2. Fornecedores marcados */}
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900">Fornecedores fora das Compras</h3>
+                <p className="text-xs text-gray-500 mt-0.5 mb-3">
+                  Marcam-se nos <Link href="/extras/fornecedores" prefetch={false}
+                    className="text-emerald-700 hover:underline">Fornecedores</Link>. Nenhuma fatura
+                  deles entra no catálogo — é o que resolve as mensalidades de serviços. A marca
+                  apanha também as variantes que começam pelo nome (ex.: &quot;MEO&quot; cobre
+                  &quot;MEO - Serviços de Comunicações&quot;).
+                </p>
+
+                {fornecedoresFora.length === 0 ? (
+                  <p className="text-xs text-gray-400">Nenhum fornecedor marcado.</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {fornecedoresFora.map(x => (
+                      <div key={x.id} className="flex items-center gap-3 bg-gray-50 rounded-lg px-3 py-2">
+                        <span className="text-sm text-gray-800 flex-1 truncate">{x.supplier_name}</span>
+                        {x.notes && (
+                          <span className="text-xs text-gray-400 truncate hidden sm:inline max-w-[220px]">{x.notes}</span>
+                        )}
+                        <button onClick={() => removerFornecedorFora(x)}
+                          className="text-gray-400 hover:text-emerald-600 flex-shrink-0 inline-flex items-center gap-1 text-xs whitespace-nowrap"
+                          title="Voltar a incluir este fornecedor">
+                          <Undo2 className="w-3.5 h-3.5" /> Incluir
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* 3. Documentos excluídos */}
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900">
+                  Documentos excluídos ({docsExcluidos.length})
+                </h3>
+                <p className="text-xs text-gray-500 mt-0.5 mb-3">
+                  Faturas fora do catálogo, por regra ou à mão. Não têm linhas e são sempre
+                  ignoradas pela leitura automática.
+                </p>
+
+                {docsExcluidos.length === 0 ? (
+                  <p className="text-xs text-gray-400">Nenhum documento excluído.</p>
+                ) : (
+                  <div className="space-y-1.5 max-h-72 overflow-y-auto">
+                    {docsExcluidos.map(d => (
+                      <div key={d.id} className="flex items-center gap-3 bg-gray-50 rounded-lg px-3 py-2">
+                        <span className="text-xs text-gray-400 whitespace-nowrap w-20 flex-shrink-0">
+                          {d.doc_date ? formatDate(d.doc_date) : '—'}
+                        </span>
+                        <span className="text-sm text-gray-800 truncate flex-1"
+                          title={d.original_name ?? ''}>
+                          {d.supplier_name ?? d.original_name ?? '—'}
+                          {d.doc_number ? ` · nº ${d.doc_number}` : ''}
+                        </span>
+                        <span className="text-xs text-gray-500 whitespace-nowrap hidden sm:inline">
+                          {d.purchase_items_motivo ?? '—'}
+                        </span>
+                        {d.file_path && (
+                          <button onClick={() => abrirFatura(d)}
+                            className="text-gray-400 hover:text-emerald-600 flex-shrink-0" title="Abrir a fatura">
+                            <FileText className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                        <button onClick={() => reincluir(d)}
+                          className="text-gray-400 hover:text-emerald-600 flex-shrink-0 inline-flex items-center gap-1 text-xs whitespace-nowrap"
+                          title="Voltar a incluir este documento">
+                          <Undo2 className="w-3.5 h-3.5" /> Reincluir
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 p-4 border-t border-gray-100">
+              <button className="btn-secondary" onClick={() => setVerRegras(false)}>Fechar</button>
+              <button className="btn-primary inline-flex items-center gap-2"
+                onClick={async () => { await aplicarRegras(); setVerRegras(false) }} disabled={aAplicar}>
+                {aAplicar ? <Loader2 className="w-4 h-4 animate-spin" /> : <Ban className="w-4 h-4" />}
+                {aAplicar ? 'A aplicar...' : 'Aplicar regras agora'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Correção de uma linha */}
