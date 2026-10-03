@@ -13,6 +13,9 @@ import {
   cobrarParteEmFalta, encontrarCobrancasDaLeitura, partesPorCobrar, valorCobradoDaLeitura, formatPct,
   type MeterShare, type ContratoAtivo, type ParteDivisao,
 } from '@/lib/meterShares'
+import {
+  NOTA_RESET, cadeiaRecalculada, ehArranqueDeContador, leituraDeArranque, validarDataDoReset,
+} from '@/lib/meterReset'
 import MeterShareModal from '@/components/MeterShareModal'
 import { SharePreview, ShareSplitDetails } from '@/components/ShareSplitView'
 
@@ -70,6 +73,20 @@ interface ResetModal {
   tenantName: string
 }
 
+/**
+ * Troca do contador físico de água: a contagem recomeça do zero.
+ *
+ * Não muda de inquilino nem perdoa nada (isso é o fecho de contas acima):
+ * o contador antigo fecha onde está e o novo arranca a 0.
+ */
+interface ResetContadorModal {
+  space: Space
+  /** Onde o contador antigo fica fechado (a última leitura registada). */
+  lastReading: Reading | null
+  acumulado: number
+  partilhado: boolean
+}
+
 export default function ContadoresEspacosAguaPage() {
   const { isAdmin, isCoAdmin, profile } = useAuth()
   const canEdit = isAdmin || isCoAdmin || profile?.role === 'electrician'
@@ -89,6 +106,9 @@ export default function ContadoresEspacosAguaPage() {
     notes: '',
   })
   const [resetConfirm, setResetConfirm] = useState(false)
+  // Troca do contador físico (contagem a recomeçar do zero)
+  const [resetContador, setResetContador] = useState<ResetContadorModal | null>(null)
+  const [resetContadorData, setResetContadorData] = useState(new Date().toISOString().slice(0, 10))
   const [editReadingModal, setEditReadingModal] = useState<Reading | null>(null)
   const [saving, setSaving] = useState(false)
   const [readingForm, setReadingForm] = useState({
@@ -247,6 +267,61 @@ export default function ContadoresEspacosAguaPage() {
     setResetLoading(false)
   }
 
+  /**
+   * Troca de contador: o contador antigo fecha na última leitura que já
+   * está na app e o novo arranca a 0. Nada do histórico é alterado.
+   */
+  function openResetContador(space: Space) {
+    const lastReading = (readings[space.id] ?? [])[0] ?? null
+    setResetContador({
+      space,
+      lastReading,
+      acumulado: getAccumulatedAmount(space.id),
+      partilhado: grupoDe(space.id).length > 0,
+    })
+    setResetContadorData(new Date().toISOString().slice(0, 10))
+  }
+
+  async function executarResetContador() {
+    if (!resetContador) return
+    const { space, lastReading, acumulado } = resetContador
+
+    const erroData = validarDataDoReset(resetContadorData, lastReading?.reading_date ?? null)
+    if (erroData) { alert(erroData); return }
+
+    setResetting(true)
+    try {
+      const { error } = await supabase.from('water_readings').insert(
+        leituraDeArranque({
+          spaceId: space.id,
+          dataISO: resetContadorData,
+          acumulado,
+          campoUnidades: 'm3_consumed',
+        }),
+      )
+      if (error) { alert(`Não foi possível registar o arranque: ${error.message}`); return }
+
+      await logAccess({
+        action: 'criar',
+        page: '/agua/espacos',
+        details: `Troca de contador de água no ${space.ref}: contador antigo fechado em ${lastReading ? `${lastReading.reading_value} m³ (${formatDate(lastReading.reading_date)})` : 'sem leituras'}, contador novo a arrancar a 0 em ${formatDate(resetContadorData)}`
+          + (acumulado > 0 ? `; ${formatCurrency(acumulado)} acumulado(s) transportado(s)` : ''),
+      })
+
+      alert(
+        `✅ Contador trocado no ${space.ref}.\n\n` +
+        `O contador antigo fica fechado na leitura ${lastReading ? `${lastReading.reading_value} m³ de ${formatDate(lastReading.reading_date)}` : '(não havia leituras)'}.\n` +
+        `O contador novo arranca a 0 em ${formatDate(resetContadorData)} — a próxima leitura conta a partir do zero.` +
+        (acumulado > 0 ? `\n\nO valor acumulado de ${formatCurrency(acumulado)} continua a contar para a próxima cobrança.` : '')
+      )
+
+      setResetContador(null)
+      fetchAll()
+    } finally {
+      setResetting(false)
+    }
+  }
+
   async function executeReset() {
     if (!resetModal) return
     setResetting(true)
@@ -347,10 +422,11 @@ export default function ContadoresEspacosAguaPage() {
         <td>${r.m3_consumed != null ? Number(r.m3_consumed).toFixed(2) + ' m³' : '—'}</td>
         <td style="font-weight:600">${r.amount_calculated != null ? formatCurrency(r.amount_calculated) : '—'}</td>
         <td><span style="padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;${
-          r.waived ? 'background:#dbeafe;color:#1d4ed8'
+          ehArranqueDeContador(r) ? 'background:#f3e8ff;color:#6b21a8'
+          : r.waived ? 'background:#dbeafe;color:#1d4ed8'
           : r.charged ? 'background:#d1fae5;color:#065f46'
           : 'background:#fef3c7;color:#92400e'
-        }">${r.waived ? 'Oferta' : r.charged ? 'Cobrado' : 'Acumulado'}</span>${
+        }">${ehArranqueDeContador(r) ? 'Contador novo' : r.waived ? 'Oferta' : r.charged ? 'Cobrado' : 'Acumulado'}</span>${
           r.waived && r.waived_reason ? `<br><span style="font-size:10px;color:#888">${r.waived_reason}</span>` : ''
         }</td>
       </tr>`).join('')
@@ -504,17 +580,10 @@ export default function ContadoresEspacosAguaPage() {
 
     if (!todas || todas.length === 0) return
 
-    let anterior: number | null = null
-    for (const r of todas) {
-      const m3 = anterior != null ? parseFloat((r.reading_value - anterior).toFixed(2)) : null
-      const patch: Record<string, any> = { previous_value: anterior, m3_consumed: m3 }
-
-      if (!r.charged && !r.waived) {
-        patch.amount_calculated = m3 != null ? parseFloat((m3 * priceWithVat).toFixed(2)) : null
-      }
-
-      await supabase.from('water_readings').update(patch).eq('id', r.id)
-      anterior = r.reading_value
+    // Uma troca de contador (leitura a 0) corta a cadeia: as leituras do
+    // contador novo nunca ligam ao antigo — ver lib/meterReset.
+    for (const { id, patch } of cadeiaRecalculada(todas, { campoUnidades: 'm3_consumed', precoComIva: priceWithVat })) {
+      await supabase.from('water_readings').update(patch).eq('id', id)
     }
   }
 
@@ -902,6 +971,16 @@ export default function ContadoresEspacosAguaPage() {
   }
 
   async function deleteReading(reading: Reading) {
+    // Apagar o arranque de um contador novo volta a ligar as leituras do
+    // contador novo ao antigo — o consumo seguinte ficaria disparatado.
+    if (ehArranqueDeContador(reading)) {
+      const seguintes = (readings[reading.space_id] ?? [])
+        .filter(r => r.reading_date >= reading.reading_date && r.id !== reading.id).length
+      if (seguintes > 0 && !confirm(
+        `Esta leitura é o arranque do contador novo.\n\nSe a apagares, as ${seguintes} leitura(s) seguintes voltam a contar a partir do contador antigo e o consumo fica errado. Só deves fazer isto se a troca tiver sido registada por engano.\n\nApagar mesmo assim?`
+      )) return
+    }
+
     const { data: spaceLeases } = await supabase
       .from('leases')
       .select('id')
@@ -1220,8 +1299,16 @@ export default function ContadoresEspacosAguaPage() {
                         <button
                           onClick={e => { e.stopPropagation(); openResetModal(space) }}
                           className="text-xs text-amber-600 hover:underline font-medium whitespace-nowrap"
-                          title="Fechar contas do inquilino que sai e pôr o contador a zero para o próximo">
+                          title="Fechar as contas do inquilino que sai: leitura de saída, perdão das cobranças em aberto e limpeza do acumulado">
                           ⟲ Fecho de contas
+                        </button>
+                      )}
+                      {(isAdmin || isCoAdmin) && !titular && (
+                        <button
+                          onClick={e => { e.stopPropagation(); openResetContador(space) }}
+                          className="text-xs text-purple-600 hover:underline font-medium whitespace-nowrap"
+                          title="O contador físico foi trocado: fecha o antigo onde está e arranca o novo a 0">
+                          🔄 Reset do contador
                         </button>
                       )}
                       {(isAdmin || isCoAdmin) && !titular && (
@@ -1273,7 +1360,18 @@ export default function ContadoresEspacosAguaPage() {
                                   {r.amount_calculated != null ? formatCurrency(r.amount_calculated) : '—'}
                                 </td>
                                 <td className="py-2">
-                                  {r.waived ? (
+                                  {ehArranqueDeContador(r) ? (
+                                    <>
+                                      <span
+                                        className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium whitespace-nowrap"
+                                        title={r.notes ?? NOTA_RESET}>
+                                        🔄 Contador novo
+                                      </span>
+                                      {r.accumulated && !r.charged && (r.amount_calculated ?? 0) > 0 && (
+                                        <p className="text-[11px] text-gray-400 mt-0.5">acumulado de antes da troca</p>
+                                      )}
+                                    </>
+                                  ) : r.waived ? (
                                     <span
                                       className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium"
                                       title={r.waived_reason ?? 'Não cobrado'}>
@@ -1342,6 +1440,86 @@ export default function ContadoresEspacosAguaPage() {
           </div>
         )}
       </div>
+
+      {/* Troca do contador físico — contagem a recomeçar do zero */}
+      {resetContador && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-semibold text-lg text-gray-900">
+                🔄 Reset do contador — {resetContador.space.ref}
+              </h2>
+              <button onClick={() => setResetContador(null)}><X className="w-5 h-5 text-gray-400" /></button>
+            </div>
+
+            <p className="text-sm text-gray-600 mb-4">
+              O contador físico foi trocado e a contagem recomeça do zero. O histórico
+              não é alterado: o contador antigo fica fechado onde está.
+            </p>
+
+            <div className="space-y-3 mb-4">
+              <div className="bg-gray-50 rounded-lg p-3">
+                <p className="text-xs text-gray-500 mb-1">O contador antigo fecha nesta leitura</p>
+                {resetContador.lastReading ? (
+                  <p className="text-sm font-semibold text-gray-900">
+                    {resetContador.lastReading.reading_value} m³
+                    <span className="text-gray-500 font-normal"> · {formatDate(resetContador.lastReading.reading_date)}</span>
+                  </p>
+                ) : (
+                  <p className="text-sm text-gray-500">Este espaço ainda não tem leituras registadas.</p>
+                )}
+                <p className="text-[11px] text-gray-400 mt-1">
+                  Se tiveres uma leitura mais recente do contador antigo, fecha esta janela,
+                  registo-a em &quot;+ Leitura&quot; e só depois faz o reset.
+                </p>
+              </div>
+
+              <div className="bg-purple-50 border border-purple-100 rounded-lg p-3">
+                <p className="text-xs text-purple-700 mb-1">Leitura de arranque do contador novo</p>
+                <p className="text-sm font-semibold text-purple-900">0 m³</p>
+                <p className="text-[11px] text-purple-600 mt-1">{NOTA_RESET}</p>
+              </div>
+
+              <div>
+                <label className="label">Data em que o contador novo começou</label>
+                <input type="date" className="input" value={resetContadorData}
+                  onChange={e => setResetContadorData(e.target.value)} />
+              </div>
+
+              {resetContador.acumulado > 0 && (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+                  Há {formatCurrency(resetContador.acumulado)} acumulado(s) deste espaço. A troca de
+                  contador não apaga dívidas: esse valor continua a contar para a próxima cobrança.
+                </p>
+              )}
+
+              {resetContador.partilhado && (
+                <p className="text-xs text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2">
+                  Este contador é partilhado. O reset faz-se aqui, no titular, e a divisão
+                  continua a funcionar como nas leituras normais.
+                </p>
+              )}
+            </div>
+
+            <div className="bg-gray-50 rounded-lg p-3 mb-4">
+              <p className="text-xs font-semibold text-gray-700 mb-1">O que vai acontecer</p>
+              <ul className="text-xs text-gray-600 space-y-0.5 list-disc list-inside">
+                <li>Fica registada uma leitura de 0 m³ em {formatDate(resetContadorData)}.</li>
+                <li>Essa leitura não gera consumo nem cobrança.</li>
+                <li>A leitura seguinte conta a partir do zero, não do contador antigo.</li>
+                <li>Nenhuma leitura, cobrança ou oferta antiga é alterada.</li>
+              </ul>
+            </div>
+
+            <div className="flex gap-3">
+              <button className="btn-secondary flex-1" onClick={() => setResetContador(null)}>Cancelar</button>
+              <button className="btn-primary flex-1" onClick={executarResetContador} disabled={resetting}>
+                {resetting ? 'A registar...' : 'Confirmar troca de contador'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal Fecho de Contas */}
       {resetModal && (
