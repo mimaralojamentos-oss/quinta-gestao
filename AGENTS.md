@@ -35,6 +35,38 @@ correr mais do que uma vez sem erro.
 6. `NOTIFY pgrst, 'reload schema';` no fim, para a API ver a tabela sem
    esperar.
 
+## Toda a função nova leva `SET search_path`
+
+```sql
+CREATE OR REPLACE FUNCTION public.<nome>(...) RETURNS ...
+LANGUAGE plpgsql
+SET search_path = public, pg_temp      -- obrigatório
+AS $$ ... $$;
+```
+
+Sem isto, a função resolve os nomes das tabelas pelo `search_path` de quem a
+chama — e numa função `SECURITY DEFINER` isso corre com os privilégios do
+dono. O `pg_temp` vai no fim de propósito, para tabelas temporárias nunca se
+fazerem passar pelas verdadeiras.
+
+E o `EXECUTE` também se escreve: as funções nascem executáveis por `PUBLIC`,
+o que no Supabase significa chamáveis **sem sessão** em
+`/rest/v1/rpc/<nome>`.
+
+```sql
+REVOKE ALL ON FUNCTION public.<nome>(...) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.<nome>(...) TO authenticated, service_role;
+```
+
+As funções usadas dentro de políticas de RLS (`user_role()`, `is_admin()`)
+**têm** de manter o `EXECUTE` para `authenticated`: a condição da política é
+avaliada como o utilizador que faz o pedido. As funções de trigger não
+precisam de `EXECUTE` para dispararem — isso é verificado quando o trigger é
+criado, não a cada escrita.
+
+O ficheiro `supabase-hardening-functions.sql` aplica isto a tudo o que já
+existe, nas duas bases.
+
 ## "permission denied for table" é falta de GRANT, não de RLS
 
 São duas coisas diferentes e são precisas as duas: o **GRANT** diz se o papel
