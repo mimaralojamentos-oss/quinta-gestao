@@ -14,8 +14,22 @@ correr mais do que uma vez sem erro.
 ## Todo o SQL que cria uma tabela em `public` inclui, no mesmo ficheiro:
 
 1. `ALTER TABLE ... ENABLE ROW LEVEL SECURITY;`
-2. as **políticas** de leitura e de escrita (a escrita decidida por
-   `user_role()`: `admin`, `coadmin`, `electrician`, `viewer`, `super_reader`);
+2. as **políticas** de leitura e de escrita, **as duas decididas por
+   `user_role()`** — a leitura exige papel atribuído, a escrita exige os
+   papéis que podem alterar aquela tabela:
+   ```sql
+   CREATE POLICY <tabela>_read ON public.<tabela> FOR SELECT TO authenticated
+     USING (user_role() = ANY (ARRAY['admin','coadmin','electrician','viewer','super_reader']));
+   CREATE POLICY <tabela>_write ON public.<tabela> FOR ALL TO authenticated
+     USING (user_role() = ANY (ARRAY['admin','coadmin']))
+     WITH CHECK (user_role() = ANY (ARRAY['admin','coadmin']));
+   ```
+   **A leitura nunca é `USING (true)`**: uma conta recém-criada nasce
+   `'pendente'` (ver `supabase-signup-pendente.sql`) e com `true` lia tudo.
+   A única exceção é a `profiles`, onde cada um tem de poder ler o seu
+   próprio perfil — senão a app não descobre o papel e ninguém entra.
+   O ficheiro `supabase-leitura-por-papel.sql` aplicou isto a tudo o que já
+   existia;
 3. os **GRANTs explícitos**:
    ```sql
    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.<tabela> TO authenticated;
