@@ -186,21 +186,45 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
 -- ----------------------------------------------------------------------------
 -- 7. Verificação — o que ficou (deve dar 0 em todas as colunas de falhas)
 -- ----------------------------------------------------------------------------
-WITH objetos AS (
-  SELECT c.oid, c.relname AS nome, c.relkind,
-         has_table_privilege('authenticated', c.oid, 'SELECT') AS auth_select,
-         has_table_privilege('authenticated', c.oid, 'INSERT') AS auth_insert,
-         has_table_privilege('service_role',  c.oid, 'SELECT') AS srv_select,
-         has_table_privilege('service_role',  c.oid, 'DELETE') AS srv_delete,
-         (has_table_privilege('anon', c.oid, 'SELECT')
-          OR has_table_privilege('anon', c.oid, 'INSERT')
-          OR has_table_privilege('anon', c.oid, 'UPDATE')
-          OR has_table_privilege('anon', c.oid, 'DELETE')) AS anon_tem_acesso,
-         c.relrowsecurity AS rls,
+-- As funções has_table_privilege e has_sequence_privilege dão erro quando
+-- recebem um objeto do tipo errado ("X is not a sequence"), e o planeador é
+-- livre de as calcular ANTES do filtro do relkind — o que fazia a consulta
+-- rebentar em índices de outros schemas. Como o SQL Editor corre tudo numa
+-- transação, esse erro desfazia os GRANTs todos.
+--
+-- Por isso a escolha dos objetos vive em CTEs MATERIALIZED (barreira de
+-- otimização, o mesmo efeito de um OFFSET 0): o filtro corre primeiro e
+-- cada função só vê objetos do seu tipo.
+WITH tabelas AS MATERIALIZED (
+  SELECT c.oid, c.relname AS nome, c.relrowsecurity AS rls,
          (SELECT count(*) FROM pg_policy p WHERE p.polrelid = c.oid) AS politicas
   FROM pg_class c
   JOIN pg_namespace n ON n.oid = c.relnamespace
   WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')
+),
+sequences AS MATERIALIZED (
+  SELECT c.oid
+  FROM pg_class c
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+  WHERE n.nspname = 'public' AND c.relkind = 'S'
+),
+objetos AS (
+  SELECT t.nome, t.rls, t.politicas,
+         has_table_privilege('authenticated', t.oid, 'SELECT') AS auth_select,
+         has_table_privilege('authenticated', t.oid, 'INSERT') AS auth_insert,
+         has_table_privilege('service_role',  t.oid, 'SELECT') AS srv_select,
+         has_table_privilege('service_role',  t.oid, 'DELETE') AS srv_delete,
+         (has_table_privilege('anon', t.oid, 'SELECT')
+          OR has_table_privilege('anon', t.oid, 'INSERT')
+          OR has_table_privilege('anon', t.oid, 'UPDATE')
+          OR has_table_privilege('anon', t.oid, 'DELETE')) AS anon_tem_acesso
+  FROM tabelas t
+),
+falhas_sequences AS (
+  SELECT count(*) AS n FROM sequences s
+  WHERE NOT has_sequence_privilege('authenticated', s.oid, 'USAGE')
+     OR NOT has_sequence_privilege('service_role', s.oid, 'USAGE')
+     OR has_sequence_privilege('anon', s.oid, 'USAGE')
 )
 SELECT
   count(*)                                                                   AS tabelas,
@@ -212,7 +236,5 @@ SELECT
   count(*) FILTER (WHERE NOT rls)                                            AS tabelas_sem_rls,
   coalesce(string_agg(nome, ', ' ORDER BY nome) FILTER (WHERE politicas = 0), 'nenhuma')
                                                                              AS tabelas_sem_politicas,
-  (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-    WHERE n.nspname = 'public' AND c.relkind = 'S'
-      AND NOT has_sequence_privilege('authenticated', c.oid, 'USAGE'))        AS falha_sequences_sem_usage
+  (SELECT n FROM falhas_sequences)                                           AS falha_sequences
 FROM objetos;
