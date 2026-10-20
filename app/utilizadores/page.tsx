@@ -3,16 +3,21 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { useAuth } from '@/lib/auth-context'
-import { Shield, Plus, Trash2, Eye, Zap, Key, ChevronLeft, History, BookOpen } from 'lucide-react'
+import { Shield, Plus, Trash2, Eye, Zap, Key, ChevronLeft, History, BookOpen, Clock } from 'lucide-react'
 import Link from 'next/link'
 import { formatDateTime } from '@/lib/utils'
 
 const supabase = createClient()
 
+/**
+ * 'pendente' é o papel com que nasce uma conta criada por registo próprio:
+ * não consta de nenhuma política, por isso não vê nem escreve nada até um
+ * administrador lhe dar um papel aqui.
+ */
 type Profile = {
   id: string
   email: string
-  role: 'admin' | 'coadmin' | 'viewer' | 'electrician' | 'super_reader'
+  role: 'admin' | 'coadmin' | 'viewer' | 'electrician' | 'super_reader' | 'pendente'
   created_at: string
 }
 
@@ -121,7 +126,7 @@ export default function UtilizadoresPage() {
     setCreating(false)
   }
 
-  async function handleChangeRole(id: string, role: 'admin' | 'coadmin' | 'viewer' | 'electrician') {
+  async function handleChangeRole(id: string, role: 'admin' | 'coadmin' | 'viewer' | 'electrician' | 'super_reader') {
     await supabase.from('profiles').update({ role }).eq('id', id)
     fetchProfiles()
   }
@@ -136,12 +141,17 @@ export default function UtilizadoresPage() {
     fetchProfiles()
   }
 
+  // Um papel desconhecido mostra-se como está, nunca como "Visualizador":
+  // dizer que uma conta é visualizadora quando não é dava a ideia errada
+  // de quem tem acesso a quê.
   function getRoleLabel(role: string) {
     if (role === 'admin') return 'Administrador'
     if (role === 'coadmin') return 'Co-Administrador'
     if (role === 'electrician') return 'Eletricista'
     if (role === 'super_reader') return 'Super Leitor'
-    return 'Visualizador'
+    if (role === 'viewer') return 'Visualizador'
+    if (role === 'pendente') return 'Pendente — sem acesso'
+    return role
   }
 
   function getRoleIcon(role: string) {
@@ -149,7 +159,8 @@ export default function UtilizadoresPage() {
     if (role === 'coadmin') return <Key className="w-4 h-4 text-orange-500" />
     if (role === 'electrician') return <Zap className="w-4 h-4 text-yellow-500" />
     if (role === 'super_reader') return <BookOpen className="w-4 h-4 text-blue-500" />
-    return <Eye className="w-4 h-4 text-gray-400" />
+    if (role === 'viewer') return <Eye className="w-4 h-4 text-gray-400" />
+    return <Clock className="w-4 h-4 text-amber-500" />
   }
 
   function getRoleBadge(role: string) {
@@ -157,7 +168,8 @@ export default function UtilizadoresPage() {
     if (role === 'coadmin') return 'bg-orange-100 text-orange-700'
     if (role === 'electrician') return 'bg-yellow-100 text-yellow-700'
     if (role === 'super_reader') return 'bg-blue-100 text-blue-700'
-    return 'bg-gray-100 text-gray-600'
+    if (role === 'viewer') return 'bg-gray-100 text-gray-600'
+    return 'bg-amber-100 text-amber-700'
   }
 
   useEffect(() => {
@@ -256,7 +268,11 @@ export default function UtilizadoresPage() {
                     onChange={e => handleChangeRole(p.id, e.target.value as any)}
                     className="text-sm border rounded px-2 py-1 text-gray-700"
                   >
+                    {p.role === 'pendente' && (
+                      <option value="pendente" disabled>Pendente — escolhe um papel</option>
+                    )}
                     <option value="viewer">Visualizador</option>
+                    <option value="super_reader">Super Leitor</option>
                     <option value="electrician">Eletricista</option>
                     <option value="coadmin">Co-Administrador</option>
                     <option value="admin">Administrador</option>
