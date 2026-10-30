@@ -354,6 +354,91 @@ export function calcularConta(entries: WorkEntry[], payments: WorkerPayment[]): 
   }
 }
 
+// --------------------------------------------- relatório de pagamento
+
+export interface PeriodoRelatorio {
+  /** Data inicial, inclusive (AAAA-MM-DD). */
+  de: string
+  /** Data final, inclusive (AAAA-MM-DD). */
+  ate: string
+}
+
+export interface RelatorioPagamento {
+  periodo: PeriodoRelatorio
+  /** Os dias do período, do mais antigo para o mais recente. */
+  entradas: EntradaComEstado[]
+  totalHoras: number
+  totalGanho: number
+  /** Do que foi ganho no período, quanto já está coberto por pagamentos. */
+  totalPago: number
+  /** O valor a liquidar — é o número que interessa. */
+  porPagar: number
+  /** Quantos registos do período ainda não estão pagos por inteiro. */
+  registosPorPagar: number
+}
+
+/**
+ * Os dias de um período e as suas contas, para o documento que se entrega
+ * ao trabalhador quando se lhe paga.
+ *
+ * O estado de cada dia (pago / parcial / por pagar) vem da distribuição
+ * global dos pagamentos feita pela calcularConta — os pagamentos cobrem
+ * sempre os dias mais antigos primeiro. Por isso os totais daqui são
+ * fatias dessa conta, e não uma conta à parte: somam-se os `pago` e os
+ * `emFalta` dos dias do período.
+ *
+ * É só leitura: não marca nada como pago nem toca em dados.
+ */
+export function relatorioPagamento(conta: ResumoConta, periodo: PeriodoRelatorio): RelatorioPagamento {
+  const dentro = (conta.entradas ?? []).filter(e => {
+    const d = String(e.work_date)
+    return d >= periodo.de && d <= periodo.ate
+  })
+
+  // A conta entrega as entradas da mais recente para a mais antiga; o
+  // documento lê-se por ordem de data.
+  const entradas = [...dentro].sort((a, b) => {
+    const d = String(a.work_date).localeCompare(String(b.work_date))
+    if (d !== 0) return d
+    return String(a.start_time ?? '').localeCompare(String(b.start_time ?? ''))
+  })
+
+  const soma = (f: (e: EntradaComEstado) => number) =>
+    parseFloat(entradas.reduce((s, e) => s + f(e), 0).toFixed(2))
+
+  return {
+    periodo,
+    entradas,
+    totalHoras: soma(e => Number(e.hours ?? 0)),
+    totalGanho: soma(e => Number(e.amount ?? 0)),
+    totalPago: soma(e => Number(e.pago ?? 0)),
+    porPagar: soma(e => Number(e.emFalta ?? 0)),
+    registosPorPagar: entradas.filter(e => e.estado !== 'pago').length,
+  }
+}
+
+/**
+ * O período que vem pré-selecionado: do dia mais antigo que está por pagar
+ * até hoje.
+ *
+ * Se não houver nada por pagar, abre o mês corrente (o documento sai vazio
+ * ou só com dias já pagos, que é o que faz sentido mostrar). Se houver um
+ * registo por pagar com data futura, o fim do período acompanha-o, para
+ * não ficar nada de fora.
+ */
+export function periodoPorPagar(conta: ResumoConta, hoje: Date = new Date()): PeriodoRelatorio {
+  const hojeISO = hoje.toISOString().slice(0, 10)
+  const porPagar = (conta.entradas ?? []).filter(e => e.estado !== 'pago').map(e => String(e.work_date))
+
+  if (porPagar.length === 0) {
+    return { de: `${hojeISO.slice(0, 7)}-01`, ate: hojeISO }
+  }
+
+  const maisAntigo = porPagar.reduce((a, b) => (a < b ? a : b))
+  const maisRecente = porPagar.reduce((a, b) => (a > b ? a : b))
+  return { de: maisAntigo, ate: maisRecente > hojeISO ? maisRecente : hojeISO }
+}
+
 // ------------------------------------------------- correções do trabalhador
 
 /** Horas que o trabalhador tem para corrigir um registo seu, a contar da criação. */

@@ -7,9 +7,10 @@ import { formatCurrency, formatDate, openStorageDocument, slugifyFilename, delet
 
 import {
   calcularConta, calcularHoras, formatarHoras, tarifaAoGuardar, ehDiaEspecial,
-  motivoDiaEspecial, ehValorFixo,
+  motivoDiaEspecial, ehValorFixo, relatorioPagamento, periodoPorPagar,
   type Worker, type WorkEntry, type WorkerPayment, type ResumoConta, type TipoRegisto,
 } from '@/lib/ponto'
+import { htmlRelatorioPagamento } from '@/lib/pontoRelatorio'
 import { useAuth } from '@/lib/auth-context'
 import { logAccess } from '@/lib/logAccess'
 import WorkerFormModal from '@/components/WorkerFormModal'
@@ -76,6 +77,12 @@ export default function TrabalhadorPage({ params }: { params: Promise<{ id: stri
   const [guardandoPagamento, setGuardandoPagamento] = useState(false)
   const [erroPagamento, setErroPagamento] = useState('')
 
+  /**
+   * Relatório de pagamento: só escolhe o período e imprime. Não marca nada
+   * como pago — o pagamento registra-se como sempre, no botão ao lado.
+   */
+  const [periodoRelatorio, setPeriodoRelatorio] = useState<{ de: string; ate: string } | null>(null)
+
 
   async function carregar(silencioso = false) {
     if (!silencioso) setLoading(true)
@@ -114,6 +121,12 @@ export default function TrabalhadorPage({ params }: { params: Promise<{ id: stri
     { key: 'pagos', label: `Pagos (${entradasPagas.length})` },
     { key: 'todos', label: `Todos (${entradas.length})` },
   ]
+
+  // O que entra no período escolhido, para a janela do relatório poder
+  // mostrar as contas antes de gerar o documento.
+  const previaRelatorio = conta && periodoRelatorio && periodoRelatorio.de && periodoRelatorio.ate
+    ? relatorioPagamento(conta, periodoRelatorio)
+    : null
 
   async function copiar(texto: string, qual: 'link' | 'pin') {
     try {
@@ -270,6 +283,45 @@ export default function TrabalhadorPage({ params }: { params: Promise<{ id: stri
     return pdf.output('blob')
   }
 
+  // ------------------------------------------- relatório de pagamento
+
+  function abrirRelatorio() {
+    if (!conta) return
+    setPeriodoRelatorio(periodoPorPagar(conta))
+  }
+
+  /**
+   * Abre o documento numa janela nova e manda imprimir (dá para guardar
+   * como PDF na própria janela de impressão do browser).
+   *
+   * A janela tem de abrir no clique, senão o bloqueador de janelas do
+   * browser trava-a — por isso o registo no log vem só depois.
+   */
+  async function imprimirRelatorio() {
+    if (!worker || !previaRelatorio) return
+
+    const janela = window.open('', '_blank')
+    if (!janela) {
+      alert('O browser bloqueou a janela de impressão.\n\nPermite janelas novas para este site e tenta outra vez.')
+      return
+    }
+    janela.document.write(htmlRelatorioPagamento({
+      worker,
+      relatorio: previaRelatorio,
+      appName: process.env.NEXT_PUBLIC_APP_NAME,
+      appLocation: process.env.NEXT_PUBLIC_APP_LOCATION,
+    }))
+    janela.document.close()
+
+    await logAccess({
+      action: 'ver',
+      page: '/trabalhadores',
+      details: `Gerou o relatório de pagamento de ${worker.name} de ${formatDate(previaRelatorio.periodo.de)} a ${formatDate(previaRelatorio.periodo.ate)}`
+        + ` (${previaRelatorio.entradas.length} registo(s), ${formatCurrency(previaRelatorio.porPagar)} por pagar)`,
+    })
+    setPeriodoRelatorio(null)
+  }
+
   // ------------------------------------------------------------ pagamento
   async function guardarPagamento() {
     if (!worker || !formPagamento) return
@@ -422,6 +474,10 @@ export default function TrabalhadorPage({ params }: { params: Promise<{ id: stri
             <div className="flex gap-2">
               <button className="btn-secondary" onClick={() => setEditarDados(true)}>
                 <Pencil className="w-4 h-4" /> Editar
+              </button>
+              <button className="btn-secondary" onClick={abrirRelatorio}
+                title="Documento com os dias trabalhados de um período, para entregar ao trabalhador">
+                <FileText className="w-4 h-4" /> Relatório de pagamento
               </button>
               <button className="btn-primary" onClick={() => { setFormPagamento({ payment_date: new Date().toISOString().slice(0, 10), amount: String(conta?.saldo ?? ''), notes: '' }); setErroPagamento('') }}>
                 <Banknote className="w-4 h-4" /> Registar Pagamento
@@ -774,6 +830,73 @@ export default function TrabalhadorPage({ params }: { params: Promise<{ id: stri
       )}
 
       {/* Janela: pagamento */}
+      {/* Relatório de pagamento: escolher o período e imprimir */}
+      {periodoRelatorio && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg">
+            <div className="flex items-center justify-between p-5 border-b border-gray-100">
+              <div>
+                <h2 className="font-semibold text-lg text-gray-900">Relatório de pagamento</h2>
+                <p className="text-xs text-gray-500 mt-0.5">{worker.name}</p>
+              </div>
+              <button onClick={() => setPeriodoRelatorio(null)}><X className="w-5 h-5 text-gray-400" /></button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="label">De</label>
+                  <input type="date" className="input" value={periodoRelatorio.de}
+                    onChange={e => setPeriodoRelatorio(p => p && { ...p, de: e.target.value })} />
+                </div>
+                <div>
+                  <label className="label">Até</label>
+                  <input type="date" className="input" value={periodoRelatorio.ate}
+                    onChange={e => setPeriodoRelatorio(p => p && { ...p, ate: e.target.value })} />
+                </div>
+              </div>
+
+              {periodoRelatorio.de > periodoRelatorio.ate ? (
+                <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+                  A data inicial é posterior à final.
+                </p>
+              ) : previaRelatorio && (
+                <div className="bg-gray-50 border border-gray-100 rounded-lg px-4 py-3 space-y-1.5">
+                  <p className="text-sm text-gray-800">
+                    <strong>{previaRelatorio.entradas.length}</strong> registo(s) neste período
+                    {previaRelatorio.registosPorPagar > 0 && (
+                      <> · <strong>{previaRelatorio.registosPorPagar}</strong> por pagar</>
+                    )}
+                  </p>
+                  <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-gray-600">
+                    <span>Horas: <strong>{formatarHoras(previaRelatorio.totalHoras)}</strong></span>
+                    <span>Ganho: <strong>{formatCurrency(previaRelatorio.totalGanho)}</strong></span>
+                    <span>Já pago: <strong>{formatCurrency(previaRelatorio.totalPago)}</strong></span>
+                    <span className={previaRelatorio.porPagar > 0.005 ? 'text-red-600' : 'text-emerald-600'}>
+                      Por pagar: <strong>{formatCurrency(previaRelatorio.porPagar)}</strong>
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              <p className="text-xs text-gray-400">
+                Vem pré-selecionado o período que cobre tudo o que está por pagar. O documento
+                abre numa janela nova para imprimir ou guardar como PDF — é só leitura, não
+                marca nada como pago.
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-3 p-4 border-t border-gray-100">
+              <button className="btn-secondary" onClick={() => setPeriodoRelatorio(null)}>Cancelar</button>
+              <button className="btn-primary" onClick={imprimirRelatorio}
+                disabled={!previaRelatorio || periodoRelatorio.de > periodoRelatorio.ate}>
+                <FileText className="w-4 h-4" /> Gerar documento
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {formPagamento && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
