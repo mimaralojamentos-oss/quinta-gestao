@@ -79,6 +79,8 @@ function DespesasContent() {
   const supplierDropdownRef = useRef<HTMLDivElement>(null)
   const [filterProject, setFilterProject] = useState('all')
   const [filterPayment, setFilterPayment] = useState<'all' | 'dinheiro' | 'banco'>('all')
+  /** Tipo da despesa (expenses.type), como é definido ao criar/editar. */
+  const [filterType, setFilterType] = useState<'all' | 'recorrente' | 'pontual'>('all')
   const [filterPeriod, setFilterPeriod] = useState<'all' | 'hoje' | 'semana' | 'mes' | 'ano'>('all')
   const [filterDateFrom, setFilterDateFrom] = useState('')
   const [filterDateTo, setFilterDateTo] = useState('')
@@ -199,6 +201,7 @@ function DespesasContent() {
   function resetFilters() {
     setSearch(''); setFilterCategory('all'); setFilterSuppliers([])
     setFilterProject('all'); setFilterPeriod('all'); setFilterPayment('all')
+    setFilterType('all')
     setFilterDateFrom(''); setFilterDateTo('')
     setFilterAmountMin(''); setFilterAmountMax('')
     clearExpenseFilter()
@@ -207,6 +210,7 @@ function DespesasContent() {
 
   const hasActiveFilters = search || filterCategory !== 'all' || filterSuppliers.length > 0 ||
     filterProject !== 'all' || filterPeriod !== 'all' || filterPayment !== 'all' ||
+    filterType !== 'all' ||
     filterDateFrom || filterDateTo || filterAmountMin || filterAmountMax || filterExpenseId
 
   const allSuppliers = [...new Set(expenses.map(e => e.supplier).filter(Boolean))].sort()
@@ -221,6 +225,10 @@ function DespesasContent() {
     // sem método definido — senão desapareciam dos dois filtros.
     const matchPayment = filterPayment === 'all'
       || (filterPayment === 'dinheiro' ? e.payment_method === 'dinheiro' : e.payment_method !== 'dinheiro')
+    // 'pontual' apanha tudo o que não é recorrente, incluindo registos
+    // antigos sem tipo definido — senão desapareciam dos dois filtros.
+    const matchType = filterType === 'all'
+      || (filterType === 'recorrente' ? e.type === 'recorrente' : e.type !== 'recorrente')
     const matchDateFrom = !filterDateFrom || e.expense_date >= filterDateFrom
     const matchDateTo = !filterDateTo || e.expense_date <= filterDateTo
     const matchPeriod = !dateRange || (e.expense_date >= dateRange.from && e.expense_date <= dateRange.to)
@@ -228,7 +236,7 @@ function DespesasContent() {
     const matchAmountMax = !filterAmountMax || e.amount <= parseFloat(filterAmountMax)
     const matchExpenseId = !filterExpenseId || e.id === filterExpenseId
     const matchSelectedPeriod = selectedPeriod === 'all' || e.expense_date?.slice(0, 7) === selectedPeriod
-    return matchSearch && matchCat && matchSupplier && matchProject && matchPayment && matchDateFrom && matchDateTo && matchPeriod && matchAmountMin && matchAmountMax && matchExpenseId && matchSelectedPeriod
+    return matchSearch && matchCat && matchSupplier && matchProject && matchPayment && matchType && matchDateFrom && matchDateTo && matchPeriod && matchAmountMin && matchAmountMax && matchExpenseId && matchSelectedPeriod
   }).sort((a, b) => {
     let valA = a[sortField] ?? '', valB = b[sortField] ?? ''
     if (sortField === 'amount') { valA = Number(valA); valB = Number(valB) }
@@ -387,7 +395,7 @@ function DespesasContent() {
           </div>
 
           {/* Filtros — linha 2 */}
-          <div className="grid grid-cols-6 gap-2 items-center">
+          <div className="grid grid-cols-7 gap-2 items-center">
             {/* Fornecedor multi-select */}
             <div className="relative col-span-2" ref={supplierDropdownRef}>
               <button onClick={() => setShowSupplierDropdown(!showSupplierDropdown)}
@@ -422,6 +430,16 @@ function DespesasContent() {
               <option value="all">Todos os pagamentos</option>
               <option value="dinheiro">💵 Dinheiro</option>
               <option value="banco">🏦 Banco</option>
+            </select>
+
+            {/* Tipo da despesa */}
+            <select
+              className={`input text-sm ${filterType !== 'all' ? 'border-emerald-400 text-emerald-700' : 'text-gray-600'}`}
+              value={filterType}
+              onChange={e => setFilterType(e.target.value as 'all' | 'recorrente' | 'pontual')}>
+              <option value="all">Todos os tipos</option>
+              <option value="recorrente">🔁 Recorrentes</option>
+              <option value="pontual">📌 Pontuais</option>
             </select>
 
             {/* Mais filtros (datas e valores) */}
