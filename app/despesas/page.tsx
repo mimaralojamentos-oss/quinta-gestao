@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { Expense } from '@/lib/types'
 import { formatCurrency, formatDate, categoryLabel, matchesSearch, openStorageDocument, deleteExpenseSafely, getMonthLabel } from '@/lib/utils'
-import { EXPENSE_CATEGORIES } from '@/lib/expenseCategories'
+import { EXPENSE_CATEGORIES, EXPENSE_TYPES, expenseTypeLabel } from '@/lib/expenseCategories'
 import { Plus, Search, Trash2, X, SlidersHorizontal, Eye, ChevronDown as ChevronDownIcon, Copy, CopyPlus } from 'lucide-react'
 import ExpenseModal from './ExpenseModal'
 import CopiarDespesasModal from './CopiarDespesasModal'
@@ -161,6 +161,40 @@ function DespesasContent() {
     const project = projects.find(p => p.id === projectId)
     await logAccess({ action: 'editar', page: '/despesas', details: projectId ? `Associou despesa "${expense?.description}" ao projeto "${project?.name}"` : `Removeu projeto da despesa "${expense?.description}"` })
     setExpenses(prev => prev.map(e => { if (e.id !== expenseId) return e; const project = projects.find(p => p.id === projectId) ?? null; return { ...e, project_id: projectId || null, project } }))
+  }
+
+  /**
+   * Categoria e tipo mudam na própria linha, como o projeto: grava-se só o
+   * campo alterado (nada mais da despesa é reescrito) e a lista e os
+   * cartões refazem-se a partir do estado. Se a linha deixar de
+   * corresponder a um filtro ativo, sai da vista — é o que se espera.
+   */
+  async function handleCategoryChange(expenseId: string, category: string) {
+    const expense = expenses.find(e => e.id === expenseId)
+    if (!expense || !category || expense.category === category) return
+
+    const { error } = await supabase.from('expenses').update({ category }).eq('id', expenseId)
+    if (error) { alert(`Não foi possível mudar a categoria: ${error.message}`); return }
+
+    await logAccess({
+      action: 'editar', page: '/despesas',
+      details: `Mudou a categoria da despesa "${expense.description}" de "${categoryLabel(expense.category)}" para "${categoryLabel(category)}"`,
+    })
+    setExpenses(prev => prev.map(e => (e.id === expenseId ? { ...e, category } : e)))
+  }
+
+  async function handleTypeChange(expenseId: string, type: string) {
+    const expense = expenses.find(e => e.id === expenseId)
+    if (!expense || !type || expense.type === type) return
+
+    const { error } = await supabase.from('expenses').update({ type }).eq('id', expenseId)
+    if (error) { alert(`Não foi possível mudar o tipo: ${error.message}`); return }
+
+    await logAccess({
+      action: 'editar', page: '/despesas',
+      details: `Mudou o tipo da despesa "${expense.description}" de "${expenseTypeLabel(expense.type)}" para "${expenseTypeLabel(type)}"`,
+    })
+    setExpenses(prev => prev.map(e => (e.id === expenseId ? { ...e, type } : e)))
   }
 
   async function viewDocument(expenseId: string) {
@@ -438,8 +472,7 @@ function DespesasContent() {
               value={filterType}
               onChange={e => setFilterType(e.target.value as 'all' | 'recorrente' | 'pontual')}>
               <option value="all">Todos os tipos</option>
-              <option value="recorrente">🔁 Recorrentes</option>
-              <option value="pontual">📌 Pontuais</option>
+              {EXPENSE_TYPES.map(t => <option key={t.value} value={t.value}>{t.filterLabel}</option>)}
             </select>
 
             {/* Mais filtros (datas e valores) */}
@@ -496,6 +529,7 @@ function DespesasContent() {
                   <th className={thClass} onClick={() => handleSort('expense_date')}>Data <SortIcon field="expense_date" sortField={sortField} sortDir={sortDir} variant="chevron" /></th>
                   <th className={thClass} onClick={() => handleSort('description')}>Descrição <SortIcon field="description" sortField={sortField} sortDir={sortDir} variant="chevron" /></th>
                   <th className={thClass} onClick={() => handleSort('category')}>Categoria <SortIcon field="category" sortField={sortField} sortDir={sortDir} variant="chevron" /></th>
+                  <th className="table-header">Tipo</th>
                   <th className={thClass} onClick={() => handleSort('supplier')}>Fornecedor <SortIcon field="supplier" sortField={sortField} sortDir={sortDir} variant="chevron" /></th>
                   <th className={thClass} onClick={() => handleSort('amount')}>Valor <SortIcon field="amount" sortField={sortField} sortDir={sortDir} variant="chevron" /></th>
                   <th className="table-header">Pagamento</th>
@@ -515,9 +549,31 @@ function DespesasContent() {
                         {expense.notes && <p className="text-xs text-gray-500">{expense.notes}</p>}
                       </td>
                       <td className="table-cell">
-                        <span className={`text-xs px-2 py-1 rounded-full font-medium ${categoryColors[expense.category] ?? 'bg-gray-100 text-gray-700'}`}>
-                          {categoryLabel(expense.category)}
-                        </span>
+                        {(isAdmin || isCoAdmin) ? (
+                          <select value={expense.category ?? ''} onChange={e => handleCategoryChange(expense.id, e.target.value)}
+                            title="Mudar a categoria"
+                            className={`text-xs font-medium border-0 rounded-full pl-2 pr-1 py-1 max-w-[150px] cursor-pointer focus:outline-none focus:ring-1 focus:ring-emerald-500 ${categoryColors[expense.category] ?? 'bg-gray-100 text-gray-700'}`}>
+                            {EXPENSE_CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                          </select>
+                        ) : (
+                          <span className={`text-xs px-2 py-1 rounded-full font-medium ${categoryColors[expense.category] ?? 'bg-gray-100 text-gray-700'}`}>
+                            {categoryLabel(expense.category)}
+                          </span>
+                        )}
+                      </td>
+                      <td className="table-cell">
+                        {(isAdmin || isCoAdmin) ? (
+                          <select value={expense.type === 'recorrente' ? 'recorrente' : 'pontual'}
+                            onChange={e => handleTypeChange(expense.id, e.target.value)}
+                            title="Mudar o tipo"
+                            className={`text-xs font-medium border-0 rounded-full pl-2 pr-1 py-1 max-w-[118px] cursor-pointer focus:outline-none focus:ring-1 focus:ring-emerald-500 ${expense.type === 'recorrente' ? 'bg-violet-100 text-violet-700' : 'bg-gray-100 text-gray-600'}`}>
+                            {EXPENSE_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                          </select>
+                        ) : (
+                          <span className={`text-xs px-2 py-1 rounded-full font-medium ${expense.type === 'recorrente' ? 'bg-violet-100 text-violet-700' : 'bg-gray-100 text-gray-600'}`}>
+                            {expenseTypeLabel(expense.type)}
+                          </span>
+                        )}
                       </td>
                       <td className="table-cell text-sm">{expense.supplier ?? '—'}</td>
                       <td className="table-cell font-semibold text-red-600">{formatCurrency(expense.amount)}</td>
@@ -567,7 +623,7 @@ function DespesasContent() {
                   )
                 })}
                 {filtered.length === 0 && (
-                  <tr><td colSpan={(isAdmin || isCoAdmin) ? 9 : 8} className="py-12 text-center text-gray-400 text-sm">
+                  <tr><td colSpan={(isAdmin || isCoAdmin) ? 10 : 9} className="py-12 text-center text-gray-400 text-sm">
                     {hasActiveFilters ? 'Nenhuma despesa encontrada com estes filtros' : 'Nenhuma despesa encontrada'}
                   </td></tr>
                 )}

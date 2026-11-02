@@ -27,3 +27,19 @@ export const EXPENSE_CATEGORIES = [
 ] as const satisfies readonly ExpenseCategoryInfo[]
 
 export type ExpenseCategoryValue = typeof EXPENSE_CATEGORIES[number]['value']
+
+/**
+ * Tipo da despesa (expenses.type), com os rótulos usados na tabela e no
+ * filtro da página de Despesas — no singular na linha, no plural no filtro.
+ */
+export const EXPENSE_TYPES = [
+  { value: 'recorrente', label: '🔁 Recorrente', filterLabel: '🔁 Recorrentes', color: 'bg-violet-100 text-violet-700' },
+  { value: 'pontual', label: '📌 Pontual', filterLabel: '📌 Pontuais', color: 'bg-gray-100 text-gray-600' },
+] as const
+
+export type ExpenseTypeValue = typeof EXPENSE_TYPES[number]['value']
+
+/** O rótulo do tipo. Um registo antigo sem tipo conta como pontual. */
+export function expenseTypeLabel(type: string | null | undefined): string {
+  return (EXPENSE_TYPES.find(t => t.value === type) ?? EXPENSE_TYPES[1]).label
+}
