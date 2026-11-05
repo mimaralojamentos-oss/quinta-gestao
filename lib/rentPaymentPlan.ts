@@ -70,6 +70,12 @@ export interface RentPaymentPlan {
   rendaTotal: number
   /** Soma de rendaPayments[].creditApplied — crédito de adiantamento consumido neste pagamento. */
   creditTotal: number
+  /**
+   * Crédito de adiantamento que o inquilino tinha ANTES deste pagamento.
+   * Serve para se poder dizer que ele existe sem dar a entender que vai ser
+   * usado: só é tocado se o dinheiro recebido não chegar.
+   */
+  creditAvailable: number
   /** null quando não há caução em falta (ou o contrato não é elegível — ver lib/depositShortfall.ts). */
   caucao: CaucaoPlan | null
   electricityCharges: ElectricityChargePlan[]
@@ -150,6 +156,8 @@ export async function buildRentPaymentPlan(supabase: any, params: BuildPlanParam
 
   const rendaPayments: RendaMonthPlan[] = []
   let creditTotal = 0
+  /** Crédito que o inquilino já tinha antes deste pagamento. */
+  let creditAvailableBefore = 0
   let caucao: CaucaoPlan | null = null
 
   if (podeRenda) {
@@ -166,9 +174,10 @@ export async function buildRentPaymentPlan(supabase: any, params: BuildPlanParam
 
       const appliedAdvances = buildAppliedAdvanceMap(payments)
 
-      let creditAvailable = payments
+      let creditAvailable = parseFloat(payments
         .filter((p: any) => p.tipo === 'adiantamento' && !p.used)
-        .reduce((s: number, p: any) => s + (p.amount ?? 0), 0)
+        .reduce((s: number, p: any) => s + (p.amount ?? 0), 0).toFixed(2))
+      creditAvailableBefore = creditAvailable
 
       // No "Só renda", o mês escolhido também não pode ir além do fim do
       // contrato — um pagamento nunca pode ser distribuído para depois de o
@@ -190,14 +199,23 @@ export async function buildRentPaymentPlan(supabase: any, params: BuildPlanParam
         // No "Só renda" mostra-se sempre o mês escolhido, mesmo que já esteja em dia.
         if (destino !== 'renda' && owedBefore <= 0.01) continue
 
-        const creditApplied = parseFloat(Math.min(creditAvailable, owedBefore).toFixed(2))
-        creditAvailable = parseFloat((creditAvailable - creditApplied).toFixed(2))
-        const owedAfterCredit = parseFloat((owedBefore - creditApplied).toFixed(2))
-
-        const applyAmount = parseFloat(Math.max(0, Math.min(remaining, owedAfterCredit)).toFixed(2))
+        // O DINHEIRO DO DIA PRIMEIRO, o crédito antigo só para o que faltar.
+        //
+        // Ao contrário: um inquilino que entregasse 170 € numa renda de 175 €
+        // tendo 10 € de crédito antigo ficava com a renda registada como
+        // 165 € em dinheiro + 10 € de crédito e com um adiantamento NOVO de
+        // 5 € no mesmo dia — um registo que não corresponde ao que entrou.
+        // Assim, o valor em dinheiro da linha é sempre o que foi entregue
+        // naquela data, e nunca se consome crédito antigo e se cria
+        // adiantamento novo no mesmo recebimento.
+        const applyAmount = parseFloat(Math.max(0, Math.min(remaining, owedBefore)).toFixed(2))
         remaining = parseFloat((remaining - applyAmount).toFixed(2))
+        const owedAfterCash = parseFloat((owedBefore - applyAmount).toFixed(2))
 
-        const remainingAfter = parseFloat((owedAfterCredit - applyAmount).toFixed(2))
+        const creditApplied = parseFloat(Math.min(creditAvailable, owedAfterCash).toFixed(2))
+        creditAvailable = parseFloat((creditAvailable - creditApplied).toFixed(2))
+
+        const remainingAfter = parseFloat((owedAfterCash - creditApplied).toFixed(2))
         const fullyPaid = remainingAfter <= 0.01
 
         if (destino === 'renda' || creditApplied > 0 || applyAmount > 0) {
@@ -228,12 +246,16 @@ export async function buildRentPaymentPlan(supabase: any, params: BuildPlanParam
 
   const rendaTotal = parseFloat(rendaPayments.reduce((s, r) => s + r.amount, 0).toFixed(2))
 
+  // O dinheiro do dia e o crédito antigo aparecem sempre separados, para a
+  // linha se ler como "170,00 € dinheiro + 5,00 € adiantamento".
   for (const rp of rendaPayments) {
     const mesLabel = getMonthLabel(rp.referenceMonth)
-    const creditoTxt = rp.creditApplied > 0 ? ` (crédito ${formatCurrency(rp.creditApplied)} aplicado)` : ''
+    const valorTxt = rp.creditApplied > 0
+      ? `${formatCurrency(rp.amount)} dinheiro + ${formatCurrency(rp.creditApplied)} adiantamento`
+      : formatCurrency(rp.amount)
     lines.push(rp.fullyPaid
-      ? `Renda ${mesLabel}: ${formatCurrency(rp.amount)}${creditoTxt} ✅`
-      : `Renda ${mesLabel}: ${formatCurrency(rp.amount)}${creditoTxt} de ${formatCurrency(rp.monthlyRent)} ⚠️`)
+      ? `Renda ${mesLabel}: ${valorTxt} ✅`
+      : `Renda ${mesLabel}: ${valorTxt} de ${formatCurrency(rp.monthlyRent)} ⚠️`)
   }
   if (podeRenda && rendaPayments.length === 0 && destino === 'auto') {
     lines.push('Renda: sem meses em falta')
@@ -371,7 +393,7 @@ export async function buildRentPaymentPlan(supabase: any, params: BuildPlanParam
   }
 
   return {
-    rendaPayments, rendaTotal, creditTotal, caucao,
+    rendaPayments, rendaTotal, creditTotal, creditAvailable: creditAvailableBefore, caucao,
     electricityCharges, electricityTotal,
     waterCharges, waterTotal,
     debtPayments, debtTotal,
@@ -399,11 +421,15 @@ export interface ManualPlanItem {
   proposed: number
   monthlyRent?: number
   owedBefore?: number
-  /** Renda: crédito de adiantamento já aplicado automaticamente (não editável aqui). */
-  creditApplied?: number
   chargeDate?: string | null
   totalAmount?: number
   alreadyPaid?: number
+  /**
+   * Só nas rendas: o crédito de adiantamento que o inquilino tem guardado.
+   * Não está "já aplicado" — só entra no que o dinheiro escrito à mão não
+   * cobrir, e só se nada do valor recebido ficar por distribuir.
+   */
+  creditAvailable?: number
 }
 
 /**
@@ -431,8 +457,11 @@ export async function buildManualPlanItems(
   const items: ManualPlanItem[] = []
 
   for (const rp of full.rendaPayments) {
-    const max = parseFloat(Math.max(0, rp.owedBefore - rp.creditApplied).toFixed(2))
-    if (max <= 0) continue // nada por pagar a dinheiro novo nesta rubrica
+    // O teto é a dívida inteira do mês: agora o dinheiro entra primeiro e o
+    // crédito só cobre o que ficar a faltar, por isso não se desconta nada
+    // ao máximo que se pode pagar a dinheiro.
+    const max = parseFloat(Math.max(0, rp.owedBefore).toFixed(2))
+    if (max <= 0) continue
     const pr = proposed.rendaPayments.find(x => x.referenceMonth === rp.referenceMonth)
     items.push({
       type: 'renda',
@@ -442,7 +471,7 @@ export async function buildManualPlanItems(
       proposed: pr ? pr.amount : 0,
       monthlyRent: rp.monthlyRent,
       owedBefore: rp.owedBefore,
-      creditApplied: rp.creditApplied,
+      creditAvailable: full.creditAvailable,
     })
   }
 
@@ -525,6 +554,17 @@ export function validateManualPlan(items: ManualPlanItem[], values: Record<strin
 export function buildPlanFromManualItems(items: ManualPlanItem[], values: Record<string, number>, amount: number): RentPaymentPlan {
   const rendaPayments: RendaMonthPlan[] = []
   let creditTotal = 0
+  const creditAvailable = items.find(it => it.type === 'renda')?.creditAvailable ?? 0
+
+  /**
+   * O crédito antigo entra depois do dinheiro escrito à mão, e só se TODO o
+   * valor recebido tiver sido distribuído: se sobrar dinheiro para
+   * adiantamento, o crédito antigo não se toca — um recebimento nunca
+   * consome crédito e cria adiantamento ao mesmo tempo.
+   */
+  const distribuidoAMao = items.reduce((s, it) => s + parseFloat((values[it.key] ?? 0).toFixed(2)), 0)
+  const sobra = parseFloat((amount - distribuidoAMao).toFixed(2))
+  let creditLeft = sobra > 0.01 ? 0 : creditAvailable
   let caucao: CaucaoPlan | null = null
   const electricityCharges: ElectricityChargePlan[] = []
   const waterCharges: WaterChargePlan[] = []
@@ -535,10 +575,12 @@ export function buildPlanFromManualItems(items: ManualPlanItem[], values: Record
     const value = parseFloat((values[it.key] ?? 0).toFixed(2))
 
     if (it.type === 'renda') {
-      const creditApplied = it.creditApplied ?? 0
-      if (value <= 0 && creditApplied <= 0) continue
       const owedBefore = it.owedBefore ?? 0
-      const remainingAfter = parseFloat((owedBefore - creditApplied - value).toFixed(2))
+      const porCobrir = parseFloat(Math.max(0, owedBefore - value).toFixed(2))
+      const creditApplied = parseFloat(Math.min(creditLeft, porCobrir).toFixed(2))
+      creditLeft = parseFloat((creditLeft - creditApplied).toFixed(2))
+      if (value <= 0 && creditApplied <= 0) continue
+      const remainingAfter = parseFloat((porCobrir - creditApplied).toFixed(2))
       const fullyPaid = remainingAfter <= 0.01
       rendaPayments.push({
         referenceMonth: it.key, monthlyRent: it.monthlyRent ?? 0, owedBefore, creditApplied,
@@ -546,9 +588,12 @@ export function buildPlanFromManualItems(items: ManualPlanItem[], values: Record
       })
       creditTotal = parseFloat((creditTotal + creditApplied).toFixed(2))
       const mesLabel = getMonthLabel(it.key)
+      const valorTxt = creditApplied > 0
+        ? `${formatCurrency(value)} dinheiro + ${formatCurrency(creditApplied)} adiantamento`
+        : formatCurrency(value)
       lines.push(fullyPaid
-        ? `Renda ${mesLabel}: ${formatCurrency(value)} ✅`
-        : `Renda ${mesLabel}: ${formatCurrency(value)} de ${formatCurrency(it.monthlyRent ?? 0)} ⚠️`)
+        ? `Renda ${mesLabel}: ${valorTxt} ✅`
+        : `Renda ${mesLabel}: ${valorTxt} de ${formatCurrency(it.monthlyRent ?? 0)} ⚠️`)
     } else if (it.type === 'caucao') {
       if (value <= 0) continue
       const owedBefore = it.owedBefore ?? 0
@@ -597,7 +642,7 @@ export function buildPlanFromManualItems(items: ManualPlanItem[], values: Record
   if (adiantamento > 0.01) lines.push(`Excedente (não distribuído) → adiantamento: ${formatCurrency(adiantamento)}`)
 
   return {
-    rendaPayments, rendaTotal, creditTotal, caucao,
+    rendaPayments, rendaTotal, creditTotal, creditAvailable, caucao,
     electricityCharges, electricityTotal,
     waterCharges, waterTotal,
     debtPayments, debtTotal,

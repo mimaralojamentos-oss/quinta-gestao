@@ -15,7 +15,7 @@ import {
 import ManualAllocationEditor from '@/components/ManualAllocationEditor'
 import { consumeAdvances, releaseAdvance, describeAdvanceTarget, buildAppliedAdvanceMap } from '@/lib/advanceCredit'
 import { getDebtRemaining } from '@/lib/debts'
-import { getMonthlyRentStatus } from '@/lib/rentShortfall'
+import { getMonthlyRentStatus, rendaMensalDoInquilino } from '@/lib/rentShortfall'
 import { getDepositShortfall } from '@/lib/depositShortfall'
 
 interface Props {
@@ -834,6 +834,9 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
       return sum + (p.amount ?? 0)
     }, 0) - totalAdvance
 
+  // A renda mensal que o inquilino paga (contratos ativos) — só leitura.
+  const renda = rendaMensalDoInquilino(leases, formatCurrency)
+
   // Calcula a distribuição deste recebimento em concreto, à medida que o
   // valor é escrito — o mesmo motor único usado no banco e em /pagamentos.
   // No destino "Manual" busca-se a lista de rubricas em aberto em vez do
@@ -1406,7 +1409,21 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
 
           {!isNew && tab === 'conta' && (
             <div>
-              <div className="grid grid-cols-3 gap-3 mb-4">
+              <div className="grid grid-cols-4 gap-3 mb-4">
+                <div className="bg-gray-50 rounded-lg p-3 text-center"
+                  title={renda.contratos > 1 ? renda.divisao : undefined}>
+                  <p className="text-xs text-gray-500 mb-1">Renda mensal</p>
+                  {renda.contratos === 0 ? (
+                    <p className="font-medium text-gray-400 text-xs mt-1">sem contrato ativo</p>
+                  ) : (
+                    <>
+                      <p className="font-semibold text-gray-900">{formatCurrency(renda.total)}</p>
+                      {renda.contratos > 1 && (
+                        <p className="text-[11px] text-gray-500 mt-0.5 truncate">{renda.divisao}</p>
+                      )}
+                    </>
+                  )}
+                </div>
                 <div className="bg-gray-50 rounded-lg p-3 text-center">
                   <p className="text-xs text-gray-500 mb-1">Total pago</p>
                   <p className="font-semibold text-gray-900">{formatCurrency(payments.filter(p => p.payment_date && p.payment_date !== 'liquidada').reduce((s, p) => s + p.amount, 0))}</p>
@@ -1518,7 +1535,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                                 🏠 Renda {getMonthLabel(rp.referenceMonth)}
                                 {!rp.fullyPaid && <span className="text-orange-500 ml-1">(parcial)</span>}
                                 {rp.creditApplied > 0 && (
-                                  <span className="block text-[11px] text-purple-600 mt-0.5">💰 crédito {formatCurrency(rp.creditApplied)} aplicado</span>
+                                  <span className="block text-[11px] text-purple-600 mt-0.5">💰 + {formatCurrency(rp.creditApplied)} de adiantamento (crédito antigo)</span>
                                 )}
                                 <span className="block text-[11px] text-gray-500 mt-0.5">
                                   Em dívida {formatCurrency(rp.owedBefore)}

@@ -55,8 +55,10 @@ export default function ManualAllocationEditor({
                 <p className="text-xs text-gray-700 truncate" title={it.label}>{ICONS[it.type]} {it.label}</p>
                 <p className="text-[11px] text-gray-400 truncate">
                   em falta {formatCurrency(it.max)}
-                  {it.type === 'renda' && (it.creditApplied ?? 0) > 0 && (
-                    <span className="text-purple-500"> · crédito {formatCurrency(it.creditApplied!)} já aplicado</span>
+                  {it.type === 'renda' && (it.creditAvailable ?? 0) > 0 && (
+                    <span className="text-purple-500" title="O crédito só é usado no que o dinheiro não cobrir, e nunca quando sobra dinheiro para adiantamento">
+                      {' '}· há {formatCurrency(it.creditAvailable!)} de crédito
+                    </span>
                   )}
                 </p>
               </div>

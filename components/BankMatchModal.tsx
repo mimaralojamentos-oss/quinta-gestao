@@ -610,13 +610,14 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
                           </span>
                           {rp.creditApplied > 0 && (
                             <span className="block text-[11px] text-purple-600 mt-0.5">
-                              💰 crédito {formatCurrency(rp.creditApplied)} aplicado
+                              💰 + {formatCurrency(rp.creditApplied)} de adiantamento (crédito antigo)
                             </span>
                           )}
                           <SaldoLinha emDivida={rp.owedBefore} fica={rp.remainingAfter} />
                         </span>
-                        <span className={`font-medium ${rp.fullyPaid ? 'text-gray-900' : 'text-amber-700'}`}>
+                        <span className={`font-medium whitespace-nowrap ${rp.fullyPaid ? 'text-gray-900' : 'text-amber-700'}`}>
                           {formatCurrency(rp.amount)}
+                          {rp.creditApplied > 0 && <span className="font-normal text-[10px] text-gray-400"> dinheiro</span>}
                         </span>
                       </div>
                     ))}

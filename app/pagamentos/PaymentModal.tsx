@@ -32,7 +32,8 @@ interface DebtItem {
   referenceMonth?: string
   chargeId?: string
   debtId?: string
-  creditApplied?: number  // crédito de adiantamento já descontado
+  /** Crédito guardado do inquilino — usado só no que o dinheiro não cobrir. */
+  creditAvailable?: number
 }
 
 export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: Props) {
@@ -146,14 +147,15 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
       .or('used.is.null,used.eq.false')
       .order('payment_date', { ascending: true })
 
-    // Aplicar crédito às rendas (mais antigas primeiro)
-    let creditLeft = (advData ?? []).reduce((s: number, a: any) => s + a.amount, 0)
-    const adjustedItems = items.map(item => {
-      if (item.type !== 'renda' || creditLeft <= 0) return item
-      const credit = parseFloat(Math.min(creditLeft, item.remainingAmount).toFixed(2))
-      creditLeft = parseFloat((creditLeft - credit).toFixed(2))
-      return { ...item, remainingAmount: parseFloat((item.remainingAmount - credit).toFixed(2)), creditApplied: credit }
-    })
+    // O crédito guardado NÃO se desconta ao que está em dívida: o dinheiro
+    // recebido entra primeiro e o crédito só cobre o que ficar a faltar
+    // (ver lib/rentPaymentPlan.ts). Esta lista mostra a dívida inteira e diz
+    // só que o crédito existe — quem decide se é usado é o valor recebido.
+    const creditoGuardado = parseFloat((advData ?? []).reduce((s: number, a: any) => s + a.amount, 0).toFixed(2))
+    const adjustedItems = items.map(item =>
+      item.type === 'renda' && creditoGuardado > 0
+        ? { ...item, creditAvailable: creditoGuardado }
+        : item)
 
     setDebtItems(adjustedItems)
     setLoadingDebts(false)
@@ -417,8 +419,10 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
                       <div key={item.id} className="flex items-center justify-between px-3 py-2 rounded-lg bg-gray-50 border border-gray-100">
                         <div>
                           <p className="text-sm font-medium text-gray-800">{item.label}</p>
-                          {(item.creditApplied ?? 0) > 0 && (
-                            <p className="text-xs text-purple-600">💰 {formatCurrency(item.creditApplied!)} de crédito será aplicado</p>
+                          {(item.creditAvailable ?? 0) > 0 && (
+                            <p className="text-xs text-purple-600" title="O crédito entra só no que o valor recebido não cobrir">
+                              💰 há {formatCurrency(item.creditAvailable!)} de crédito guardado
+                            </p>
                           )}
                         </div>
                         <div className="flex items-center gap-2">
@@ -500,10 +504,13 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
                               🏠 Renda {getMonthLabel(rp.referenceMonth)}
                               {!rp.fullyPaid && <span className="text-orange-500 ml-1">(parcial)</span>}
                               {rp.creditApplied > 0 && (
-                                <span className="block text-[11px] text-purple-600">💰 crédito {formatCurrency(rp.creditApplied)} aplicado</span>
+                                <span className="block text-[11px] text-purple-600">💰 + {formatCurrency(rp.creditApplied)} de adiantamento (crédito antigo)</span>
                               )}
                             </span>
-                            <span className="text-xs font-semibold">{formatCurrency(rp.amount)}</span>
+                            <span className="text-xs font-semibold whitespace-nowrap">
+                              {formatCurrency(rp.amount)}
+                              {rp.creditApplied > 0 && <span className="font-normal text-[10px] text-gray-400"> dinheiro</span>}
+                            </span>
                           </div>
                         ))}
                         {plan.caucao && (

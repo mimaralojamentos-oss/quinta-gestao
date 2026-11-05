@@ -106,3 +106,37 @@ export function getMonthlyRentStatus<P extends RentPaymentLike>(params: {
   }
   return result
 }
+
+// ------------------------------------------------- renda mensal do inquilino
+
+export interface RendaMensal {
+  /** Soma das rendas dos contratos ATIVOS. */
+  total: number
+  /** Quantos contratos ativos entraram na soma. */
+  contratos: number
+  /** A divisão por espaço, quando há mais do que um (ex.: "P24S 175,00 € + A07-A 325,00 €"). */
+  divisao: string
+}
+
+/**
+ * A renda mensal que um inquilino paga, somando os contratos ativos.
+ *
+ * Só para orientação de quem está a ver a ficha — não entra em nenhuma
+ * conta. Sem contrato ativo devolve contratos = 0, para o ecrã poder dizer
+ * "sem contrato ativo" em vez de mostrar 0 €, que daria a ideia errada.
+ * Um contrato ativo com renda 0 é diferente disso: aí há contrato, e o
+ * valor a mostrar é mesmo 0 €.
+ */
+export function rendaMensalDoInquilino(
+  leases: { status?: string | null; monthly_rent?: number | null; space?: { ref?: string | null } | null }[] | null | undefined,
+  formatar: (v: number) => string = (v) => `${v.toFixed(2)} €`,
+): RendaMensal {
+  const ativos = (leases ?? []).filter(l => l?.status === 'ativo')
+  return {
+    total: parseFloat(ativos.reduce((s, l) => s + Number(l.monthly_rent ?? 0), 0).toFixed(2)),
+    contratos: ativos.length,
+    divisao: ativos
+      .map(l => `${l.space?.ref ?? '—'} ${formatar(Number(l.monthly_rent ?? 0))}`)
+      .join(' + '),
+  }
+}
