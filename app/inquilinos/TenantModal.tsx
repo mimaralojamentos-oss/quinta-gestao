@@ -14,6 +14,7 @@ import {
 } from '@/lib/rentPaymentPlan'
 import ManualAllocationEditor from '@/components/ManualAllocationEditor'
 import { consumeAdvances, releaseAdvance, describeAdvanceTarget, buildAppliedAdvanceMap } from '@/lib/advanceCredit'
+import { planearReversaoPagamento, reverterPagamento, textoConfirmacao } from '@/lib/paymentReversal'
 import { getDebtRemaining } from '@/lib/debts'
 import { getMonthlyRentStatus, rendaMensalDoInquilino } from '@/lib/rentShortfall'
 import { getDepositShortfall } from '@/lib/depositShortfall'
@@ -39,6 +40,8 @@ const tipoConfig = {
 interface PaymentRow {
   id?: string
   lease_id?: string
+  /** Só nos registos feitos depois da migração dos grupos de recebimento. */
+  receipt_group_id?: string | null
   reference_month: string
   amount: number
   payment_date: string | null
@@ -612,11 +615,31 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
     await fetchPayments()
   }
 
+  /**
+   * Apagar desfaz tudo o que o registo criou: devolve o crédito consumido,
+   * apaga o adiantamento do mesmo recebimento e os movimentos do fundo de
+   * maneio (ver lib/paymentReversal.ts). O diálogo diz o que vai acontecer
+   * antes de o fazer.
+   */
   async function handleDeletePayment(id: string) {
-    if (!confirm('Tens a certeza que queres apagar este pagamento?')) return
     const payment = payments.find(p => p.id === id)
-    await supabase.from('rent_payments').delete().eq('id', id)
-    await logAccess({ action: 'apagar', page: '/inquilinos', details: `Apagou pagamento (${formatCurrency(payment?.amount ?? 0)}) de "${tenant?.name}"` })
+    if (!payment) return
+
+    const plano = await planearReversaoPagamento(supabase, {
+      id, lease_id: payment.lease_id ?? payment.lease?.id,
+      tipo: payment.tipo, amount: Number(payment.amount ?? 0),
+      payment_date: payment.payment_date, reference_month: payment.reference_month,
+      used: payment.used, receipt_group_id: payment.receipt_group_id,
+    })
+    if (!confirm(textoConfirmacao(plano))) return
+
+    const { erro, resumo } = await reverterPagamento(supabase, plano)
+    if (erro) { alert(`Não foi possível apagar: ${erro}`); return }
+
+    await logAccess({
+      action: 'apagar', page: '/inquilinos',
+      details: `Apagou pagamento de "${tenant?.name}" — ${resumo}`,
+    })
     await fetchPayments()
   }
 

@@ -50,7 +50,18 @@ function toMonthStart(month?: string | null): string | null {
  */
 export async function consumeAdvances(
   supabase: any,
-  params: { leaseId: string; amountNeeded: number; target: AdvanceTarget },
+  params: {
+    leaseId: string
+    amountNeeded: number
+    target: AdvanceTarget
+    /**
+     * O recebimento que está a gastar este crédito. Fica guardado na linha
+     * para que apagar esse recebimento saiba exatamente que crédito devolver
+     * (ver lib/paymentReversal.ts). Vem a null enquanto a migração das
+     * colunas de grupo não estiver aplicada.
+     */
+    receiptGroupId?: string | null
+  },
 ): Promise<ConsumeAdvancesResult> {
   const { leaseId, target } = params
   let remaining = parseFloat(Number(params.amountNeeded ?? 0).toFixed(2))
@@ -58,7 +69,8 @@ export async function consumeAdvances(
 
   const { data: advances, error: fetchError } = await supabase
     .from('rent_payments')
-    .select('id, lease_id, reference_month, amount, payment_date, payment_method, notes')
+    .select('id, lease_id, reference_month, amount, payment_date, payment_method, notes'
+      + (params.receiptGroupId ? ', receipt_group_id' : ''))
     .eq('lease_id', leaseId)
     .eq('tipo', 'adiantamento')
     .or('used.is.null,used.eq.false')
@@ -68,6 +80,7 @@ export async function consumeAdvances(
 
   const stamp = {
     used: true,
+    ...(params.receiptGroupId ? { consumed_by_receipt_id: params.receiptGroupId } : {}),
     applied_to_type: target.type,
     applied_to_id: (target.type === 'eletricidade' || target.type === 'agua') ? (target.chargeId ?? null) : null,
     applied_to_lease_id: target.type === 'renda' ? (target.leaseId ?? leaseId) : null,
@@ -107,6 +120,9 @@ export async function consumeAdvances(
         tipo: 'adiantamento',
         notes: adv.notes,
         used: false,
+        // O troco é a continuação da linha de onde saiu, não do recebimento
+        // que a gastou: fica com o grupo do original (se o tiver).
+        ...(adv.receipt_group_id ? { receipt_group_id: adv.receipt_group_id } : {}),
       })
       if (insertError) return { applied, consumedIds, error: insertError.message }
 

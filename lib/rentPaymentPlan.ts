@@ -1,6 +1,7 @@
 import { formatCurrency, getMonthLabel, getCurrentMonth } from './utils'
 import { getMonthlyRentStatus, getSingleMonthRentStatus } from './rentShortfall'
 import { buildAppliedAdvanceMap, consumeAdvances } from './advanceCredit'
+import { receiptGroupsDisponiveis } from './paymentReversal'
 import { getDebtRemaining } from './debts'
 import { getDepositShortfall } from './depositShortfall'
 import { CASH_FUND_START_DATE } from './cashFundConfig'
@@ -683,6 +684,21 @@ export async function applyRentPaymentPlan(supabase: any, plan: RentPaymentPlan,
   const cashOk = paymentMethod === 'dinheiro' && paymentDate >= CASH_FUND_START_DATE
   const quemTexto = spaceRef ? `${spaceRef}${tenantName ? ` (${tenantName})` : ''}` : (tenantName ?? '')
 
+  /**
+   * Todas as linhas nascidas deste recebimento levam o mesmo grupo, e o
+   * crédito que ele gastar fica a apontar para cá. É isto que permite,
+   * mais tarde, apagar o pagamento e desfazer exatamente o que ele fez
+   * (ver lib/paymentReversal.ts).
+   *
+   * Enquanto a migração das colunas não estiver aplicada nas duas bases,
+   * o grupo fica a null e a reversão trabalha por aproximação — nunca se
+   * envia a coluna, para a gravação não falhar.
+   */
+  const grupo = (await receiptGroupsDisponiveis(supabase))
+    ? (globalThis.crypto?.randomUUID?.() ?? null)
+    : null
+  const comGrupo = grupo ? { receipt_group_id: grupo } : {}
+
   const rendaPayments: any[] = []
 
   for (const rp of plan.rendaPayments) {
@@ -691,6 +707,7 @@ export async function applyRentPaymentPlan(supabase: any, plan: RentPaymentPlan,
         leaseId,
         amountNeeded: rp.creditApplied,
         target: { type: 'renda', leaseId, month: rp.referenceMonth },
+        receiptGroupId: grupo,
       })
       if (error) return { rendaPayments, adiantamentoPayment: null, error: `Erro ao aplicar o crédito de adiantamento: ${error}` }
     }
@@ -705,6 +722,7 @@ export async function applyRentPaymentPlan(supabase: any, plan: RentPaymentPlan,
       payment_method: paymentMethod,
       tipo: 'renda',
       notes: appendNote(rp.fullyPaid ? null : 'Pagamento parcial', notes),
+      ...comGrupo,
     }).select().single()
 
     if (insertErr) return { rendaPayments, adiantamentoPayment: null, error: insertErr.message }
@@ -732,6 +750,7 @@ export async function applyRentPaymentPlan(supabase: any, plan: RentPaymentPlan,
       payment_method: paymentMethod,
       tipo: 'caucao',
       notes: appendNote(plan.caucao.fullyPaid ? null : 'Pagamento parcial', notes),
+      ...comGrupo,
     }).select().single()
 
     if (caucaoErr) return { rendaPayments, adiantamentoPayment: null, error: caucaoErr.message }
@@ -840,6 +859,7 @@ export async function applyRentPaymentPlan(supabase: any, plan: RentPaymentPlan,
       tipo: 'adiantamento',
       used: false,
       notes: appendNote('Excedente (adiantamento)', notes),
+      ...comGrupo,
     }).select().single()
     adiantamentoPayment = data
 

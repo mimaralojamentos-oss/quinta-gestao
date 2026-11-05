@@ -11,6 +11,7 @@ import DestinoPagamentoPicker from '@/components/DestinoPagamentoPicker'
 import ManualAllocationEditor from '@/components/ManualAllocationEditor'
 import { X, Pencil, Trash2, AlertTriangle } from 'lucide-react'
 import { logAccess } from '@/lib/logAccess'
+import { planearReversaoPagamento, reverterPagamento, textoConfirmacao } from '@/lib/paymentReversal'
 import { buildAppliedAdvanceMap } from '@/lib/advanceCredit'
 import { getMonthlyRentStatus } from '@/lib/rentShortfall'
 import { PAYMENT_TYPES, PAYMENT_TYPE_LABELS } from '@/lib/paymentTypes'
@@ -264,11 +265,27 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
     })
   }
 
+  /**
+   * Apagar desfaz tudo o que o registo criou — o mesmo caminho da ficha do
+   * inquilino (lib/paymentReversal.ts): crédito devolvido, adiantamento do
+   * mesmo recebimento apagado e movimentos do fundo de maneio limpos.
+   */
   async function handleDelete(p: any) {
-    if (!confirm('Tens a certeza que queres apagar este pagamento?')) return
-    await supabase.from('cash_fund_movements').delete().eq('source_id', p.id)
-    await supabase.from('rent_payments').delete().eq('id', p.id)
-    await logAccess({ action: 'apagar', page: '/pagamentos', details: `Apagou pagamento de ${PAYMENT_TYPE_LABELS[p.tipo] ?? p.tipo} (${formatCurrency(p.amount)}) de ${lease.tenant?.name} (${lease.space?.ref})` })
+    const plano = await planearReversaoPagamento(supabase, {
+      id: p.id, lease_id: p.lease_id ?? lease.id,
+      tipo: p.tipo, amount: Number(p.amount ?? 0),
+      payment_date: p.payment_date, reference_month: p.reference_month,
+      used: p.used, receipt_group_id: p.receipt_group_id,
+    })
+    if (!confirm(textoConfirmacao(plano))) return
+
+    const { erro, resumo } = await reverterPagamento(supabase, plano)
+    if (erro) { alert(`Não foi possível apagar: ${erro}`); return }
+
+    await logAccess({
+      action: 'apagar', page: '/pagamentos',
+      details: `Apagou pagamento de ${PAYMENT_TYPE_LABELS[p.tipo] ?? p.tipo} de ${lease.tenant?.name} (${lease.space?.ref}) — ${resumo}`,
+    })
     onSaved()
   }
 
