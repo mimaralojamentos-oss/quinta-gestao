@@ -1,11 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import nodemailer from 'nodemailer'
 import { requireRole } from '@/lib/require-role'
 import { getAdminEmails } from '@/lib/adminEmails'
-import { applySubjectPrefix } from '@/lib/emailConfig'
 import { getEmailSettings } from '@/lib/emailSettings'
-import { recordSentEmail } from '@/lib/sentEmails'
-import { buildAppEmailHtml } from '@/lib/appEmailHtml'
+import { enviarEmailApp } from '@/lib/appMailer'
 
 export async function POST(request: NextRequest) {
   // Só quem tem sessão e permissão pode enviar e-mails em nome da empresa.
@@ -36,10 +33,6 @@ export async function POST(request: NextRequest) {
       }, { status: 500 })
     }
 
-    // Prefixo obrigatório do assunto, aplicado no servidor para que nenhum
-    // e-mail saia sem ele, independentemente de onde foi pedido.
-    finalSubject = applySubjectPrefix(subject, settings.subjectPrefix)
-
     // Todos os administradores vão em CC.
     if (!skipAdminCc) {
       const admins = await getAdminEmails()
@@ -47,60 +40,29 @@ export async function POST(request: NextRequest) {
       cc = admins.filter(e => !toList.includes(e.toLowerCase()))
     }
 
-    const transporter = nodemailer.createTransport({
-      host: settings.smtpHost,
-      port: settings.smtpPort,
-      secure: settings.smtpPort === 465,
-      auth: { user: settings.smtpUser, pass: settings.smtpPassword },
-    })
-
-    const displayName = senderName ?? settings.fromName
-    const htmlBody = buildAppEmailHtml({ displayName, body, fromName: settings.fromName, footerNote })
-
-    await transporter.sendMail({
-      from: `"${displayName}" <${settings.fromEmail}>`,
-      to,
-      cc: cc.length > 0 ? cc.join(', ') : undefined,
-      subject: finalSubject,
-      html: htmlBody,
-      text: body,
-      replyTo: replyTo ?? settings.replyTo ?? settings.fromEmail,
-    })
-
-    // Histórico completo, incluindo o corpo do e-mail.
-    await recordSentEmail({
-      toEmail: String(to),
-      toName: payload.recipientName ?? null,
-      ccEmails: cc,
-      subject: finalSubject,
-      body: String(body),
+    // O envio, o prefixo do assunto, a moldura HTML e o registo no histórico
+    // vivem todos em lib/appMailer — o mesmo caminho que o cron e o alerta
+    // imediato da folha de ponto usam.
+    const resultado = await enviarEmailApp({
+      to: String(to), subject: String(subject), body: String(body),
+      cc, replyTo, senderName, footerNote,
       context: payload.context ?? null,
+      recipientName: payload.recipientName ?? null,
       sentById: auth.user?.id ?? null,
       sentByEmail: auth.user?.email ?? null,
-      status: 'enviado',
     })
+    finalSubject = resultado.subject
+
+    if (!resultado.enviado) {
+      return NextResponse.json({ error: resultado.erro ?? 'Erro ao enviar e-mail' }, { status: 500 })
+    }
 
     return NextResponse.json({ success: true, subject: finalSubject, cc })
   } catch (e: any) {
     console.error('[send-email]', e)
 
-    // As falhas também ficam registadas — é o que permite perceber
-    // mais tarde porque é que um inquilino nunca recebeu o e-mail.
-    if (payload?.to && payload?.subject) {
-      await recordSentEmail({
-        toEmail: String(payload.to),
-        toName: payload.recipientName ?? null,
-        ccEmails: cc,
-        subject: finalSubject || String(payload.subject),
-        body: String(payload.body ?? ''),
-        context: payload.context ?? null,
-        sentById: auth.user?.id ?? null,
-        sentByEmail: auth.user?.email ?? null,
-        status: 'erro',
-        errorMessage: e.message ?? 'Erro desconhecido',
-      })
-    }
-
+    // As falhas do próprio envio já ficam registadas pelo appMailer; isto
+    // apanha só o que falhe antes dele (payload inválido, definições, CC).
     return NextResponse.json({ error: e.message ?? 'Erro ao enviar e-mail' }, { status: 500 })
   }
 }

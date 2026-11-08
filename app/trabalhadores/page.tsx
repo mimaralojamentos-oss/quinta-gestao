@@ -8,7 +8,8 @@ import { formatarHoras, calcularConta, type Worker } from '@/lib/ponto'
 import { useAuth } from '@/lib/auth-context'
 import WorkerFormModal from '@/components/WorkerFormModal'
 import WorkerEmailModal, { type DestinatarioEmail } from '@/components/WorkerEmailModal'
-import { Plus, Search, ChevronRight, Users, Pencil, Mail, Send } from 'lucide-react'
+import TimesheetAlertsModal from '@/components/TimesheetAlertsModal'
+import { Plus, Search, ChevronRight, Users, Pencil, Mail, Send, Bell } from 'lucide-react'
 import Link from 'next/link'
 
 const supabase = createClient()
@@ -29,6 +30,7 @@ interface LinhaTrabalhador extends Worker {
 
 export default function TrabalhadoresPage() {
   const { isAdmin, isCoAdmin } = useAuth()
+  const [alertasAberto, setAlertasAberto] = useState(false)
   const podeEditar = isAdmin || isCoAdmin
 
   const [linhas, setLinhas] = useState<LinhaTrabalhador[]>([])
@@ -108,9 +110,15 @@ export default function TrabalhadoresPage() {
             </p>
           </div>
           {podeEditar && (
-            <button className="btn-primary" onClick={() => setNovoAberto(true)}>
-              <Plus className="w-4 h-4" /> Novo Trabalhador
-            </button>
+            <div className="flex gap-2">
+              <button className="btn-secondary" onClick={() => setAlertasAberto(true)}
+                title="Quem é avisado por e-mail dos registos de horas">
+                <Bell className="w-4 h-4" /> Alertas
+              </button>
+              <button className="btn-primary" onClick={() => setNovoAberto(true)}>
+                <Plus className="w-4 h-4" /> Novo Trabalhador
+              </button>
+            </div>
           )}
         </div>
 
@@ -258,6 +266,8 @@ export default function TrabalhadoresPage() {
           </div>
         )}
       </div>
+
+      {alertasAberto && <TimesheetAlertsModal onClose={() => setAlertasAberto(false)} />}
 
       {novoAberto && (
         <WorkerFormModal

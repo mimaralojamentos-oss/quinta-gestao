@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { enviarAlertaImediato } from '@/lib/timesheetAlertSender'
 import { createClient } from '@supabase/supabase-js'
 import {
   calcularHoras, calcularConta, tarifaDoDia, ehDiaEspecial, podeTrabalhadorCorrigir,
@@ -148,7 +149,7 @@ export async function POST(request: NextRequest) {
     const especial = ehDiaEspecial(String(work_date))
     const valor = parseFloat((horas * tarifa).toFixed(2))
 
-    const { error } = await supabase.from('work_entries').insert({
+    const { data: criada, error } = await supabase.from('work_entries').insert({
       worker_id: worker.id,
       work_date,
       start_time,
@@ -162,9 +163,19 @@ export async function POST(request: NextRequest) {
       // Pelo link só se registam horas. Os registos de valor fixo são
       // lançados pelo gestor no backoffice.
       entry_type: 'horas',
-    })
+    }).select('id, work_date, start_time, end_time, hours, amount, description, entry_type, is_holiday').maybeSingle()
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+    // Alerta imediato a quem o pediu. Nunca faz falhar nem atrasa o registo:
+    // a função apanha tudo por dentro e tem tempo limite curto.
+    if (criada) {
+      await enviarAlertaImediato(supabase, {
+        entrada: criada as any,
+        trabalhador: worker.name,
+        quemRegistou: `o próprio trabalhador (${worker.name})`,
+      })
+    }
 
     await registarAcesso(supabase, worker.name, 'criar',
       `Trabalhador registou ${horas}h em ${work_date} (${start_time}-${end_time}) — ${valor.toFixed(2)} EUR`)

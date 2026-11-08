@@ -192,12 +192,22 @@ export default function TrabalhadorPage({ params }: { params: Promise<{ id: stri
     }
 
     setGuardandoHoras(true)
-    const { error } = formHoras.id
-      ? await supabase.from('work_entries').update(payload).eq('id', formHoras.id)
-      : await supabase.from('work_entries').insert(payload)
+    const { data: gravada, error } = formHoras.id
+      ? await supabase.from('work_entries').update(payload).eq('id', formHoras.id).select('id').maybeSingle()
+      : await supabase.from('work_entries').insert(payload).select('id').maybeSingle()
 
     setGuardandoHoras(false)
     if (error) { alert(`Não foi possível guardar: ${error.message}`); return }
+
+    // Alerta imediato, só para registos NOVOS e sem travar nada: se o e-mail
+    // falhar, a entrada já está gravada e o erro fica no histórico de e-mails.
+    if (!formHoras.id && gravada?.id) {
+      fetch('/api/timesheet-alert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entryId: gravada.id }),
+      }).catch(() => {})
+    }
 
     await logAccess({ action: formHoras.id ? 'editar' : 'criar', page: '/trabalhadores', details: detalhe })
     setFormHoras(null)

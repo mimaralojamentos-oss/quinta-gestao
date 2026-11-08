@@ -1,0 +1,6 @@
+{
+  "crons": [
+    { "path": "/api/cron/timesheet-alerts?tipo=diario", "schedule": "0 9 * * *" },
+    { "path": "/api/cron/timesheet-alerts?tipo=fim-do-dia", "schedule": "0 20 * * *" }
+  ]
+}
