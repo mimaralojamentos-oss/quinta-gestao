@@ -157,9 +157,9 @@ export default function RevisaoRendasPage() {
   // --------------------------------------------------------------- linhas
 
   /**
-   * Marcar/desmarcar o aumento. Sem aumento, o valor a pedir passa a ser o
-   * atual e deixa de ser editável; ao voltar a marcar com aumento, a edição
-   * regressa e o valor volta ao recomendado.
+   * Marcar/desmarcar o aumento. Sem aumento, o recomendado e o valor a pedir
+   * passam a ser o atual e a edição desliga-se; ao voltar a marcar com
+   * aumento, a edição regressa e os dois voltam ao valor calculado.
    */
   async function alternarAumento(item: ItemRevisao) {
     const comAumento = !item.com_aumento
@@ -397,7 +397,16 @@ export default function RevisaoRendasPage() {
                         </select>
                       </td>
                       <td className="px-3 py-2 text-right whitespace-nowrap">{formatCurrency(Number(l.valor_atual))}</td>
-                      <td className="px-3 py-2 text-right whitespace-nowrap">{formatCurrency(l.recomendado)}</td>
+                      <td className="px-3 py-2 text-right whitespace-nowrap">
+                        {l.com_aumento ? formatCurrency(l.recomendado) : (
+                          <span title={`Sem aumento: fica igual ao valor atual. Com o coeficiente daria ${formatCurrency(l.recomendadoCalculado)}.`}>
+                            {formatCurrency(l.recomendado)}
+                            <span className="block text-[10px] text-gray-400 leading-tight">
+                              c/ aumento: {formatCurrency(l.recomendadoCalculado)}
+                            </span>
+                          </span>
+                        )}
+                      </td>
                       <td className="px-3 py-2 text-right whitespace-nowrap">
                         {l.com_aumento ? (
                           <input type="number" step="0.01" min="0"
@@ -435,8 +444,9 @@ export default function RevisaoRendasPage() {
             <p className="text-xs text-gray-400 mt-3">
               Os valores atuais são a fotografia tirada quando o estudo foi criado
               {estudo.created_at ? ` (${formatDate(estudo.created_at.slice(0, 10))})` : ''}.
-              As linhas sem aumento entram nos totais com o valor atual. Nada nesta página
-              altera contratos, rendas ou pagamentos.
+              Nas linhas sem aumento, o recomendado, o valor a pedir e os totais ficam no
+              valor atual; em baixo, em letra pequena, fica o que o coeficiente daria.
+              Nada nesta página altera contratos, rendas ou pagamentos.
             </p>
 
             {linhas.some(l => l.contratoTerminado) && (

@@ -96,7 +96,18 @@ export function nasceSemAumento(leaseStartDate: string | null | undefined, anoDo
 }
 
 export interface LinhaCalculada extends ItemRevisao {
+  /**
+   * O recomendado desta linha, tal como aparece na coluna. Numa linha sem
+   * aumento é o valor atual — a linha está fora do exercício, e a coluna
+   * mostra o que a fração vai valer, não uma conta que não se vai fazer.
+   */
   recomendado: number
+  /**
+   * O valor atual × coeficiente, sempre, mesmo quando a linha está sem
+   * aumento. Não entra na coluna nem nos totais: serve para mostrar à parte
+   * (tooltip no ecrã, letra pequena na impressão) o que se deixou de pedir.
+   */
+  recomendadoCalculado: number
   /** O que vai ser pedido: o valor escrito, o recomendado, ou o atual se for sem aumento. */
   aPedir: number
   diferenca: number
@@ -107,20 +118,27 @@ export interface LinhaCalculada extends ItemRevisao {
 /**
  * Uma linha do estudo, com as contas feitas.
  *
- * Linha sem aumento: o valor a pedir é SEMPRE o valor atual, mesmo que o
- * coeficiente mude depois — e não é editável enquanto a marca estiver ativa.
+ * Linha sem aumento: o recomendado E o valor a pedir são SEMPRE o valor
+ * atual, mesmo que o coeficiente mude depois — e o valor a pedir não é
+ * editável enquanto a marca estiver ativa. A conta do coeficiente continua
+ * guardada em `recomendadoCalculado`, mas fora da coluna e fora dos totais:
+ * a tabela e os totais mostram o que vai acontecer, não o que não se pediu.
  */
 export function calcularLinha(item: ItemRevisao, coeficiente: number, ativos?: Set<string>): LinhaCalculada {
-  const recomendado = valorRecomendado(item.valor_atual, coeficiente)
+  const atual = Number(item.valor_atual ?? 0)
+  const calculado = valorRecomendado(atual, coeficiente)
+
+  const recomendado = item.com_aumento ? calculado : atual
   const aPedir = item.com_aumento
     ? (item.valor_a_pedir ?? recomendado)
-    : Number(item.valor_atual ?? 0)
+    : atual
 
   return {
     ...item,
     recomendado,
+    recomendadoCalculado: calculado,
     aPedir: parseFloat(Number(aPedir).toFixed(2)),
-    diferenca: parseFloat((Number(aPedir) - Number(item.valor_atual ?? 0)).toFixed(2)),
+    diferenca: parseFloat((Number(aPedir) - atual).toFixed(2)),
     contratoTerminado: ativos ? !ativos.has(item.space_id) : undefined,
   }
 }
@@ -191,7 +209,9 @@ export function htmlEstudoRevisao(p: {
           : '<span class="marca">sem aumento</span>'}${l.contratoTerminado
             ? ' <span class="marca">contrato terminado</span>' : ''}</td>
         <td class="right nowrap">${escapar(formatCurrency(Number(l.valor_atual ?? 0)))}</td>
-        <td class="right nowrap">${escapar(formatCurrency(l.recomendado))}</td>
+        <td class="right nowrap">${escapar(formatCurrency(l.recomendado))}${l.com_aumento
+          ? ''
+          : `<br><span class="calculo">c/ aumento: ${escapar(formatCurrency(l.recomendadoCalculado))}</span>`}</td>
         <td class="right nowrap forte">${escapar(formatCurrency(l.aPedir))}</td>
         <td class="right nowrap">${l.diferenca === 0 ? '—' : escapar(formatCurrency(l.diferenca))}</td>
       </tr>`).join('')
@@ -225,6 +245,8 @@ export function htmlEstudoRevisao(p: {
        claro para se distinguir numa fotocópia. */
     tr.sem-aumento td { color: #777; background: #f2f2f2; font-style: italic; }
     tr.sem-aumento .forte { font-weight: 400; }
+    /* O que se deixou de pedir, à parte: fica no papel sem entrar na conta. */
+    .calculo { font-size: 9px; color: #999; font-style: normal; white-space: nowrap; }
     .nota { font-size: 10.5px; color: #666; margin-top: 12px; }
     .rodape { margin-top: 20px; border-top: 1px solid #ddd; padding-top: 10px;
               display: flex; justify-content: space-between; font-size: 10px; color: #888; }
@@ -267,9 +289,11 @@ export function htmlEstudoRevisao(p: {
   </table>
 
   <p class="nota">
-    As linhas esbatidas estão marcadas como <strong>sem aumento</strong>: entram nos
-    totais com o valor atual. O recomendado é o valor atual multiplicado pelo
-    coeficiente; o valor a pedir é o que foi decidido, podendo ficar acima ou abaixo.
+    As linhas esbatidas estão marcadas como <strong>sem aumento</strong>: o recomendado,
+    o valor a pedir e os totais entram com o valor atual, e em letra pequena fica o que
+    o coeficiente daria, só para memória. Nas restantes, o recomendado é o valor atual
+    multiplicado pelo coeficiente; o valor a pedir é o que foi decidido, podendo ficar
+    acima ou abaixo.
     ${p.estudo.notes ? `<br><br>${escapar(p.estudo.notes)}` : ''}
   </p>
 
