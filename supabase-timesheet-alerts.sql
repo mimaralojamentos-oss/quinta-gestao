@@ -122,14 +122,20 @@ CREATE POLICY timesheet_alert_sends_read ON public.timesheet_alert_sends
   FOR SELECT TO authenticated
   USING (user_role() = ANY (ARRAY['admin', 'coadmin']));
 
+-- ATENÇÃO: uma tabela nova NÃO nasce sem privilégios. O
+-- supabase-grants-public.sql deixou ALTER DEFAULT PRIVILEGES a dar
+-- SELECT/INSERT/UPDATE/DELETE ao authenticated em tudo o que se criar no
+-- public. Por isso cada tabela começa por um REVOKE ALL explícito e só
+-- depois se dá o que é para dar — senão fica com escrita que ninguém pediu.
+REVOKE ALL ON TABLE public.timesheet_alert_recipients FROM authenticated, anon;
+REVOKE ALL ON TABLE public.timesheet_alert_sends      FROM authenticated, anon;
+
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.timesheet_alert_recipients TO authenticated;
-GRANT ALL    ON TABLE public.timesheet_alert_recipients TO service_role;
-REVOKE ALL   ON TABLE public.timesheet_alert_recipients FROM anon;
+GRANT ALL ON TABLE public.timesheet_alert_recipients TO service_role;
 
 -- Nos envios, o authenticated só lê: a escrita é do servidor.
 GRANT SELECT ON TABLE public.timesheet_alert_sends TO authenticated;
-GRANT ALL    ON TABLE public.timesheet_alert_sends TO service_role;
-REVOKE ALL   ON TABLE public.timesheet_alert_sends FROM anon;
+GRANT ALL ON TABLE public.timesheet_alert_sends TO service_role;
 
 
 -- ----------------------------------------------------------------------------

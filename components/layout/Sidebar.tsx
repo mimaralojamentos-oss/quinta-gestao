@@ -29,7 +29,7 @@ import { useEffect, useRef, useState } from 'react'
  */
 
 /** Quem vê uma entrada. Sem isto, vê-se sempre (como era antes). */
-type QuemVe = 'pessoal' | 'email' | 'admin'
+type QuemVe = 'pessoal' | 'email' | 'admin' | 'gestao'
 
 interface Entrada {
   href: string
@@ -62,6 +62,8 @@ const GRUPOS: Grupo[] = [
       { href: '/espacos', label: 'Espaços', icon: Building2 },
       { href: '/inquilinos', label: 'Inquilinos', icon: Users },
       { href: '/contratos', label: 'Contratos', icon: ScrollText },
+      // Estudo anual de atualização de preços: só quem decide as rendas.
+      { href: '/revisao-rendas', label: 'Revisão de Rendas', icon: TrendingUp, ve: 'gestao' },
     ],
   },
   {
@@ -142,6 +144,8 @@ export default function Sidebar({ onClose }: { onClose?: () => void }) {
   const permissoes: Record<QuemVe, boolean> = {
     admin: isAdmin,
     pessoal: isAdmin || isCoAdmin,
+    /** Matéria de gestão do negócio (decisões sobre rendas e preços). */
+    gestao: isAdmin || isCoAdmin,
     // O Super Leitor entra para consultar e rever, mas o botão de enviar
     // fica-lhe desativado dentro do próprio módulo.
     email: ['admin', 'coadmin', 'super_reader'].includes(profile?.role ?? ''),
