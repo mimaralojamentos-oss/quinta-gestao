@@ -23,6 +23,7 @@ import ManualAllocationEditor from '@/components/ManualAllocationEditor'
 import { logAccess } from '@/lib/logAccess'
 import { createExpense } from '@/lib/createExpense'
 import { findSimilarExpenses } from '@/lib/expenseDuplicates'
+import { opcoesDeInquilino, opcaoCorresponde, textoDaOpcao } from '@/lib/tenantPicker'
 
 const supabase = createClient()
 
@@ -372,9 +373,11 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
       return Math.abs((a.amount ?? 0) - txAmountAbs) - Math.abs((b.amount ?? 0) - txAmountAbs)
     })
 
-  const filteredTenants = tenants.filter(t =>
-    !searchTenant || matchesSearch(t.name, searchTenant)
-  )
+  // A lista de inquilinos por ordem de fração, com a renda à vista: é assim
+  // que se procura uma transação no extrato. Quem não tem contrato ativo fica
+  // no fim — ainda é preciso para identificar transações antigas.
+  const opcoesTenants = opcoesDeInquilino(tenants, leases)
+  const filteredTenants = opcoesTenants.filter(o => opcaoCorresponde(o, searchTenant))
 
   const expensesNearby = sortedExpenses.filter(e => {
     const diff = Math.abs(new Date(e.expense_date).getTime() - txDate.getTime())
@@ -542,15 +545,14 @@ export default function BankMatchModal({ tx, tenants, leases, expenses, document
                 <label className="label">Inquilino</label>
                 <div className="relative mb-2">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
-                  <input className="input pl-8 text-sm" placeholder="Pesquisar inquilino..."
+                  <input className="input pl-8 text-sm" placeholder="Pesquisar por fração ou nome..."
                     value={searchTenant} onChange={e => setSearchTenant(e.target.value)} />
                 </div>
                 <select className="input" value={tenantId} onChange={e => setTenantId(e.target.value)} size={5}>
                   <option value="">— Nenhum —</option>
-                  {filteredTenants.map(t => {
-                    const lease = leases.find(l => (l.tenant as any)?.id === t.id)
-                    return <option key={t.id} value={t.id}>{t.name}{lease?.space ? ` · ${(lease.space as any).ref}` : ''}</option>
-                  })}
+                  {filteredTenants.map(o => (
+                    <option key={o.id} value={o.id}>{textoDaOpcao(o)}</option>
+                  ))}
                 </select>
               </div>
               <div>
