@@ -4,12 +4,13 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, matchesSearch } from '@/lib/utils'
-import { formatarHoras, calcularConta, type Worker } from '@/lib/ponto'
+import { formatarHoras, calcularConta, type Worker, type WorkEntry, type WorkerPayment, type EntradaComEstado } from '@/lib/ponto'
 import { useAuth } from '@/lib/auth-context'
 import WorkerFormModal from '@/components/WorkerFormModal'
 import WorkerEmailModal, { type DestinatarioEmail } from '@/components/WorkerEmailModal'
 import TimesheetAlertsModal from '@/components/TimesheetAlertsModal'
-import { Plus, Search, ChevronRight, Users, Pencil, Mail, Send, Bell } from 'lucide-react'
+import TimesheetCalendar from '@/components/TimesheetCalendar'
+import { Plus, Search, ChevronRight, Users, Pencil, Mail, Send, Bell, List, CalendarDays } from 'lucide-react'
 import Link from 'next/link'
 
 const supabase = createClient()
@@ -33,7 +34,13 @@ export default function TrabalhadoresPage() {
   const [alertasAberto, setAlertasAberto] = useState(false)
   const podeEditar = isAdmin || isCoAdmin
 
+  // "lista" é a vista de sempre; "calendario" é o mapa de utilização do mês.
+  // O estado dos filtros da lista vive aqui e não se perde ao alternar.
+  const [vista, setVista] = useState<'lista' | 'calendario'>('lista')
   const [linhas, setLinhas] = useState<LinhaTrabalhador[]>([])
+  // Todas as entradas, já com o que está pago e o que falta — calculado pelo
+  // mesmo calcularConta que alimenta a lista. O calendário só as agrupa.
+  const [entradas, setEntradas] = useState<EntradaComEstado[]>([])
   const [loading, setLoading] = useState(true)
   const [erro, setErro] = useState('')
   const [pesquisa, setPesquisa] = useState('')
@@ -52,17 +59,21 @@ export default function TrabalhadoresPage() {
     if (!silencioso) setLoading(true)
     const [wRes, eRes, pRes] = await Promise.all([
       supabase.from('workers').select('id, name, phone, email, phone_os, nif, notes, hourly_rate, hourly_rate_holiday, active').order('name'),
-      supabase.from('work_entries').select('worker_id, work_date, start_time, amount, hours'),
-      supabase.from('worker_payments').select('worker_id, amount'),
+      // As colunas a mais são para o calendário (horário, trabalho, estado);
+      // a lista usa as mesmas linhas e ignora o resto.
+      supabase.from('work_entries').select('id, worker_id, work_date, start_time, end_time, hours, amount, is_holiday, hourly_rate, description, entry_type'),
+      supabase.from('worker_payments').select('id, worker_id, amount'),
     ])
 
     if (wRes.error) { setErro(wRes.error.message); setLoading(false); return }
     setErro('')
 
+    const todasAsEntradas: EntradaComEstado[] = []
     const linhas = (wRes.data ?? []).map((w: any) => {
-      const entradas = (eRes.data ?? []).filter((e: any) => e.worker_id === w.id)
+      const suas = (eRes.data ?? []).filter((e: any) => e.worker_id === w.id)
       const pagamentos = (pRes.data ?? []).filter((p: any) => p.worker_id === w.id)
-      const conta = calcularConta(entradas as any, pagamentos as any)
+      const conta = calcularConta(suas as WorkEntry[], pagamentos as WorkerPayment[])
+      todasAsEntradas.push(...conta.entradas)
       return {
         ...w,
         horas: conta.totalHoras,
@@ -73,6 +84,7 @@ export default function TrabalhadoresPage() {
     })
 
     setLinhas(linhas)
+    setEntradas(todasAsEntradas)
     setLoading(false)
   }
 
@@ -139,6 +151,36 @@ export default function TrabalhadoresPage() {
           </div>
         </div>
 
+        {erro && (
+          <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2 mb-4">
+            Não foi possível carregar: {erro}
+          </p>
+        )}
+
+        {/* Alternador de vista. A lista é a de sempre e fica como está; o
+            calendário é uma leitura nova sobre os mesmos dados. */}
+        <div className="flex items-center gap-1 mb-3">
+          <button onClick={() => setVista('lista')}
+            className={`text-sm px-3 py-1.5 rounded-lg border inline-flex items-center gap-1.5 transition-colors ${
+              vista === 'lista' ? 'bg-gray-800 text-white border-gray-800' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'}`}>
+            <List className="w-4 h-4" /> Lista
+          </button>
+          <button onClick={() => setVista('calendario')}
+            className={`text-sm px-3 py-1.5 rounded-lg border inline-flex items-center gap-1.5 transition-colors ${
+              vista === 'calendario' ? 'bg-gray-800 text-white border-gray-800' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'}`}
+            title="Mapa de utilização dos trabalhadores, mês a mês">
+            <CalendarDays className="w-4 h-4" /> Calendário
+          </button>
+        </div>
+
+        {vista === 'calendario' ? (
+          loading ? (
+            <p className="text-gray-500">A carregar...</p>
+          ) : (
+            <TimesheetCalendar entradas={entradas} workers={linhas} />
+          )
+        ) : (
+        <>
         <div className="flex items-center gap-3 mb-3 flex-wrap">
           <div className="relative flex-1 min-w-[200px] max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -160,12 +202,6 @@ export default function TrabalhadoresPage() {
             </div>
           )}
         </div>
-
-        {erro && (
-          <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2 mb-4">
-            Não foi possível carregar: {erro}
-          </p>
-        )}
 
         {loading ? (
           <p className="text-gray-500">A carregar...</p>
@@ -264,6 +300,8 @@ export default function TrabalhadoresPage() {
               </tbody>
             </table>
           </div>
+        )}
+        </>
         )}
       </div>
 
