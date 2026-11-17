@@ -5,6 +5,11 @@ import {
   calcularHoras, calcularConta, tarifaDoDia, ehDiaEspecial, podeTrabalhadorCorrigir,
   type Worker,
 } from '@/lib/ponto'
+import {
+  lerCasa, podeRegistarNaCasa, casasDisponiveis, crossConfigurada,
+  nomeCasaLocal, nomeCasaCruzada, juntarContas, type Casa,
+} from '@/lib/casaCruzada'
+import { crossClient } from '@/lib/casaCruzadaServer'
 
 /**
  * Porta de entrada da folha de ponto para os trabalhadores.
@@ -18,6 +23,13 @@ import {
  *     Se viesse, qualquer pessoa podia inflacionar o que tem a receber.
  *   - Só devolve os dados do próprio trabalhador. Nunca a lista de todos,
  *     nem nada do resto da aplicação.
+ *
+ * DUAS CASAS: quem trabalha para as duas tem aqui uma segunda ligação, à base
+ * da outra casa, e escolhe em cada registo para quem trabalhou. O que vem do
+ * telemóvel é só uma sugestão: antes de gravar confirma-se aqui que o
+ * trabalhador TEM mapeamento (`cross_worker_id`) e lê-se a ficha dele na
+ * outra casa, de onde sai a tarifa. Sem as variáveis de ambiente da segunda
+ * ligação, nada disto existe e a app é a de sempre.
  */
 
 function adminClient() {
@@ -134,23 +146,51 @@ export async function POST(request: NextRequest) {
   // ---------------------------------------------------------- registar
   if (acao === 'registar') {
     const { work_date, start_time, end_time, description } = body
+    const casa = lerCasa(body.casa)
 
     if (!work_date || !start_time || !end_time) {
       return NextResponse.json({ error: 'Indica a data, a hora de entrada e a hora de saída.' }, { status: 400 })
     }
+
+    // A casa é decidida AQUI. O telemóvel só sugere.
+    const permissao = podeRegistarNaCasa(worker as any, casa)
+    if (!permissao.ok) return NextResponse.json({ error: permissao.erro }, { status: 403 })
 
     // Dia não futuro e horário plausível — evita enganos na data.
     const validacao = validarHorario(String(work_date), String(start_time), String(end_time))
     if ('erro' in validacao) return NextResponse.json({ error: validacao.erro }, { status: 400 })
     const { horas } = validacao
 
-    // A tarifa é decidida aqui, com base no dia. Nunca vem do telemóvel.
-    const tarifa = tarifaDoDia(worker, String(work_date))
+    // Onde se grava e com que ficha. Na outra casa, a tarifa é a de LÁ: lê-se
+    // a ficha dessa base, e se ela não existir não se inventa nada.
+    const destino = casa === 'cruzada' ? crossClient() : supabase
+    if (!destino) return NextResponse.json({ error: 'Esta app não está ligada à outra casa.' }, { status: 503 })
+
+    let fichaDaCasa: Worker = worker
+    let idNaCasa = worker.id
+    if (casa === 'cruzada') {
+      const { data: la } = await destino.from('workers')
+        .select('id, name, hourly_rate, hourly_rate_holiday, active')
+        .eq('id', (worker as any).cross_worker_id)
+        .maybeSingle()
+      if (!la) {
+        return NextResponse.json(
+          { error: 'A tua ficha na outra casa não foi encontrada. Fala com o gestor.' }, { status: 409 })
+      }
+      if (!la.active) {
+        return NextResponse.json({ error: 'O teu acesso à outra casa está desativado.' }, { status: 403 })
+      }
+      fichaDaCasa = la as Worker
+      idNaCasa = la.id
+    }
+
+    // A tarifa é decidida aqui, com base no dia e na casa. Nunca vem do telemóvel.
+    const tarifa = tarifaDoDia(fichaDaCasa, String(work_date))
     const especial = ehDiaEspecial(String(work_date))
     const valor = parseFloat((horas * tarifa).toFixed(2))
 
-    const { data: criada, error } = await supabase.from('work_entries').insert({
-      worker_id: worker.id,
+    const { data: criada, error } = await destino.from('work_entries').insert({
+      worker_id: idNaCasa,
       work_date,
       start_time,
       end_time,
@@ -167,18 +207,26 @@ export async function POST(request: NextRequest) {
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-    // Alerta imediato a quem o pediu. Nunca faz falhar nem atrasa o registo:
-    // a função apanha tudo por dentro e tem tempo limite curto.
+    // Alerta imediato a quem o pediu, com a configuração da casa onde o
+    // registo ficou: destinatários, definições de e-mail e histórico saem
+    // todos dessa base. Nunca faz falhar nem atrasa o registo.
     if (criada) {
-      await enviarAlertaImediato(supabase, {
+      await enviarAlertaImediato(destino, {
         entrada: criada as any,
-        trabalhador: worker.name,
+        trabalhador: fichaDaCasa.name,
         quemRegistou: `o próprio trabalhador (${worker.name})`,
       })
     }
 
-    await registarAcesso(supabase, worker.name, 'criar',
+    // O rasto fica nas duas casas: na que recebeu o registo e na do link.
+    const ondeTrabalhou = casa === 'cruzada' ? ` para ${nomeCasaCruzada()}` : ''
+    await registarAcesso(destino, fichaDaCasa.name, 'criar',
       `Trabalhador registou ${horas}h em ${work_date} (${start_time}-${end_time}) — ${valor.toFixed(2)} EUR`)
+    if (casa === 'cruzada') {
+      await registarAcesso(supabase, worker.name, 'criar',
+        `Trabalhador registou ${horas}h em ${work_date} (${start_time}-${end_time})${ondeTrabalhou}`
+        + ` — ${valor.toFixed(2)} EUR (gravado na outra casa)`)
+    }
   }
 
   // ------------------------------------------------- corrigir / apagar
@@ -191,9 +239,19 @@ export async function POST(request: NextRequest) {
     const entryId = String(body.entry_id ?? '')
     if (!entryId) return NextResponse.json({ error: 'Falta indicar o registo.' }, { status: 400 })
 
+    // A correção vai à base da casa onde o registo vive. A permissão é a
+    // mesma de sempre e é verificada contra ESSA base.
+    const casa = lerCasa(body.casa)
+    const permissao = podeRegistarNaCasa(worker as any, casa)
+    if (!permissao.ok) return NextResponse.json({ error: permissao.erro }, { status: 403 })
+
+    const destino = casa === 'cruzada' ? crossClient() : supabase
+    if (!destino) return NextResponse.json({ error: 'Esta app não está ligada à outra casa.' }, { status: 503 })
+    const idNaCasa = casa === 'cruzada' ? String((worker as any).cross_worker_id) : worker.id
+
     const [{ data: registos }, { data: pagos }] = await Promise.all([
-      supabase.from('work_entries').select('*').eq('worker_id', worker.id),
-      supabase.from('worker_payments').select('id, payment_date, amount').eq('worker_id', worker.id),
+      destino.from('work_entries').select('*').eq('worker_id', idNaCasa),
+      destino.from('worker_payments').select('id, payment_date, amount').eq('worker_id', idNaCasa),
     ])
 
     // A conta é feita só com os registos deste trabalhador: um id de outra
@@ -202,19 +260,19 @@ export async function POST(request: NextRequest) {
     const alvo = conta.entradas.find(e => e.id === entryId)
     if (!alvo) return NextResponse.json({ error: 'Esse registo não existe ou não é teu.' }, { status: 404 })
 
-    const permissao = podeTrabalhadorCorrigir(alvo)
-    if (!permissao.pode) return NextResponse.json({ error: permissao.motivo }, { status: 403 })
+    const podeMexer = podeTrabalhadorCorrigir(alvo)
+    if (!podeMexer.pode) return NextResponse.json({ error: podeMexer.motivo }, { status: 403 })
 
     const horario = `${String(alvo.start_time).slice(0, 5)}-${String(alvo.end_time).slice(0, 5)}`
 
     if (acao === 'apagar') {
       // O filtro entry_type repete a regra no proprio pedido: um registo de
       // valor fixo nunca é apagado por aqui, mesmo que algo falhe acima.
-      const { error } = await supabase.from('work_entries')
-        .delete().eq('id', entryId).eq('worker_id', worker.id).eq('entry_type', 'horas')
+      const { error } = await destino.from('work_entries')
+        .delete().eq('id', entryId).eq('worker_id', idNaCasa).eq('entry_type', 'horas')
       if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-      await registarAcesso(supabase, worker.name, 'apagar',
+      await registarAcesso(destino, worker.name, 'apagar',
         `Trabalhador apagou pelo link o registo de ${alvo.work_date} (${horario}) — ${Number(alvo.amount).toFixed(2)} EUR`)
     } else {
       const { work_date, start_time, end_time, description } = body
@@ -231,30 +289,78 @@ export async function POST(request: NextRequest) {
       const tarifa = Number(alvo.hourly_rate)
       const valor = parseFloat((horas * tarifa).toFixed(2))
 
-      const { error } = await supabase.from('work_entries').update({
+      const { error } = await destino.from('work_entries').update({
         work_date,
         start_time,
         end_time,
         hours: horas,
         amount: valor,
         description: description ? String(description).slice(0, 500) : null,
-      }).eq('id', entryId).eq('worker_id', worker.id).eq('entry_type', 'horas')
+      }).eq('id', entryId).eq('worker_id', idNaCasa).eq('entry_type', 'horas')
 
       if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-      await registarAcesso(supabase, worker.name, 'editar',
+      await registarAcesso(destino, worker.name, 'editar',
         `Trabalhador corrigiu pelo link o registo de ${alvo.work_date} (${horario}) para ${work_date} ` +
         `(${String(start_time).slice(0, 5)}-${String(end_time).slice(0, 5)}) — ${horas}h, ${valor.toFixed(2)} EUR`)
     }
   }
 
   // ---------------------------------------------------------- devolver
-  const [entriesRes, paymentsRes] = await Promise.all([
-    supabase.from('work_entries').select('*').eq('worker_id', worker.id),
-    supabase.from('worker_payments').select('id, payment_date, amount, payment_method, notes').eq('worker_id', worker.id),
+  //
+  // Cada casa é lida e contada SEPARADAMENTE: é assim que os pagamentos de
+  // uma casa nunca pagam as horas da outra. Só depois se somam os totais.
+  const casas = casasDisponiveis(worker as any)
+  const cross = casas.length > 0 ? crossClient() : null
+
+  async function lerCasaDados(cliente: any, idNaCasa: string) {
+    const [entriesRes, paymentsRes] = await Promise.all([
+      cliente.from('work_entries').select('*').eq('worker_id', idNaCasa),
+      cliente.from('worker_payments')
+        .select('id, payment_date, amount, payment_method, notes').eq('worker_id', idNaCasa),
+    ])
+    return {
+      conta: calcularConta(entriesRes.data ?? [], (paymentsRes.data ?? []) as any),
+      pagamentos: paymentsRes.data ?? [],
+    }
+  }
+
+  const aqui = await lerCasaDados(supabase, worker.id)
+
+  // Uma casa só: a resposta é exatamente a de sempre.
+  if (!cross) {
+    return NextResponse.json({
+      worker: {
+        name: worker.name,
+        hourly_rate: worker.hourly_rate,
+        hourly_rate_holiday: worker.hourly_rate_holiday,
+      },
+      ...aqui.conta,
+      pagamentos: aqui.pagamentos.sort((a: any, b: any) =>
+        String(b.payment_date).localeCompare(String(a.payment_date))),
+    })
+  }
+
+  // Duas casas. Se a outra falhar, mostra-se esta e diz-se o que faltou —
+  // mais vale meia folha do que um ecrã de erro.
+  let la: { conta: ReturnType<typeof calcularConta>; pagamentos: any[] } | null = null
+  let avisoCasa: string | null = null
+  try {
+    la = await lerCasaDados(cross, String((worker as any).cross_worker_id))
+  } catch (e: any) {
+    console.error('[ponto] outra casa', e?.message ?? e)
+    avisoCasa = `Não foi possível ler os registos de ${nomeCasaCruzada()} agora.`
+  }
+
+  const juntas = juntarContas([
+    { casa: 'local' as Casa, nome: nomeCasaLocal(), conta: aqui.conta },
+    ...(la ? [{ casa: 'cruzada' as Casa, nome: nomeCasaCruzada(), conta: la.conta }] : []),
   ])
 
-  const conta = calcularConta(entriesRes.data ?? [], (paymentsRes.data ?? []) as any)
+  const pagamentos = [
+    ...aqui.pagamentos.map((p: any) => ({ ...p, casa: 'local', casaNome: nomeCasaLocal() })),
+    ...(la?.pagamentos ?? []).map((p: any) => ({ ...p, casa: 'cruzada', casaNome: nomeCasaCruzada() })),
+  ].sort((a: any, b: any) => String(b.payment_date).localeCompare(String(a.payment_date)))
 
   return NextResponse.json({
     worker: {
@@ -262,8 +368,16 @@ export async function POST(request: NextRequest) {
       hourly_rate: worker.hourly_rate,
       hourly_rate_holiday: worker.hourly_rate_holiday,
     },
-    ...conta,
-    pagamentos: (paymentsRes.data ?? []).sort((a: any, b: any) =>
-      String(b.payment_date).localeCompare(String(a.payment_date))),
+    // Os totais somados, com os mesmos nomes de sempre.
+    totalGanho: juntas.totalGanho,
+    totalPago: juntas.totalPago,
+    saldo: juntas.saldo,
+    totalHoras: juntas.totalHoras,
+    entradas: juntas.entradas,
+    pagamentos,
+    // O que é novo: as casas para escolher e a conta de cada uma.
+    casas,
+    porCasa: juntas.porCasa,
+    avisoCasa,
   })
 }

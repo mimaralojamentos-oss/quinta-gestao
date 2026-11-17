@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { logAccess } from '@/lib/logAccess'
 import { useAuth } from '@/lib/auth-context'
@@ -39,6 +39,19 @@ export default function WorkerFormModal({ worker, onClose, onSaved, onAccessChan
   const [erro, setErro] = useState('')
   const [acessoMudou, setAcessoMudou] = useState(false)
 
+  /**
+   * O mapeamento para a outra casa só se mostra quando a coluna existe —
+   * enquanto o supabase-trabalhador-partilhado.sql não for corrido, o campo
+   * nem aparece e nada do que se grava o menciona.
+   */
+  const [temColunaCruzada, setTemColunaCruzada] = useState<boolean | null>(null)
+  useEffect(() => {
+    let vivo = true
+    supabase.from('workers').select('cross_worker_id').limit(1)
+      .then(({ error }) => { if (vivo) setTemColunaCruzada(!error) })
+    return () => { vivo = false }
+  }, [])
+
   const campo = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm(f => ({ ...f, [k]: e.target.value }))
 
@@ -46,10 +59,14 @@ export default function WorkerFormModal({ worker, onClose, onSaved, onAccessChan
     const v = validarDadosTrabalhador(form)
     if ('erro' in v) { setErro(v.erro); return }
 
+    // Sem a coluna na base, o campo não vai no que se grava.
+    const { cross_worker_id, ...semCruzada } = v.campos
+    const campos = temColunaCruzada ? v.campos : semCruzada
+
     setGuardando(true); setErro('')
     const { error } = worker
-      ? await supabase.from('workers').update(v.campos).eq('id', worker.id)
-      : await supabase.from('workers').insert({ ...v.campos, access_token: gerarToken(), pin: gerarPin() })
+      ? await supabase.from('workers').update(campos).eq('id', worker.id)
+      : await supabase.from('workers').insert({ ...campos, access_token: gerarToken(), pin: gerarPin() })
     setGuardando(false)
     if (error) { setErro(`Não foi possível guardar: ${error.message}`); return }
 
@@ -118,6 +135,21 @@ export default function WorkerFormModal({ worker, onClose, onSaved, onAccessChan
             <label className="label">Notas</label>
             <input className="input" value={form.notes} onChange={campo('notes')} />
           </div>
+
+          {/* Trabalhador partilhado pelas duas casas. Em branco em toda a
+              gente menos nos que trabalham para as duas. */}
+          {temColunaCruzada && (
+            <div>
+              <label className="label">Mesma pessoa na outra casa</label>
+              <input className="input font-mono text-xs" placeholder="em branco se só trabalha para esta casa"
+                value={form.cross_worker_id} onChange={campo('cross_worker_id')} />
+              <p className="text-xs text-gray-500 mt-1">
+                Cola aqui o id da ficha desta mesma pessoa na outra casa. Com isto preenchido,
+                a app dele passa a perguntar para quem trabalhou em cada registo, e o registo vai
+                para a base dessa casa, com o preço/hora de lá. Cada casa continua a pagar só o que é seu.
+              </p>
+            </div>
+          )}
 
           {editar && (
             <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer pt-1">

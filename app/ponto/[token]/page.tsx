@@ -63,6 +63,18 @@ function EscolherHora({ valor, onChange, etiqueta }: {
   )
 }
 
+interface CasaDescrita { id: 'local' | 'cruzada'; nome: string }
+
+interface ContaDeCasa {
+  casa: 'local' | 'cruzada'
+  nome: string
+  totalGanho: number
+  totalPago: number
+  saldo: number
+  totalHoras: number
+  registos: number
+}
+
 interface Dados {
   worker: { name: string; hourly_rate: number; hourly_rate_holiday: number | null }
   totalGanho: number
@@ -71,6 +83,10 @@ interface Dados {
   totalHoras: number
   entradas: any[]
   pagamentos: any[]
+  /** Só para quem trabalha para as duas casas. Ausente = uma casa só. */
+  casas?: CasaDescrita[]
+  porCasa?: ContaDeCasa[]
+  avisoCasa?: string | null
 }
 
 export default function PontoPage({ params }: { params: Promise<{ token: string }> }) {
@@ -112,6 +128,27 @@ export default function PontoPage({ params }: { params: Promise<{ token: string 
     end_time: '17:00',
     description: '',
   })
+
+  /**
+   * Para quem se trabalhou. Só aparece a quem trabalha para as duas casas.
+   * Fica guardada no telemóvel: quem anda uma semana na mesma casa não tem
+   * de a escolher todos os dias.
+   */
+  const chaveCasa = `ponto_casa_${token}`
+  const [casa, setCasa] = useState<'local' | 'cruzada'>('local')
+  useEffect(() => {
+    try {
+      const guardada = window.localStorage.getItem(chaveCasa)
+      if (guardada === 'cruzada' || guardada === 'local') setCasa(guardada)
+    } catch { /* sem armazenamento: fica a casa local */ }
+  }, [])
+  function escolherCasa(nova: 'local' | 'cruzada') {
+    setCasa(nova)
+    try { window.localStorage.setItem(chaveCasa, nova) } catch { /* não faz mal */ }
+  }
+  const casas = dados?.casas ?? []
+  const duasCasas = casas.length > 1
+  const nomeDaCasa = (id: string) => casas.find(c => c.id === id)?.nome ?? ''
 
   // Tenta entrar sozinho com o código guardado no telemóvel
   useEffect(() => {
@@ -171,17 +208,28 @@ export default function PontoPage({ params }: { params: Promise<{ token: string 
       return
     }
     setGuardando(true)
+    // A casa vai no pedido, mas quem decide é o servidor: sem mapeamento,
+    // um registo "para a outra casa" é recusado lá.
     const ok = editandoId
-      ? await carregar(pin, 'editar', { ...form, entry_id: editandoId })
-      : await carregar(pin, 'registar', { ...form })
+      ? await carregar(pin, 'editar', { ...form, entry_id: editandoId, casa: casaEmEdicao ?? casa })
+      : await carregar(pin, 'registar', { ...form, casa })
     setGuardando(false)
     if (ok) {
       setMostrarForm(false)
-      avisar(editandoId ? 'Registo corrigido.' : 'Horas registadas.')
+      avisar(editandoId
+        ? 'Registo corrigido.'
+        : duasCasas ? `Horas registadas em ${nomeDaCasa(casa)}.` : 'Horas registadas.')
       setEditandoId(null)
+      setCasaEmEdicao(null)
       setForm(f => ({ ...f, description: '' }))
     }
   }
+
+  /**
+   * A casa do registo que está a ser corrigido. Corrigir não muda de casa:
+   * o registo fica onde está, e a correção vai à base certa.
+   */
+  const [casaEmEdicao, setCasaEmEdicao] = useState<'local' | 'cruzada' | null>(null)
 
   /** Abre o formulário já preenchido com o registo a corrigir. */
   function corrigir(e: any) {
@@ -191,6 +239,7 @@ export default function PontoPage({ params }: { params: Promise<{ token: string 
       end_time: String(e.end_time).slice(0, 5),
       description: e.description ?? '',
     })
+    setCasaEmEdicao(e.casa ?? 'local')
     setEditandoId(e.id)
     setErro('')
     setMostrarForm(true)
@@ -206,7 +255,7 @@ export default function PontoPage({ params }: { params: Promise<{ token: string 
     )) return
 
     setGuardando(true)
-    const ok = await carregar(pin, 'apagar', { entry_id: e.id })
+    const ok = await carregar(pin, 'apagar', { entry_id: e.id, casa: e.casa ?? 'local' })
     setGuardando(false)
     if (ok) {
       if (editandoId === e.id) { setEditandoId(null); setMostrarForm(false) }
@@ -276,12 +325,31 @@ export default function PontoPage({ params }: { params: Promise<{ token: string 
         </div>
 
         <div className="mt-5 bg-white/10 rounded-xl p-4">
-          <p className="text-emerald-100 text-xs mb-1">Tens a receber</p>
+          <p className="text-emerald-100 text-xs mb-1">
+            Tens a receber{duasCasas ? ', ao todo' : ''}
+          </p>
           <p className="text-3xl font-bold">{formatCurrency(dados?.saldo ?? 0)}</p>
           <div className="flex gap-4 mt-3 text-xs text-emerald-100">
             <span>{formatarHoras(dados?.totalHoras ?? 0)} trabalhadas</span>
             <span>Já recebeste {formatCurrency(dados?.totalPago ?? 0)}</span>
           </div>
+
+          {/* Cada casa paga o que é seu: o total junto é só para se saber o
+              tamanho da coisa, o que conta é esta separação. */}
+          {duasCasas && (dados?.porCasa?.length ?? 0) > 0 && (
+            <div className="mt-3 pt-3 border-t border-white/20 space-y-1.5">
+              {dados!.porCasa!.map(c => (
+                <div key={c.casa} className="flex items-baseline justify-between gap-3">
+                  <span className="text-xs text-emerald-100 truncate">{c.nome}</span>
+                  <span className="text-sm font-semibold whitespace-nowrap">
+                    {formatCurrency(c.saldo)}
+                    <span className="text-xs text-emerald-200 font-normal"> · {formatarHoras(c.totalHoras)}</span>
+                  </span>
+                </div>
+              ))}
+              <p className="text-[11px] text-emerald-200 pt-0.5">Cada casa paga as suas horas.</p>
+            </div>
+          )}
         </div>
       </div>
 
@@ -299,12 +367,46 @@ export default function PontoPage({ params }: { params: Promise<{ token: string 
           </div>
         )}
 
+        {dados?.avisoCasa && (
+          <div className="bg-white border border-amber-200 rounded-xl p-3 mb-3 shadow-sm">
+            <p className="text-sm text-amber-700">{dados.avisoCasa}</p>
+            <p className="text-xs text-amber-600 mt-0.5">O que vês aqui pode estar incompleto.</p>
+          </div>
+        )}
+
         {mostrarForm && (
           <div className="bg-white border border-gray-100 rounded-xl p-4 mb-3 shadow-sm space-y-3">
             <h2 className="font-semibold text-gray-900">{editandoId ? 'Corrigir registo' : 'Registar horas'}</h2>
             {editandoId && (
               <p className="text-xs text-gray-500 -mt-2">
                 Podes corrigir até {HORAS_PARA_CORRIGIR} horas depois de teres registado. O valor é recalculado com o mesmo preço/hora.
+              </p>
+            )}
+
+            {/* Para quem se trabalhou. Só aparece a quem trabalha para as
+                duas casas — quem só tem uma nunca vê isto. */}
+            {duasCasas && !editandoId && (
+              <div>
+                <label className="text-xs text-gray-500 block mb-1.5">A trabalhar para</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {casas.map(c => (
+                    <button key={c.id} type="button" onClick={() => escolherCasa(c.id)}
+                      className={`rounded-xl border-2 px-3 py-3 text-center transition-colors ${
+                        casa === c.id
+                          ? 'border-emerald-500 bg-emerald-50 text-emerald-800 font-semibold'
+                          : 'border-gray-200 bg-white text-gray-600'}`}>
+                      <span className="text-sm">{c.nome}</span>
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-gray-400 mt-1.5">
+                  Cada casa tem o seu preço/hora e paga o que é seu.
+                </p>
+              </div>
+            )}
+            {duasCasas && editandoId && casaEmEdicao && (
+              <p className="text-xs text-gray-500 -mt-1">
+                Registo de <strong>{nomeDaCasa(casaEmEdicao)}</strong>. A correção fica na mesma casa.
               </p>
             )}
 
@@ -340,7 +442,7 @@ export default function PontoPage({ params }: { params: Promise<{ token: string 
 
             <div className="flex gap-2 pt-1">
               <button className="flex-1 py-2.5 rounded-lg border border-gray-200 text-gray-600 font-medium"
-                onClick={() => { setMostrarForm(false); setEditandoId(null); setErro('') }}>
+                onClick={() => { setMostrarForm(false); setEditandoId(null); setCasaEmEdicao(null); setErro('') }}>
                 Cancelar
               </button>
               <button className="flex-1 py-2.5 rounded-lg bg-emerald-600 text-white font-semibold disabled:opacity-50"
@@ -367,6 +469,12 @@ export default function PontoPage({ params }: { params: Promise<{ token: string 
                   <div className="min-w-0">
                     <p className="font-medium text-gray-900 text-sm">
                       {formatDate(e.work_date)}
+                      {duasCasas && e.casaNome && (
+                        <span className={`ml-2 text-xs px-1.5 py-0.5 rounded-full ${
+                          e.casa === 'cruzada' ? 'bg-sky-100 text-sky-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                          {e.casaNome}
+                        </span>
+                      )}
                       {e.is_holiday && <span className="ml-2 text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">fds/feriado</span>}
                     </p>
                     {ehValorFixo(e) ? (
@@ -424,7 +532,15 @@ export default function PontoPage({ params }: { params: Promise<{ token: string 
               {dados!.pagamentos.map(p => (
                 <div key={p.id} className="bg-white border border-gray-100 rounded-xl p-3.5 shadow-sm flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-gray-900">{formatDate(p.payment_date)}</p>
+                    <p className="text-sm text-gray-900">
+                      {formatDate(p.payment_date)}
+                      {duasCasas && p.casaNome && (
+                        <span className={`ml-2 text-xs px-1.5 py-0.5 rounded-full ${
+                          p.casa === 'cruzada' ? 'bg-sky-100 text-sky-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                          {p.casaNome}
+                        </span>
+                      )}
+                    </p>
                     {p.notes && <p className="text-xs text-gray-500 mt-0.5">{p.notes}</p>}
                   </div>
                   <p className="font-semibold text-emerald-600 text-sm">{formatCurrency(p.amount)}</p>
@@ -460,7 +576,7 @@ export default function PontoPage({ params }: { params: Promise<{ token: string 
 
       {!mostrarForm && (
         <div className="fixed bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-gray-50 via-gray-50">
-          <button onClick={() => { setMostrarForm(true); setEditandoId(null); setErro(''); setSucesso(null) }}
+          <button onClick={() => { setMostrarForm(true); setEditandoId(null); setCasaEmEdicao(null); setErro(''); setSucesso(null) }}
             className="w-full py-3.5 rounded-xl bg-emerald-600 text-white font-semibold shadow-lg flex items-center justify-center gap-2">
             <Plus className="w-5 h-5" /> Registar horas
           </button>

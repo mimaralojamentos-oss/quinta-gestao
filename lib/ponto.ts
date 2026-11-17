@@ -9,6 +9,8 @@
  *   3. Os pagamentos abatem sempre aos dias mais antigos primeiro.
  */
 
+import { lerIdDaOutraCasa } from './casaCruzada'
+
 /** Sistema operativo do telemóvel — decide as instruções de instalação enviadas por e-mail. */
 export type PhoneOs = 'iphone' | 'android'
 
@@ -30,6 +32,12 @@ export interface Worker {
   pin: string
   active: boolean
   created_at?: string
+  /**
+   * Id do MESMO trabalhador na base da outra casa. Null = não é partilhado.
+   * Pode vir indefinido enquanto o supabase-trabalhador-partilhado.sql não
+   * estiver aplicado — o código trata as duas coisas da mesma maneira.
+   */
+  cross_worker_id?: string | null
 }
 
 /**
@@ -242,11 +250,13 @@ export interface DadosTrabalhadorForm {
   hourly_rate: string
   hourly_rate_holiday: string
   active: boolean
+  /** Id na outra casa, como está escrito no formulário. '' = não partilhado. */
+  cross_worker_id: string
 }
 
 export const DADOS_TRABALHADOR_VAZIOS: DadosTrabalhadorForm = {
   name: '', phone: '', email: '', phone_os: '', nif: '', notes: '',
-  hourly_rate: '', hourly_rate_holiday: '', active: true,
+  hourly_rate: '', hourly_rate_holiday: '', active: true, cross_worker_id: '',
 }
 
 export function dadosDoTrabalhador(w: Worker): DadosTrabalhadorForm {
@@ -256,6 +266,7 @@ export function dadosDoTrabalhador(w: Worker): DadosTrabalhadorForm {
     hourly_rate: String(w.hourly_rate ?? ''),
     hourly_rate_holiday: w.hourly_rate_holiday != null ? String(w.hourly_rate_holiday) : '',
     active: w.active,
+    cross_worker_id: w.cross_worker_id ?? '',
   }
 }
 
@@ -270,7 +281,7 @@ export function emailValido(email: string): boolean {
  * isso editar os dados não mexe no acesso que ele já tem no telemóvel.
  */
 export function validarDadosTrabalhador(f: DadosTrabalhadorForm):
-  { erro: string } | { campos: Pick<Worker, 'name' | 'phone' | 'email' | 'phone_os' | 'nif' | 'notes' | 'hourly_rate' | 'hourly_rate_holiday' | 'active'> } {
+  { erro: string } | { campos: Pick<Worker, 'name' | 'phone' | 'email' | 'phone_os' | 'nif' | 'notes' | 'hourly_rate' | 'hourly_rate_holiday' | 'active' | 'cross_worker_id'> } {
   if (!f.name.trim()) return { erro: 'O nome é obrigatório' }
   const tarifa = parseFloat(f.hourly_rate)
   if (!tarifa || tarifa <= 0) return { erro: 'Indica o preço por hora' }
@@ -279,6 +290,9 @@ export function validarDadosTrabalhador(f: DadosTrabalhadorForm):
   if (f.phone_os && !(f.phone_os in PHONE_OS_LABELS)) return { erro: 'Sistema do telemóvel inválido' }
   const tarifaAlta = f.hourly_rate_holiday ? parseFloat(f.hourly_rate_holiday) : null
   if (tarifaAlta != null && (isNaN(tarifaAlta) || tarifaAlta < 0)) return { erro: 'O preço de fim de semana e feriados não é válido' }
+
+  const naOutraCasa = lerIdDaOutraCasa(f.cross_worker_id)
+  if ('erro' in naOutraCasa) return { erro: naOutraCasa.erro }
 
   return {
     campos: {
@@ -291,6 +305,7 @@ export function validarDadosTrabalhador(f: DadosTrabalhadorForm):
       hourly_rate: tarifa,
       hourly_rate_holiday: tarifaAlta,
       active: f.active,
+      cross_worker_id: naOutraCasa.valor,
     },
   }
 }

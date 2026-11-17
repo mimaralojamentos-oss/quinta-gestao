@@ -133,7 +133,7 @@ export async function enviarAlertaImediatoLote(
       })
       if (!novo) { resultado.saltados++; continue }
 
-      const r = await enviar({ to: d.email, subject, body, context: 'alerta_ponto_imediato' })
+      const r = await enviar({ to: d.email, subject, body, context: 'alerta_ponto_imediato', base: supabase })
       if (r.enviado) { resultado.enviados++; resultado.detalhe.push(`${d.email}: enviado`) }
       else {
         resultado.falhados++
@@ -203,7 +203,7 @@ export async function enviarResumos(
       continue
     }
 
-    const r = await enviar({ to: d.email, subject, body: corpo, context: `alerta_ponto_${p.periodicidade}` })
+    const r = await enviar({ to: d.email, subject, body: corpo, context: `alerta_ponto_${p.periodicidade}`, base: supabase })
     if (r.enviado) { resultado.enviados++; resultado.detalhe.push(`${d.email}: enviado`) }
     else {
       resultado.falhados++

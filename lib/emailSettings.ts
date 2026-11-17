@@ -34,14 +34,19 @@ function adminClient() {
   )
 }
 
-export async function getEmailSettings(): Promise<EmailSettings> {
+/**
+ * As definições de e-mail. Por omissão as desta casa; com `cliente`, as da
+ * base que for passada — é assim que um alerta da outra casa sai com o
+ * remetente, o prefixo e as credenciais dessa casa, e não com os desta.
+ */
+export async function getEmailSettings(cliente?: any): Promise<EmailSettings> {
   const envPrefix = process.env.NEXT_PUBLIC_EMAIL_SUBJECT_PREFIX ?? DEFAULT_SUBJECT_PREFIX
   const envUser = process.env.GMAIL_USER ?? ''
   const envPass = process.env.GMAIL_APP_PASSWORD ?? ''
 
   let row: any = null
   try {
-    const { data } = await adminClient()
+    const { data } = await (cliente ?? adminClient())
       .from('email_settings').select('*').eq('id', 1).maybeSingle()
     row = data
   } catch {

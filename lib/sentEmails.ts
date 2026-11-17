@@ -38,9 +38,10 @@ function adminClient() {
  * Guarda o registo. Nunca lança exceção: falhar a gravar o histórico não
  * pode fazer falhar um e-mail que já saiu.
  */
-export async function recordSentEmail(record: SentEmailRecord): Promise<void> {
+export async function recordSentEmail(record: SentEmailRecord, cliente?: any): Promise<void> {
   try {
-    const supabase = adminClient()
+    // `cliente` serve a outra casa: o e-mail dela fica no histórico dela.
+    const supabase = cliente ?? adminClient()
     const { error } = await supabase.from('sent_emails').insert({
       to_email: record.toEmail,
       to_name: record.toName ?? null,

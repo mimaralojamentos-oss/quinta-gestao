@@ -31,6 +31,12 @@ export interface EnvioApp {
   recipientName?: string | null
   sentById?: string | null
   sentByEmail?: string | null
+  /**
+   * De que base saem as definições de e-mail e para onde vai o histórico.
+   * Por omissão, esta casa. A folha de ponto passa aqui a ligação da outra
+   * casa quando o registo é de lá, para o e-mail ir com o remetente de lá.
+   */
+  base?: any
 }
 
 export interface ResultadoEnvio {
@@ -44,7 +50,7 @@ export interface ResultadoEnvio {
  * e-mail falhado não pode fazer falhar a operação que o pediu.
  */
 export async function enviarEmailApp(envio: EnvioApp): Promise<ResultadoEnvio> {
-  const settings = await getEmailSettings()
+  const settings = await getEmailSettings(envio.base)
   const subject = applySubjectPrefix(envio.subject, settings.subjectPrefix)
 
   if (!settings.smtpUser || !settings.smtpPassword) {
@@ -96,7 +102,7 @@ function registar(envio: EnvioApp, subject: string, status: 'enviado' | 'erro', 
     sentByEmail: envio.sentByEmail ?? null,
     status,
     errorMessage: erro ?? null,
-  })
+  }, envio.base)
 }
 
 /**
