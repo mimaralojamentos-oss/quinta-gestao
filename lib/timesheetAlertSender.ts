@@ -1,5 +1,6 @@
 import {
-  agruparResumo, assuntoImediato, assuntoResumo, corpoImediato, corpoResumo, periodoDe,
+  agruparResumo, assuntoImediato, assuntoImediatoLote, assuntoResumo,
+  corpoImediato, corpoImediatoLote, corpoResumo, periodoDe,
   type AlertRecipient, type EntradaDoResumo, type Periodo,
 } from './timesheetAlerts'
 import { enviarEmailApp, enviarEmailAppSemFalhar, type EnvioApp, type ResultadoEnvio } from './appMailer'
@@ -82,8 +83,32 @@ export async function enviarAlertaImediato(
     enviar?: Enviador
   },
 ): Promise<ResultadoAlertas> {
+  return enviarAlertaImediatoLote(supabase, { ...p, entradas: [p.entrada] })
+}
+
+/**
+ * O mesmo, para um lote de entradas gravadas de uma vez: UM e-mail com os
+ * dias todos, não um por dia. Com uma entrada só é literalmente o alerta de
+ * sempre — mesmo assunto, mesmo corpo, mesma marca de idempotência.
+ */
+export async function enviarAlertaImediatoLote(
+  supabase: any,
+  p: {
+    entradas: (EntradaDoResumo & { id?: string })[]
+    trabalhador: string
+    quemRegistou: string
+    enviar?: Enviador
+  },
+): Promise<ResultadoAlertas> {
   const resultado: ResultadoAlertas = {
     destinatarios: 0, enviados: 0, saltados: 0, falhados: 0, semEntradas: false, detalhe: [],
+  }
+
+  const entradas = [...(p.entradas ?? [])].sort((a, b) =>
+    String(a.work_date).localeCompare(String(b.work_date)))
+  if (entradas.length === 0) {
+    resultado.semEntradas = true
+    return resultado
   }
 
   try {
@@ -92,13 +117,19 @@ export async function enviarAlertaImediato(
     if (destinatarios.length === 0) return resultado
 
     const enviar = p.enviar ?? enviarEmailAppSemFalhar
-    const subject = assuntoImediato(p.trabalhador, p.entrada.work_date)
-    const body = corpoImediato({ trabalhador: p.trabalhador, entrada: p.entrada, quemRegistou: p.quemRegistou })
-    const periodo = `imediato:${p.entrada.id ?? `${p.entrada.work_date}:${p.entrada.amount}`}`
+    const subject = assuntoImediatoLote(p.trabalhador, entradas.map(e => e.work_date))
+    const body = corpoImediatoLote({ trabalhador: p.trabalhador, entradas, quemRegistou: p.quemRegistou })
+
+    // A marca de uma entrada só é a de sempre, para o histórico não partir ao
+    // meio. Num lote, o primeiro id mais o número de dias chega para ser único.
+    const primeira = entradas[0]
+    const periodo = entradas.length === 1
+      ? `imediato:${primeira.id ?? `${primeira.work_date}:${primeira.amount}`}`
+      : `imediato:lote:${primeira.id ?? primeira.work_date}:${entradas.length}`
 
     for (const d of destinatarios) {
       const novo = await marcar(supabase, {
-        recipientId: d.id, periodicidade: 'imediato', periodo, entradas: 1,
+        recipientId: d.id, periodicidade: 'imediato', periodo, entradas: entradas.length,
       })
       if (!novo) { resultado.saltados++; continue }
 

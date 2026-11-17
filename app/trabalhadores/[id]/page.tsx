@@ -13,6 +13,9 @@ import {
 import { htmlRelatorioPagamento } from '@/lib/pontoRelatorio'
 import { useAuth } from '@/lib/auth-context'
 import { logAccess } from '@/lib/logAccess'
+import {
+  prepararLote, linhasDoLote, detalheDoLote, textoPrevia, textoDuplicados, textoEspeciais,
+} from '@/lib/valorFixoLote'
 import WorkerFormModal from '@/components/WorkerFormModal'
 import WorkerAccessActions from '@/components/WorkerAccessActions'
 import { createExpense } from '@/lib/createExpense'
@@ -59,6 +62,8 @@ export default function TrabalhadorPage({ params }: { params: Promise<{ id: stri
   const [formHoras, setFormHoras] = useState<{
     id?: string; tipo: TipoRegisto
     work_date: string; start_time: string; end_time: string; description: string
+    /** Só no valor fixo novo: último dia do intervalo. Vazio = um dia só. */
+    work_date_ate?: string
     /** Só no valor fixo: o valor combinado, como está escrito no formulário. */
     amount?: string
     hourly_rate?: number; is_holiday?: boolean
@@ -122,6 +127,19 @@ export default function TrabalhadorPage({ params }: { params: Promise<{ id: stri
     { key: 'todos', label: `Todos (${entradas.length})` },
   ]
 
+  /**
+   * Valor fixo NOVO: o campo "até" e a pré-visualização só aparecem aqui. A
+   * editar, um registo é sempre um dia; por horas, nada muda.
+   */
+  const loteValorFixo = !!formHoras && formHoras.tipo === 'valor_fixo' && !formHoras.id
+  const lote = loteValorFixo
+    ? prepararLote({
+        de: formHoras!.work_date, ate: formHoras!.work_date_ate,
+        valor: formHoras!.amount ?? '', descricao: formHoras!.description,
+        existentes: entradas,
+      })
+    : null
+
   // O que entra no período escolhido, para a janela do relatório poder
   // mostrar as contas antes de gerar o documento.
   const previaRelatorio = conta && periodoRelatorio && periodoRelatorio.de && periodoRelatorio.ate
@@ -146,9 +164,61 @@ export default function TrabalhadorPage({ params }: { params: Promise<{ id: stri
     let payload: Record<string, any>
     let detalhe: string
 
+    if (valorFixo && !formHoras.id) {
+      // Valor combinado, um dia ou um intervalo. O valor é POR DIA e nasce um
+      // registo individual por cada dia — iguais aos de sempre, sem marca de
+      // lote: cada um corrige-se, apaga-se e paga-se por si.
+      const lote = prepararLote({
+        de: formHoras.work_date, ate: formHoras.work_date_ate,
+        valor: formHoras.amount ?? '', descricao: formHoras.description,
+        existentes: entradas,
+      })
+      if (lote.erro) { alert(lote.erro); return }
+      if (lote.confirmar && !confirm(lote.confirmar)) return
+      const aviso = textoDuplicados(lote)
+      if (aviso && !confirm(`${aviso}
+
+Gravar na mesma?`)) return
+
+      setGuardandoHoras(true)
+      // Um único INSERT com todas as linhas: o Postgres grava-as todas ou
+      // nenhuma, por isso nunca fica meio lote escrito.
+      const { data: criadas, error: erroLote } = await supabase
+        .from('work_entries')
+        .insert(linhasDoLote(lote, { workerId: worker.id, descricao: formHoras.description }))
+        .select('id')
+      setGuardandoHoras(false)
+
+      if (erroLote) {
+        alert(lote.dias.length > 1
+          ? `Não foi possível guardar os ${lote.dias.length} dias: ${erroLote.message}
+
+Não ficou nenhum registo gravado.`
+          : `Não foi possível guardar: ${erroLote.message}`)
+        return
+      }
+
+      // Um alerta só, com os dias todos.
+      const ids = (criadas ?? []).map((x: { id: string }) => x.id).filter(Boolean)
+      if (ids.length > 0) {
+        fetch('/api/timesheet-alert', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ entryIds: ids }),
+        }).catch(() => {})
+      }
+
+      await logAccess({
+        action: 'criar', page: '/trabalhadores',
+        details: detalheDoLote(lote, { trabalhador: worker.name, descricao: formHoras.description }),
+      })
+      setFormHoras(null)
+      await carregar(true)
+      return
+    }
+
     if (valorFixo) {
-      // Valor combinado: data + descrição + valor. Sem horário nem tarifa —
-      // a base de dados recusa um valor fixo com horário.
+      // A editar um registo de valor fixo: continua a ser um dia só.
       const valor = parseFloat(String(formHoras.amount ?? '').replace(',', '.'))
       if (isNaN(valor) || valor <= 0) { alert('Indica o valor combinado.'); return }
       if (!formHoras.description.trim()) { alert('Descreve o trabalho — é o que identifica este registo.'); return }
@@ -166,7 +236,7 @@ export default function TrabalhadorPage({ params }: { params: Promise<{ id: stri
         created_by: 'gestor',
         entry_type: 'valor_fixo',
       }
-      detalhe = `${formHoras.id ? 'Editou' : 'Registou'} valor fixo de ${formatCurrency(valor)} ` +
+      detalhe = `Editou valor fixo de ${formatCurrency(valor)} ` +
         `de "${worker.name}" em ${formatDate(formHoras.work_date)} (${formHoras.description.trim()})`
     } else {
       const horas = calcularHoras(formHoras.start_time, formHoras.end_time)
@@ -771,9 +841,27 @@ export default function TrabalhadorPage({ params }: { params: Promise<{ id: stri
                 </div>
               )}
               <div>
-                <label className="label">Dia</label>
-                <input className="input" type="date" value={formHoras.work_date}
-                  onChange={e => setFormHoras(f => f && ({ ...f, work_date: e.target.value }))} />
+                {loteValorFixo ? (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="label">Dia</label>
+                      <input className="input" type="date" value={formHoras.work_date}
+                        onChange={e => setFormHoras(f => f && ({ ...f, work_date: e.target.value }))} />
+                    </div>
+                    <div>
+                      <label className="label">até <span className="text-gray-400 font-normal">(opcional)</span></label>
+                      <input className="input" type="date" value={formHoras.work_date_ate ?? ''}
+                        min={formHoras.work_date}
+                        onChange={e => setFormHoras(f => f && ({ ...f, work_date_ate: e.target.value }))} />
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <label className="label">Dia</label>
+                    <input className="input" type="date" value={formHoras.work_date}
+                      onChange={e => setFormHoras(f => f && ({ ...f, work_date: e.target.value }))} />
+                  </>
+                )}
                 {formHoras.tipo === 'horas' && !formHoras.id && motivoDiaEspecial(formHoras.work_date) && (
                   <p className="text-xs text-amber-600 mt-1 font-medium">
                     É {motivoDiaEspecial(formHoras.work_date)} — conta como fds/feriado (usa o preço de fds/feriados, se estiver definido)
@@ -784,6 +872,11 @@ export default function TrabalhadorPage({ params }: { params: Promise<{ id: stri
                     O dia passou a ser {ehDiaEspecial(formHoras.work_date) ? (motivoDiaEspecial(formHoras.work_date) ?? 'dia de fds/feriado') : 'dia normal'},
                     mas o registo mantém o preço com que foi registado. Se o preço tiver de mudar,
                     apaga este registo e regista-o de novo.
+                  </p>
+                )}
+                {loteValorFixo && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    Deixa o &quot;até&quot; vazio para registar um dia só.
                   </p>
                 )}
               </div>
@@ -816,9 +909,33 @@ export default function TrabalhadorPage({ params }: { params: Promise<{ id: stri
                     value={formHoras.amount ?? ''}
                     onChange={e => setFormHoras(f => f && ({ ...f, amount: e.target.value }))} />
                   <p className="text-xs text-gray-500 mt-1">
+                    {loteValorFixo ? 'O valor é por dia. ' : ''}
                     Sem horário nem preço/hora. Entra na folha com este valor e conta para o Ganho e o Por pagar
                     como qualquer outro registo. Só tu podes lançar, corrigir ou apagar registos de valor fixo.
                   </p>
+
+                  {lote && lote.dias.length > 1 && (
+                    <div className="mt-2 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+                      <p className="text-sm text-emerald-900 font-semibold">{textoPrevia(lote)}</p>
+                      <p className="text-xs text-emerald-700 mt-0.5">
+                        De {formatDate(lote.dias[0])} a {formatDate(lote.dias[lote.dias.length - 1])}.
+                        Ficam {lote.dias.length} registos individuais, cada um com o seu dia.
+                      </p>
+                    </div>
+                  )}
+                  {lote?.erro && formHoras.work_date_ate && (
+                    <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2 mt-2">
+                      {lote.erro}
+                    </p>
+                  )}
+                  {lote && textoDuplicados(lote) && (
+                    <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mt-2">
+                      {textoDuplicados(lote)}
+                    </p>
+                  )}
+                  {lote && lote.dias.length > 1 && textoEspeciais(lote) && (
+                    <p className="text-xs text-gray-500 mt-1.5">{textoEspeciais(lote)}</p>
+                  )}
                 </div>
               )}
               <div>
@@ -832,7 +949,9 @@ export default function TrabalhadorPage({ params }: { params: Promise<{ id: stri
             <div className="flex justify-end gap-3 p-4 border-t border-gray-100">
               <button className="btn-secondary" onClick={() => setFormHoras(null)}>Cancelar</button>
               <button className="btn-primary" onClick={guardarHoras} disabled={guardandoHoras}>
-                {guardandoHoras ? 'A guardar...' : 'Guardar'}
+                {guardandoHoras
+                  ? 'A guardar...'
+                  : lote && lote.dias.length > 1 ? `Guardar ${lote.dias.length} dias` : 'Guardar'}
               </button>
             </div>
           </div>

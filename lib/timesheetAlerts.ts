@@ -270,6 +270,65 @@ export function assuntoImediato(trabalhador: string, dataISO: string): string {
   return `Folha de Ponto — ${trabalhador} registou ${formatDate(dataISO)} (${nomeDaApp()})`
 }
 
+/**
+ * O assunto de um lote: um dia só lê-se como sempre; vários dizem logo
+ * quantos são e de quando a quando.
+ */
+export function assuntoImediatoLote(trabalhador: string, dias: string[]): string {
+  const ordenados = [...(dias ?? [])].sort()
+  if (ordenados.length <= 1) return assuntoImediato(trabalhador, ordenados[0] ?? '')
+  return `Folha de Ponto — ${trabalhador} registou ${ordenados.length} dias`
+    + ` (${formatDate(ordenados[0])} a ${formatDate(ordenados[ordenados.length - 1])})`
+    + ` (${nomeDaApp()})`
+}
+
+/**
+ * Um lote de valor fixo num só e-mail, com os dias listados.
+ *
+ * Com uma entrada só, é exatamente o corpo de sempre — quem recebe não nota
+ * diferença nenhuma no caso normal.
+ */
+export function corpoImediatoLote(p: {
+  trabalhador: string
+  entradas: EntradaDoResumo[]
+  quemRegistou: string
+}): string {
+  const entradas = [...(p.entradas ?? [])].sort((a, b) =>
+    String(a.work_date).localeCompare(String(b.work_date)))
+  if (entradas.length === 0) return ''
+  if (entradas.length === 1) {
+    return corpoImediato({ trabalhador: p.trabalhador, entrada: entradas[0], quemRegistou: p.quemRegistou })
+  }
+
+  const total = parseFloat(entradas.reduce((s, e) => s + Number(e.amount ?? 0), 0).toFixed(2))
+  const valores = new Set(entradas.map(e => Number(e.amount ?? 0).toFixed(2)))
+  const descricoes = new Set(entradas.map(e => String(e.description ?? '').trim()))
+
+  const linhas = [
+    `${p.trabalhador} tem ${entradas.length} registos novos na Folha de Ponto.`,
+    '',
+    `De ${formatDate(entradas[0].work_date)} a ${formatDate(entradas[entradas.length - 1].work_date)}`
+      + ` · ${formatCurrency(total)} no total`,
+  ]
+
+  if (valores.size === 1) linhas.push(`Valor fixo de ${formatCurrency(Number(entradas[0].amount ?? 0))} por dia`)
+  linhas.push('')
+
+  for (const e of entradas) {
+    linhas.push(`  · ${formatDate(e.work_date)} — ${formatCurrency(Number(e.amount ?? 0))}`
+      + (ehValorFixo(e as any) ? ' (valor fixo)' : '')
+      + (e.is_holiday ? ' (fds/feriado)' : ''))
+  }
+
+  linhas.push('')
+  if (descricoes.size === 1 && [...descricoes][0]) linhas.push(`Trabalho: ${[...descricoes][0]}`)
+  linhas.push(`Registado por: ${p.quemRegistou}`)
+  linhas.push('')
+  linhas.push('São registos individuais: cada dia corrige-se ou apaga-se por si.')
+
+  return linhas.join('\n')
+}
+
 export function corpoImediato(p: {
   trabalhador: string
   entrada: EntradaDoResumo

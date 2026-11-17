@@ -1,14 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { requireRole } from '@/lib/require-role'
-import { enviarAlertaImediato } from '@/lib/timesheetAlertSender'
+import { enviarAlertaImediatoLote } from '@/lib/timesheetAlertSender'
 
 /**
  * Alerta imediato de uma entrada da Folha de Ponto, pedido pelo ecrã do
  * gestor depois de gravar um registo.
  *
- * O ecrã só manda o id da entrada: os dados do e-mail são lidos aqui, no
- * servidor. As entradas que o trabalhador grava pelo link não passam por
+ * O ecrã só manda o id da entrada (ou os ids de um lote gravado de uma vez,
+ * em `entryIds`): os dados do e-mail são lidos aqui, no servidor, e um lote
+ * dá UM e-mail com os dias listados, não um e-mail por dia. As entradas que o trabalhador grava pelo link não passam por
  * aqui — essas são tratadas dentro do próprio /api/ponto, que já corre com
  * a service role.
  *
@@ -20,8 +21,10 @@ export async function POST(request: NextRequest) {
   if (auth.error) return auth.error
 
   const body = await request.json().catch(() => ({}))
-  const entryId = String(body?.entryId ?? '')
-  if (!entryId) return NextResponse.json({ error: 'Falta indicar a entrada.' }, { status: 400 })
+  const ids = (Array.isArray(body?.entryIds) ? body.entryIds : [body?.entryId])
+    .map((x: unknown) => String(x ?? '').trim())
+    .filter(Boolean)
+  if (ids.length === 0) return NextResponse.json({ error: 'Falta indicar a entrada.' }, { status: 400 })
 
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -29,17 +32,18 @@ export async function POST(request: NextRequest) {
     { auth: { autoRefreshToken: false, persistSession: false } },
   )
 
-  const { data: entrada } = await supabase
+  const { data: entradas } = await supabase
     .from('work_entries')
     .select('id, work_date, start_time, end_time, hours, amount, description, entry_type, is_holiday, worker:workers(name)')
-    .eq('id', entryId)
-    .maybeSingle()
+    .in('id', ids)
 
-  if (!entrada) return NextResponse.json({ error: 'Entrada não encontrada.' }, { status: 404 })
+  if (!entradas || entradas.length === 0) {
+    return NextResponse.json({ error: 'Entrada não encontrada.' }, { status: 404 })
+  }
 
-  const resultado = await enviarAlertaImediato(supabase, {
-    entrada: entrada as any,
-    trabalhador: (entrada as any).worker?.name ?? '(trabalhador)',
+  const resultado = await enviarAlertaImediatoLote(supabase, {
+    entradas: entradas as any,
+    trabalhador: (entradas[0] as any).worker?.name ?? '(trabalhador)',
     quemRegistou: auth.user?.email ?? 'o gestor',
   })
 
