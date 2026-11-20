@@ -13,7 +13,7 @@ import { X, Pencil, Trash2, AlertTriangle } from 'lucide-react'
 import { logAccess } from '@/lib/logAccess'
 import { planearReversaoPagamento, reverterPagamento, textoConfirmacao } from '@/lib/paymentReversal'
 import { buildAppliedAdvanceMap } from '@/lib/advanceCredit'
-import { getMonthlyRentStatus } from '@/lib/rentShortfall'
+import { getMonthlyRentStatus, validarRendaComData } from '@/lib/rentShortfall'
 import { PAYMENT_TYPES, PAYMENT_TYPE_LABELS } from '@/lib/paymentTypes'
 import { getDebtRemaining } from '@/lib/debts'
 
@@ -291,6 +291,9 @@ export default function PaymentModal({ lease, currentMonth, onClose, onSaved }: 
 
   async function handleSaveNew() {
     if (!form.amount || !form.payment_date) { setError('Valor e data são obrigatórios'); return }
+    // Uma renda nunca fica sem data de pagamento (a mesma regra em todo o lado).
+    const erroRenda = validarRendaComData({ tipo: form.tipo, payment_date: form.payment_date })
+    if (erroRenda) { setError(erroRenda); return }
     setSaving(true); setError('')
 
     if (editingPayment) {

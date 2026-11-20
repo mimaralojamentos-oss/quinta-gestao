@@ -1,5 +1,5 @@
 import { formatCurrency, getMonthLabel, getCurrentMonth } from './utils'
-import { getMonthlyRentStatus, getSingleMonthRentStatus } from './rentShortfall'
+import { getMonthlyRentStatus, getSingleMonthRentStatus, validarRendaComData } from './rentShortfall'
 import { buildAppliedAdvanceMap, consumeAdvances } from './advanceCredit'
 import { receiptGroupsDisponiveis } from './paymentReversal'
 import { getDebtRemaining } from './debts'
@@ -681,6 +681,13 @@ function appendNote(auto: string | null | undefined, extra: string | null | unde
 // Executa as escritas correspondentes a um plano já confirmado pelo utilizador.
 export async function applyRentPaymentPlan(supabase: any, plan: RentPaymentPlan, params: ApplyPlanParams): Promise<ApplyPlanResult> {
   const { leaseId, paymentDate, paymentMethod, notes, spaceRef, tenantName } = params
+
+  // Nada se grava sem data de pagamento: uma renda sem data não conta como
+  // paga em lado nenhum, por isso gravá-la assim era criar dinheiro fantasma.
+  // Pára antes de tocar em crédito ou escrever seja o que for.
+  const semData = validarRendaComData({ tipo: 'renda', payment_date: paymentDate })
+  if (semData) return { rendaPayments: [], adiantamentoPayment: null, error: semData }
+
   const cashOk = paymentMethod === 'dinheiro' && paymentDate >= CASH_FUND_START_DATE
   const quemTexto = spaceRef ? `${spaceRef}${tenantName ? ` (${tenantName})` : ''}` : (tenantName ?? '')
 

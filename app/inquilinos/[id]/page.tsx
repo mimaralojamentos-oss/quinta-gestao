@@ -9,6 +9,7 @@ import { ArrowLeft, Save, Plus, Trash2, Phone, Mail, User, Home, FileText, Zap }
 import { useAuth } from '@/lib/auth-context'
 import { logAccess } from '@/lib/logAccess'
 import { getDebtRemaining } from '@/lib/debts'
+import { ehRendaSemData } from '@/lib/rentShortfall'
 
 interface Tenant {
   id: string
@@ -433,7 +434,9 @@ export default function TenantDetailPage() {
                       </p>
                       {p.payment_date
                         ? <p className="text-xs text-gray-400">Pago em {formatDate(p.payment_date)}</p>
-                        : <p className="text-xs text-red-500 font-medium">Por pagar</p>
+                        : ehRendaSemData(p)
+                          ? <p className="text-xs text-amber-600 font-medium">⚠ Registo sem data de pagamento — corrigir na conta corrente</p>
+                          : <p className="text-xs text-red-500 font-medium">Por pagar</p>
                       }
                     </div>
                     <span className={`text-sm font-semibold ${p.payment_date ? 'text-gray-700' : 'text-red-600'}`}>

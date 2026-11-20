@@ -9,7 +9,7 @@ import { EXPENSE_CATEGORIES } from '@/lib/expenseCategories'
 import { BarChart3, TrendingUp, Home, FileText, Calendar, ChevronDown, ChevronUp, Edit2, X, Save, ClipboardList, Download, Loader2, Receipt, Mail, AlertTriangle, Printer } from 'lucide-react'
 import EmailComposer from '@/components/EmailComposer'
 import { buildAppliedAdvanceMap } from '@/lib/advanceCredit'
-import { getMonthlyRentStatus } from '@/lib/rentShortfall'
+import { getMonthlyRentStatus, ehRendaSemData, rendasPagas } from '@/lib/rentShortfall'
 
 const supabase = createClient()
 
@@ -110,7 +110,9 @@ export default function RelatoriosPage() {
       allLeasesMap[l.id] = l
     }
 
-    const rendaPayments = (allPayments ?? []).filter((p: any) => p.tipo === 'renda' || !p.tipo)
+    // Só as rendas com data de pagamento: uma renda gravada sem data não foi
+    // recebida, e o contrato continua na lista dos que faltam.
+    const rendaPayments = rendasPagas(allPayments as any[])
     const outrosPayments = (allPayments ?? [])
       .filter((p: any) => p.tipo && p.tipo !== 'renda')
       .map((p: any) => ({ ...p, lease: allLeasesMap[p.lease_id] ?? null }))
@@ -149,7 +151,9 @@ export default function RelatoriosPage() {
       .select('*, lease:leases!rent_payments_lease_id_fkey(space:spaces(ref))')
       .eq('lease_id', tenant.leaseId)
       .order('reference_month', { ascending: false })
-    setContaCorrenteData(data ?? [])
+    // Esta janela lista o que foi PAGO e soma-o: uma renda gravada sem data
+    // de pagamento não entra (corrige-se na ficha do inquilino).
+    setContaCorrenteData((data ?? []).filter((p: any) => !ehRendaSemData(p)))
     setLoadingCC(false)
   }
 
@@ -223,8 +227,10 @@ export default function RelatoriosPage() {
         // `data` serve só para ordenar as parcelas cronologicamente no fim
         const parcelas: { grupo: string; descricao: string; valor: number; data: string }[] = []
 
-        // Rendas registadas sem data de pagamento
-        for (const p of payments.filter(p => leaseIds.includes(p.lease_id) && !p.payment_date)) {
+        // Registos sem data de pagamento que NÃO são rendas (a renda sem data
+        // não entra aqui: o mês dela já sai em falta no bloco seguinte, e
+        // pô-la nos dois sítios era cobrar a mesma renda duas vezes).
+        for (const p of payments.filter(p => leaseIds.includes(p.lease_id) && !p.payment_date && !ehRendaSemData(p))) {
           parcelas.push({
             grupo: 'Renda',
             descricao: `Renda de ${getMonthLabel(p.reference_month)} (registada por pagar)`,
@@ -499,11 +505,13 @@ export default function RelatoriosPage() {
     const endMonth = m === 12 ? 1 : m + 1
     const endDate = `${endYear}-${String(endMonth).padStart(2, '0')}-01`
 
-    const { data: payments } = await supabase
+    const { data: pagamentosDoMes } = await supabase
       .from('rent_payments')
-      .select('amount')
+      .select('amount, tipo, payment_date')
       .gte('reference_month', startDate)
       .lt('reference_month', endDate)
+    // Uma renda sem data de pagamento não é receita: não entrou dinheiro.
+    const payments = (pagamentosDoMes ?? []).filter((p: any) => !ehRendaSemData(p))
 
     const { data: despesas } = await supabase
       .from('expenses')

@@ -13,7 +13,7 @@ import EmailComposer, { type BulkRecipient } from '@/components/EmailComposer'
 import { logAccess } from '@/lib/logAccess'
 import { buildAppliedAdvanceMap } from '@/lib/advanceCredit'
 import { getDebtRemaining } from '@/lib/debts'
-import { getMonthlyRentStatus } from '@/lib/rentShortfall'
+import { getMonthlyRentStatus, ehRendaSemData } from '@/lib/rentShortfall'
 import { getDepositShortfall } from '@/lib/depositShortfall'
 import SortIcon from '@/components/SortIcon'
 import { useSort } from '@/lib/useSort'
@@ -129,8 +129,11 @@ export default function InquilinosPage() {
       const spaces = (spacesData ?? []).filter(s => s.tenant_id === t.id)
       const leaseIds = leases.map(l => l.id)
 
+      // Uma renda gravada sem data de pagamento não soma aqui: já não conta
+      // como paga, por isso o mês dela aparece em falta logo abaixo — somá-la
+      // outra vez era contar a mesma renda duas vezes.
       const explicitDebt = (paymentsData ?? [])
-        .filter(p => leaseIds.includes(p.lease_id) && !p.payment_date)
+        .filter(p => leaseIds.includes(p.lease_id) && !p.payment_date && !ehRendaSemData(p))
         .reduce((sum, p) => sum + (p.amount ?? 0), 0)
 
       // Rendas em falta mês a mês, incluindo pagamentos PARCIAIS.

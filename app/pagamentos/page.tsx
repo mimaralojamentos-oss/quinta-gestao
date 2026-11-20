@@ -4,6 +4,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency, getMonthLabel, getCurrentMonth, matchesSearch } from '@/lib/utils'
+import { ehRendaSemData, rendasPagas } from '@/lib/rentShortfall'
 import { Plus, ChevronLeft, ChevronRight, CheckCircle, Clock, Search, SlidersHorizontal, X, ChevronDown } from 'lucide-react'
 import PaymentModal from './PaymentModal'
 import AdvancePaymentModal from './AdvancePaymentModal'
@@ -106,8 +107,11 @@ export default function PagamentosPage() {
     setAllSpaceRefs(refs)
 
     const mapped: LeaseWithDetails[] = (leasesData ?? []).map(l => {
-      const paymentsThisMonth = (paymentsData ?? []).filter(p => p.lease_id === l.id)
-      const totalPaid = paymentsThisMonth.filter(p => p.tipo === 'renda' || !p.tipo).reduce((s, p) => s + p.amount, 0)
+      // Uma renda gravada sem data de pagamento não é um pagamento deste
+      // mês: fica de fora, e o contrato aparece como pendente. Corrige-se na
+      // ficha do inquilino, onde vem assinalada.
+      const paymentsThisMonth = (paymentsData ?? []).filter(p => p.lease_id === l.id && !ehRendaSemData(p))
+      const totalPaid = rendasPagas(paymentsThisMonth).reduce((s, p) => s + p.amount, 0)
 
       let rentDebt = 0
       if (l.start_date) {
@@ -137,7 +141,7 @@ export default function PagamentosPage() {
 
     setLeases(mapped)
     const expected = mapped.reduce((s, l) => s + l.monthly_rent, 0)
-    const rentaPayments = (paymentsData ?? []).filter(p => p.tipo === 'renda' || !p.tipo)
+    const rentaPayments = rendasPagas(paymentsData)
     const received = rentaPayments.reduce((s, p) => s + p.amount, 0)
     const inCash = rentaPayments.filter(p => p.payment_method === 'dinheiro').reduce((s, p) => s + p.amount, 0)
     const inBank = rentaPayments.filter(p => p.payment_method !== 'dinheiro').reduce((s, p) => s + p.amount, 0)

@@ -4,6 +4,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, getMonthLabel, getCurrentMonth, formatDate } from '@/lib/utils'
+import { rendasPagas } from '@/lib/rentShortfall'
 import { Building2, Users, AlertTriangle, CheckCircle, Clock, HardHat, Zap, Bell, NotebookPen } from 'lucide-react'
 import Link from 'next/link'
 
@@ -49,7 +50,7 @@ export default function Dashboard() {
       const [spacesRes, leasesRes, paymentsRes, projectsRes, metersRes, meterReadingsRes] = await Promise.all([
         supabase.from('spaces').select('id, status'),
         supabase.from('leases').select('id, monthly_rent, space:spaces(ref), tenant:tenants(name, phone)').eq('status', 'ativo'),
-        supabase.from('rent_payments').select('lease_id, amount, tipo').gte('reference_month', currentMonth).lt('reference_month', nextMonthStr),
+        supabase.from('rent_payments').select('lease_id, amount, tipo, payment_date').gte('reference_month', currentMonth).lt('reference_month', nextMonthStr),
         supabase.from('projects').select('id, status').eq('status', 'em_curso'),
         supabase.from('meters').select('id, name, contract_number').eq('active', true).order('name'),
         supabase.from('meter_readings').select('meter_id, reading_date, invoice_amount').order('reading_date', { ascending: false }),
@@ -70,7 +71,8 @@ export default function Dashboard() {
       // Um pagamento parcial não liquida o mês: continua pendente enquanto
       // o total recebido for inferior à renda.
       const paidByLease = new Map<string, number>()
-      for (const p of payments.filter(p => p.tipo === 'renda' || !p.tipo)) {
+      // Só rendas com data de pagamento: sem data, não foi paga.
+      for (const p of rendasPagas(payments)) {
         paidByLease.set(p.lease_id, (paidByLease.get(p.lease_id) ?? 0) + (p.amount ?? 0))
       }
       const pendingLeases = leases.filter(l =>

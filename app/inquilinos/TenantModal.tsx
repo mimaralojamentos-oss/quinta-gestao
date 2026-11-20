@@ -16,7 +16,8 @@ import ManualAllocationEditor from '@/components/ManualAllocationEditor'
 import { consumeAdvances, releaseAdvance, describeAdvanceTarget, buildAppliedAdvanceMap } from '@/lib/advanceCredit'
 import { planearReversaoPagamento, reverterPagamento, textoConfirmacao } from '@/lib/paymentReversal'
 import { getDebtRemaining } from '@/lib/debts'
-import { getMonthlyRentStatus, rendaMensalDoInquilino } from '@/lib/rentShortfall'
+import { getMonthlyRentStatus, rendaMensalDoInquilino, ehRenda, ehRendaSemData, validarRendaComData } from '@/lib/rentShortfall'
+import { totalEmDivida } from '@/lib/tenantDebt'
 import { getDepositShortfall } from '@/lib/depositShortfall'
 
 interface Props {
@@ -55,6 +56,12 @@ interface PaymentRow {
   isElecCharge?: boolean
   isWaterCharge?: boolean
   isDeposit?: boolean
+  /**
+   * Renda gravada na base SEM data de pagamento. Não conta como paga nem
+   * como dívida: é um registo por corrigir (pôr a data ou apagar). A dívida
+   * desse mês está na linha "em falta" do próprio mês.
+   */
+  semDataDePagamento?: boolean
   isPartialElec?: boolean
   isPartialWater?: boolean
   remainingAmount?: number
@@ -206,7 +213,8 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
       : { data: [] }
 
     const enriched: PaymentRow[] = (pays ?? []).map(p => ({
-      ...p, lease: (leasesData ?? []).find(l => l.id === p.lease_id), isMissing: false, isManualDebt: false, isElecCharge: false
+      ...p, lease: (leasesData ?? []).find(l => l.id === p.lease_id), isMissing: false, isManualDebt: false, isElecCharge: false,
+      semDataDePagamento: ehRendaSemData(p),
     }))
 
     // Adiantamentos que já foram formalmente aplicados a rendas.
@@ -580,7 +588,10 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
 
   function handleEditPayment(p: PaymentRow) {
     setEditingPaymentId(p.id ?? null)
-    setPaymentForm({ lease_id: p.lease_id ?? leases[0]?.id ?? '', reference_month: p.reference_month?.slice(0, 7) ?? '', amount: String(p.amount), payment_date: p.payment_date ?? new Date().toISOString().slice(0, 10), payment_method: p.payment_method ?? 'dinheiro', tipo: p.tipo ?? 'renda', notes: p.notes ?? '', is_debt: !p.payment_date })
+    // Uma renda sem data abre com a data EM BRANCO e como "já foi pago": a
+    // app não inventa o dia de hoje — quem corrige é que sabe quando entrou.
+    const rendaPorCorrigir = !!p.semDataDePagamento
+    setPaymentForm({ lease_id: p.lease_id ?? leases[0]?.id ?? '', reference_month: p.reference_month?.slice(0, 7) ?? '', amount: String(p.amount), payment_date: rendaPorCorrigir ? '' : (p.payment_date ?? new Date().toISOString().slice(0, 10)), payment_method: p.payment_method ?? 'dinheiro', tipo: p.tipo ?? 'renda', notes: p.notes ?? '', is_debt: rendaPorCorrigir ? false : !p.payment_date })
     setShowPaymentForm(true); setPaymentError('')
   }
 
@@ -595,6 +606,12 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
     if (!paymentForm.lease_id) { setPaymentError('Seleciona um contrato'); return }
     if (!paymentForm.amount) { setPaymentError('O valor é obrigatório'); return }
     if (!paymentForm.is_debt && !paymentForm.payment_date) { setPaymentError('A data é obrigatória'); return }
+    // Uma renda nunca fica sem data de pagamento, nem a criar nem a editar.
+    const erroRenda = validarRendaComData({
+      tipo: paymentForm.tipo,
+      payment_date: paymentForm.is_debt ? null : paymentForm.payment_date,
+    })
+    if (erroRenda) { setPaymentError(erroRenda); return }
     setSavingPayment(true); setPaymentError('')
     const payload = { lease_id: paymentForm.lease_id, reference_month: paymentForm.reference_month + '-01', payment_date: paymentForm.is_debt ? null : paymentForm.payment_date, amount: parseFloat(paymentForm.amount), payment_method: paymentForm.is_debt ? null : paymentForm.payment_method, tipo: paymentForm.tipo, notes: paymentForm.notes || null }
     let err
@@ -843,19 +860,11 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
     await fetchPayments()
   }
 
-  // totalDebt inclui: rendas em falta + caução em falta + dívidas manuais + eletricidade por pagar, deduzindo adiantamentos disponíveis (crédito do inquilino)
-  const totalAdvance = payments
-    .filter(p => p.tipo === 'adiantamento' && !p.used)
-    .reduce((sum, p) => sum + (p.amount ?? 0), 0)
-
-  const totalDebt = payments
-    .filter(p => !p.payment_date || p.payment_date === null)
-    .filter(p => p.payment_date !== 'liquidada')
-    .reduce((sum, p) => {
-      if (p.isManualDebt) return sum + (p.remainingAmount ?? 0)
-      if (p.isElecCharge || p.isWaterCharge) return sum + (p.remainingAmount ?? p.amount ?? 0)
-      return sum + (p.amount ?? 0)
-    }, 0) - totalAdvance
+  // O cartão "Em dívida" é a soma das linhas da conta corrente — rendas em
+  // falta, caução em falta, dívidas manuais, luz e água por pagar, menos o
+  // crédito por usar. Uma conta só (lib/tenantDebt.ts): uma renda gravada sem
+  // data de pagamento não soma por cima do mês em falta que ela própria gera.
+  const totalDebt = totalEmDivida(payments)
 
   // A renda mensal que o inquilino paga (contratos ativos) — só leitura.
   const renda = rendaMensalDoInquilino(leases, formatCurrency)
@@ -967,7 +976,9 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
       adiantamento: 'Adiantamento', divida: 'Dívida', eletricidade: 'Eletricidade', agua: 'Água',
     }
 
-    const rows = payments.map((p: PaymentRow) => {
+    // Uma renda sem data de pagamento é um registo interno por corrigir: não
+    // sai na impressão. O mês dela sai, como "Em falta", e o total bate.
+    const rows = payments.filter((p: PaymentRow) => !p.semDataDePagamento).map((p: PaymentRow) => {
       const isLiquidada = p.isManualDebt && p.payment_date === 'liquidada'
       const isPago = !p.isManualDebt && ((!!p.payment_date && p.payment_date !== 'liquidada') || !!p.isAdvanceOnly)
       const estado = isLiquidada ? 'Liquidada' : isPago ? 'Pago' : p.isMissing ? 'Em falta' : 'Por pagar'
@@ -1675,7 +1686,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                       <label className="label">Tipo</label>
                       <div className="grid grid-cols-4 gap-2">
                         {Object.entries(tipoConfig).filter(([k]) => k !== 'divida' && k !== 'eletricidade' && k !== 'adiantamento').map(([key, cfg]) => (
-                          <button key={key} onClick={() => setPaymentForm(f => ({ ...f, tipo: key }))}
+                          <button key={key} onClick={() => setPaymentForm(f => ({ ...f, tipo: key, is_debt: ehRenda({ tipo: key }) ? false : f.is_debt }))}
                             className={`py-2 rounded-lg border text-xs font-medium transition-colors ${paymentForm.tipo === key ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
                             {cfg.label}
                           </button>
@@ -1694,10 +1705,18 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                           ✓ Já foi pago
                         </button>
                         <button onClick={() => setPaymentForm(f => ({ ...f, is_debt: true }))}
-                          className={`py-2 rounded-lg border text-sm font-medium transition-colors ${paymentForm.is_debt ? 'bg-red-600 text-white border-red-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
+                          disabled={ehRenda({ tipo: paymentForm.tipo })}
+                          title={ehRenda({ tipo: paymentForm.tipo }) ? 'Uma renda em falta já aparece sozinha na lista, mês a mês' : undefined}
+                          className={`py-2 rounded-lg border text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${paymentForm.is_debt ? 'bg-red-600 text-white border-red-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
                           ⚠ Em dívida
                         </button>
                       </div>
+                      {ehRenda({ tipo: paymentForm.tipo }) && (
+                        <p className="text-xs text-gray-500 mt-1.5">
+                          Uma renda regista-se quando é paga, com a data. A renda que falta já aparece
+                          sozinha na lista, mês a mês — não é preciso (nem possível) lançá-la como dívida.
+                        </p>
+                      )}
                     </div>
                     {!paymentForm.is_debt && (
                       <div className="grid grid-cols-2 gap-3">
@@ -1750,6 +1769,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                         className={`flex items-center justify-between p-3 rounded-lg border ${
                           p.tipo === 'adiantamento' ? (p.used ? 'border-gray-100 bg-gray-50' : 'border-purple-200 bg-purple-50')
                           : isPago || isLiquidada ? 'border-gray-100 bg-white'
+                          : p.semDataDePagamento ? 'border-amber-300 bg-amber-50 border-dashed'
                           : p.isMissing ? 'border-orange-200 bg-orange-50'
                           : p.isDeposit ? 'border-blue-200 bg-blue-50'
                           : p.isElecCharge ? 'border-red-200 bg-red-50'
@@ -1819,6 +1839,13 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                             <p className="text-xs text-gray-500">Pago com adiantamento · {formatCurrency(p.advanceApplied ?? 0)}</p>
                           ) : p.isMissing ? (
                             <p className="text-xs text-orange-600 font-medium">{p.notes ?? '⚠ Sem registo de pagamento'}</p>
+                          ) : p.semDataDePagamento ? (
+                            <p className="text-xs text-amber-700 font-medium">
+                              ⚠ Registo sem data de pagamento — corrigir
+                              <span className="block font-normal text-amber-600">
+                                Não conta como pago nem soma à dívida: o mês aparece em falta. Usa o lápis para pôr a data, ou apaga.
+                              </span>
+                            </p>
                           ) : (
                             <p className="text-xs text-red-500 font-medium">⚠ Por pagar</p>
                           )}
@@ -1849,6 +1876,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
                           <span className={`font-semibold text-sm ${
                             p.tipo === 'adiantamento' ? (p.used ? 'text-gray-400' : 'text-purple-700')
                             : isPago || isLiquidada ? 'text-gray-900'
+                            : p.semDataDePagamento ? 'text-amber-600 line-through decoration-amber-400'
                             : p.isDeposit ? 'text-blue-700'
                             : 'text-red-600'
                           }`}>
@@ -1930,6 +1958,7 @@ export default function TenantModal({ tenant, onClose, onSaved, initialTab }: Pr
         // rubrica a rubrica em vez de apresentar só o total.
         items={totalDebt > 0
           ? payments
+              .filter(p => !p.semDataDePagamento)
               .filter(p => !p.payment_date || (p as any).isPartialElec || (p as any).isPartialWater)
               .map(p => ({
                 grupo: p.isElecCharge ? 'Eletricidade' : p.isWaterCharge ? 'Água' : p.isManualDebt ? 'Dívida' : p.isDeposit ? 'Caução' : 'Renda',

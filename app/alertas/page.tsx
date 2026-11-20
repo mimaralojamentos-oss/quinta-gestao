@@ -4,6 +4,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { formatCurrency, formatDate, getMonthLabel, getCurrentMonth } from '@/lib/utils'
+import { rendasPagas } from '@/lib/rentShortfall'
 
 const supabase = createClient()
 
@@ -105,7 +106,8 @@ export default function AlertasPage() {
     // Um pagamento parcial não liquida o mês — o alerta mantém-se até
     // o total recebido cobrir a renda.
     const paidByLease = new Map<string, number>()
-    for (const p of (payments ?? []).filter(p => p.tipo === 'renda' || !p.tipo)) {
+    // Só rendas com data de pagamento: sem data, não foi paga.
+    for (const p of rendasPagas(payments)) {
       paidByLease.set(p.lease_id, (paidByLease.get(p.lease_id) ?? 0) + (p.amount ?? 0))
     }
 

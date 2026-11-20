@@ -29,6 +29,50 @@ export interface RentPaymentLike {
   reference_month?: string | null
   tipo?: string | null
   amount?: number | null
+  /**
+   * A data em que o dinheiro entrou. Quem chama TEM de a ler da base: é por
+   * ela que se sabe se uma renda foi mesmo paga (ver ehRendaSemData).
+   */
+  payment_date?: string | null
+}
+
+// --------------------------------------------- renda sem data de pagamento
+
+/** Uma linha é de renda quando o tipo é 'renda' ou está por preencher. */
+export function ehRenda(p: { tipo?: string | null }): boolean {
+  return p?.tipo === 'renda' || !p?.tipo
+}
+
+/**
+ * Uma renda registada SEM data de pagamento.
+ *
+ * REGRA ÚNICA, em toda a app: uma linha destas NÃO conta como paga — nem no
+ * estado mês a mês, nem nos planos de distribuição, nem no motor de alocação,
+ * nem nos totais recebidos, nem nas impressões. O mês a que ela se refere
+ * fica em falta como qualquer outro, e é o MÊS que leva a dívida; a linha
+ * solta nunca soma por cima (seria contar a mesma renda duas vezes). Na
+ * conta corrente aparece assinalada, para o gestor lhe pôr a data ou a
+ * apagar.
+ *
+ * Antes havia duas leituras ao mesmo tempo: o cartão "Em dívida" contava a
+ * linha como dívida e a lista mês a mês contava-a como pagamento. Os dois
+ * números divergiam exatamente pelo valor da linha, cada um a esconder do
+ * outro onde estava o dinheiro.
+ *
+ * "Sem data" é a data ter sido LIDA e estar vazia (null ou ''). Uma linha
+ * que nem traz o campo (undefined) não é dada como sem data: se uma consulta
+ * se esquecer de pedir a coluna, o pior que acontece é ficar como estava —
+ * e não uma app inteira a dizer que ninguém pagou nada.
+ */
+export function ehRendaSemData(p: { tipo?: string | null; payment_date?: string | null }): boolean {
+  return ehRenda(p) && (p?.payment_date === null || p?.payment_date === '')
+}
+
+/** As rendas que contam como pagas: de renda, e com data de pagamento. */
+export function rendasPagas<P extends { tipo?: string | null; payment_date?: string | null }>(
+  payments: P[] | null | undefined,
+): P[] {
+  return (payments ?? []).filter(p => ehRenda(p) && !ehRendaSemData(p))
 }
 
 export interface MonthlyRentStatus<P extends RentPaymentLike = RentPaymentLike> {
@@ -55,10 +99,12 @@ export function getSingleMonthRentStatus<P extends RentPaymentLike>(params: {
 }): MonthlyRentStatus<P> {
   const { lease, monthStr, payments, rentHistory, appliedAdvances } = params
   const rentForMonth = getRentForMonth(rentHistory, lease.id, monthStr, lease.monthly_rent)
+  // Uma renda sem data de pagamento não é um pagamento: fica de fora, e o
+  // mês aparece em falta (ver ehRendaSemData).
   const monthPayments = payments.filter(p =>
     p.lease_id === lease.id &&
     p.reference_month?.slice(0, 7) === monthStr &&
-    (p.tipo === 'renda' || !p.tipo)
+    ehRenda(p) && !ehRendaSemData(p)
   )
   const totalPaidThisMonth = monthPayments.reduce((s, p) => s + (p.amount ?? 0), 0)
   const advanceThisMonth = appliedAdvanceFor(appliedAdvances, lease.id, monthStr)
@@ -139,4 +185,25 @@ export function rendaMensalDoInquilino(
       .map(l => `${l.space?.ref ?? '—'} ${formatar(Number(l.monthly_rent ?? 0))}`)
       .join(' + '),
   }
+}
+
+// ------------------------------------------------------------ prevenção
+
+/** A mensagem de quando se tenta gravar uma renda sem data de pagamento. */
+export const ERRO_RENDA_SEM_DATA =
+  'Uma renda tem de ter data de pagamento. Se ainda não foi paga, não a registes: ' +
+  'a renda em falta já aparece sozinha na lista, mês a mês.'
+
+/**
+ * Uma renda nunca se grava sem data de pagamento — nem a criar, nem a editar.
+ * Devolve a mensagem de erro, ou null se estiver tudo bem.
+ *
+ * É chamada em todos os caminhos que escrevem em rent_payments. A última
+ * linha de defesa é a restrição rent_payments_renda_com_data, na própria
+ * base de dados (supabase-renda-com-data.sql): mesmo que um ecrã novo se
+ * esqueça desta função, o Postgres recusa.
+ */
+export function validarRendaComData(p: { tipo?: string | null; payment_date?: string | null }): string | null {
+  if (!ehRenda(p)) return null
+  return String(p?.payment_date ?? '').trim() ? null : ERRO_RENDA_SEM_DATA
 }
